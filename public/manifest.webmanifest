@@ -1,0 +1,21 @@
+{
+  "name": "DzenAnalytics — финансовая аналитика",
+  "short_name": "DzenAnalytics",
+  "description": "Локальная финансовая аналитика для CSV-выгрузок из Дзен-мани. Дашборд, графики, бюджеты, FIRE, аномалии, прогнозы.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F8FAFC",
+  "theme_color": "#0891B2",
+  "lang": "ru",
+  "categories": ["finance", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

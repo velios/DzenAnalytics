@@ -197,8 +197,8 @@ export function GlobalFilters() {
   if (transactions.length === 0) return null;
 
   return (
-    <div className="card card-pad mb-6">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="card p-3 md:card-pad md:p-5 mb-4 md:mb-6">
+      <div className="flex flex-wrap items-center gap-2 md:gap-3">
         <div className="flex items-center gap-2 mr-2">
           <Filter className="w-4 h-4 text-muted" />
           <span className="text-sm font-medium">Фильтры</span>

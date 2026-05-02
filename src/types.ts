@@ -24,6 +24,9 @@ export interface Transaction {
   category: string;
   subcategory: string | null;
   categoryFull: string;
+  categoryOriginal?: string;
+  subcategoryOriginal?: string | null;
+  categoryFullOriginal?: string;
   payee: string;
   payeeOriginal?: string;
   comment: string;
