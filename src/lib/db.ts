@@ -1,0 +1,71 @@
+import { openDB, type IDBPDatabase } from "idb";
+import type { Transaction, CurrencyRates, ImportMeta } from "../types";
+
+const DB_NAME = "dzenanalytics";
+const DB_VERSION = 1;
+
+let dbPromise: Promise<IDBPDatabase> | null = null;
+
+function getDB(): Promise<IDBPDatabase> {
+  if (!dbPromise) {
+    dbPromise = openDB(DB_NAME, DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains("transactions")) {
+          db.createObjectStore("transactions", { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains("meta")) {
+          db.createObjectStore("meta");
+        }
+      },
+    });
+  }
+  return dbPromise;
+}
+
+export async function saveTransactions(txs: Transaction[]): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction("transactions", "readwrite");
+  await tx.store.clear();
+  for (const t of txs) await tx.store.put(t);
+  await tx.done;
+}
+
+export async function loadTransactions(): Promise<Transaction[]> {
+  const db = await getDB();
+  return db.getAll("transactions");
+}
+
+export async function clearTransactions(): Promise<void> {
+  const db = await getDB();
+  await db.clear("transactions");
+}
+
+export async function saveRates(rates: CurrencyRates): Promise<void> {
+  const db = await getDB();
+  await db.put("meta", rates, "rates");
+}
+
+export async function loadRates(): Promise<CurrencyRates | null> {
+  const db = await getDB();
+  return (await db.get("meta", "rates")) || null;
+}
+
+export async function saveImportMeta(meta: ImportMeta): Promise<void> {
+  const db = await getDB();
+  await db.put("meta", meta, "import");
+}
+
+export async function loadImportMeta(): Promise<ImportMeta | null> {
+  const db = await getDB();
+  return (await db.get("meta", "import")) || null;
+}
+
+export async function saveJSON<T>(key: string, value: T): Promise<void> {
+  const db = await getDB();
+  await db.put("meta", value, key);
+}
+
+export async function loadJSON<T>(key: string): Promise<T | null> {
+  const db = await getDB();
+  return ((await db.get("meta", key)) as T) || null;
+}

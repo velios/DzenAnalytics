@@ -1,0 +1,491 @@
+import { useMemo, useState } from "react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  BarChart,
+  Bar,
+  Cell,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  Radar,
+  Legend,
+} from "recharts";
+import { Activity, Calendar } from "lucide-react";
+import { useDataStore } from "../store/useDataStore";
+import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useDrillStore } from "../store/useDrillStore";
+import {
+  categoryMonthlySeries,
+  groupByCategory,
+  statsByDayOfWeek,
+  statsByHourOfWeek,
+} from "../lib/aggregations";
+import {
+  formatMoney,
+  formatNum,
+  monthLabel,
+  toNum,
+  chartTooltipProps,
+  chartGridStroke,
+  chartAxisStroke,
+} from "../lib/format";
+import { EmptyState } from "../components/EmptyState";
+
+export function TrendsPage() {
+  const transactions = useDataStore((s) => s.transactions);
+  const base = useDataStore((s) => s.rates.base);
+  const filters = useFiltersStore();
+  const showDrill = useDrillStore((s) => s.show);
+
+  const [kind, setKind] = useState<"expense" | "income">("expense");
+  const [level, setLevel] = useState<"top" | "full">("top");
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
+
+  const allCategories = useMemo(
+    () =>
+      groupByCategory(filtered, level)
+        .filter((c) => (kind === "expense" ? c.expense : c.income) > 0)
+        .slice(0, 50)
+        .map((c) => c.category),
+    [filtered, level, kind]
+  );
+
+  const activeCategories = selected.length > 0 ? selected : allCategories.slice(0, 5);
+
+  const series = useMemo(() => {
+    const allMonths = new Set<string>();
+    for (const t of filtered) {
+      if (t.date) allMonths.add(t.date.slice(0, 7));
+    }
+    const sorted = Array.from(allMonths).sort();
+    const data: Record<string, number | string>[] = sorted.map((ym) => ({ ym, label: monthLabel(ym) }));
+    for (const cat of activeCategories) {
+      const s = categoryMonthlySeries(filtered, cat, level, kind);
+      const byYm = new Map(s.map((p) => [p.ym, p.total]));
+      for (const point of data) {
+        point[cat] = Math.round(byYm.get(point.ym as string) || 0);
+      }
+    }
+    return data;
+  }, [filtered, activeCategories, level, kind]);
+
+  const dowStats = useMemo(() => statsByDayOfWeek(filtered, kind), [filtered, kind]);
+  const howCells = useMemo(() => statsByHourOfWeek(filtered, kind), [filtered, kind]);
+
+  const dowChart = dowStats.map((d) => ({
+    name: d.name.slice(0, 3),
+    fullName: d.name,
+    avg: Math.round(d.avg),
+    total: Math.round(d.total),
+    count: d.count,
+    isWeekend: d.dow === 0 || d.dow === 6,
+  }));
+
+  const radarData = dowStats.map((d) => ({
+    day: d.name.slice(0, 3),
+    value: Math.round(d.avg),
+  }));
+
+  const weekend = dowStats.filter((d) => d.dow === 0 || d.dow === 6);
+  const weekday = dowStats.filter((d) => d.dow !== 0 && d.dow !== 6);
+  const weekendAvg = weekend.reduce((s, d) => s + d.avg, 0) / Math.max(weekend.length, 1);
+  const weekdayAvg = weekday.reduce((s, d) => s + d.avg, 0) / Math.max(weekday.length, 1);
+
+  const weekendTotal = weekend.reduce((s, d) => s + d.total, 0);
+  const weekdayTotal = weekday.reduce((s, d) => s + d.total, 0);
+
+  function toggleCategory(cat: string) {
+    setSelected((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  }
+
+  function openCategoryMonth(cat: string, ym: string) {
+    const txs = filtered.filter(
+      (t) =>
+        t.kind === kind &&
+        (level === "top" ? t.category === cat : t.categoryFull === cat) &&
+        t.date.slice(0, 7) === ym
+    );
+    showDrill(`${cat} · ${monthLabel(ym)}`, txs, "Тренд категории");
+  }
+
+  function openDay(dow: number) {
+    const txs = filtered.filter((t) => t.kind === kind && new Date(t.date).getDay() === dow);
+    const name = ["воскресеньям", "понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам"][dow];
+    showDrill(`Все по ${name}`, txs, "День недели");
+  }
+
+  if (transactions.length === 0) return <EmptyState />;
+
+  const COLORS = ["#22D3EE", "#A78BFA", "#F59E0B", "#10B981", "#EF4444", "#EC4899", "#3B82F6", "#84CC16"];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-end justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Activity className="w-6 h-6 text-accent" />
+            Тренды
+          </h1>
+          <p className="text-muted text-sm mt-1">
+            Динамика категорий по месяцам и поведенческие паттерны по дням недели
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+            <button
+              onClick={() => setKind("expense")}
+              className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
+            >
+              Расходы
+            </button>
+            <button
+              onClick={() => setKind("income")}
+              className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
+            >
+              Доходы
+            </button>
+          </div>
+          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+            <button
+              onClick={() => setLevel("top")}
+              className={`px-3 py-1 text-xs rounded-md ${level === "top" ? "bg-accent text-accent-fg" : "text-muted"}`}
+            >
+              Верхний
+            </button>
+            <button
+              onClick={() => setLevel("full")}
+              className={`px-3 py-1 text-xs rounded-md ${level === "full" ? "bg-accent text-accent-fg" : "text-muted"}`}
+            >
+              С подкат.
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card card-pad">
+        <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+          <div>
+            <div className="font-semibold">Категории по месяцам</div>
+            <div className="text-xs text-muted">
+              {selected.length === 0
+                ? `Авто: топ-5 категорий (${activeCategories.length})`
+                : `Выбрано: ${selected.length}`}
+              {" · "}
+              <button onClick={() => setSelected([])} className="text-accent hover:underline">
+                сбросить
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {allCategories.slice(0, 30).map((cat) => {
+            const isActive = activeCategories.includes(cat);
+            const isSelected = selected.includes(cat);
+            const color = COLORS[activeCategories.indexOf(cat) % COLORS.length];
+            return (
+              <button
+                key={cat}
+                onClick={() => toggleCategory(cat)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  isSelected
+                    ? "bg-accent/15 text-text border-accent"
+                    : isActive
+                      ? "bg-panel2 text-text border-border"
+                      : "bg-panel2 text-muted border-border hover:border-accent/50"
+                }`}
+                style={isActive ? { borderLeftWidth: 3, borderLeftColor: color } : {}}
+              >
+                {cat}
+              </button>
+            );
+          })}
+        </div>
+        <div className="h-80">
+          <ResponsiveContainer>
+            <LineChart
+              data={series}
+              onClick={(e: unknown) => {
+                const ev = e as
+                  | { activePayload?: { payload?: { ym?: string }; dataKey?: string }[] }
+                  | undefined;
+                const ym = ev?.activePayload?.[0]?.payload?.ym;
+                const cat = ev?.activePayload?.[0]?.dataKey;
+                if (ym && cat && typeof cat === "string") openCategoryMonth(cat, ym);
+              }}
+              style={{ cursor: "pointer" }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+              <XAxis dataKey="label" stroke={chartAxisStroke} fontSize={11} minTickGap={20} />
+              <YAxis
+                stroke={chartAxisStroke}
+                fontSize={11}
+                tickFormatter={(v) => formatNum(v, { compact: true })}
+              />
+              <Tooltip
+                {...chartTooltipProps}
+                formatter={(v: unknown) => formatMoney(toNum(v), base, { compact: true })}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {activeCategories.map((cat, i) => (
+                <Line
+                  key={cat}
+                  type="monotone"
+                  dataKey={cat}
+                  stroke={COLORS[i % COLORS.length]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="card card-pad lg:col-span-2">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="font-semibold flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-accent" />
+                По дням недели
+              </div>
+              <div className="text-xs text-muted">Средний чек {kind === "expense" ? "расхода" : "дохода"} за день</div>
+            </div>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer>
+              <BarChart
+                data={dowChart}
+                onClick={(e: unknown) => {
+                  const ev = e as { activePayload?: { payload?: { fullName?: string } }[] } | undefined;
+                  const name = ev?.activePayload?.[0]?.payload?.fullName;
+                  const idx = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"].indexOf(name || "");
+                  if (idx >= 0) openDay(idx);
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+                <XAxis dataKey="name" stroke={chartAxisStroke} fontSize={11} />
+                <YAxis stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
+                <Tooltip
+                  {...chartTooltipProps}
+                  labelFormatter={(_, p) => (p?.[0]?.payload as { fullName?: string })?.fullName ?? ""}
+                  formatter={(v: unknown, n: unknown) => [
+                    formatMoney(toNum(v), base, { compact: true }),
+                    n === "avg" ? "Средний за день" : "Всего",
+                  ]}
+                />
+                <Bar dataKey="avg" radius={[4, 4, 0, 0]} activeBar={false}>
+                  {dowChart.map((d, i) => (
+                    <Cell
+                      key={i}
+                      fill={d.isWeekend ? "#A78BFA" : kind === "expense" ? "#EF4444" : "#10B981"}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          <div className="font-semibold mb-3">Радар</div>
+          <div className="h-64">
+            <ResponsiveContainer>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke={chartGridStroke} />
+                <PolarAngleAxis dataKey="day" stroke={chartAxisStroke} fontSize={11} />
+                <Radar
+                  dataKey="value"
+                  name="Средний за день"
+                  stroke="#22D3EE"
+                  fill="#22D3EE"
+                  fillOpacity={0.3}
+                  strokeWidth={2}
+                />
+                <Tooltip
+                  {...chartTooltipProps}
+                  formatter={(v: unknown) => formatMoney(toNum(v), base, { compact: true })}
+                />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="card card-pad">
+          <div className="label mb-1">Будни (среднее за день)</div>
+          <div className={`stat-num ${kind === "expense" ? "text-expense" : "text-income"}`}>
+            {formatMoney(weekdayAvg, base, { compact: true })}
+          </div>
+          <div className="text-xs text-muted mt-1">
+            Всего за будни: {formatMoney(weekdayTotal, base, { compact: true })}
+          </div>
+        </div>
+        <div className="card card-pad">
+          <div className="label mb-1">Выходные (среднее за день)</div>
+          <div className="stat-num text-accent2">
+            {formatMoney(weekendAvg, base, { compact: true })}
+          </div>
+          <div className="text-xs text-muted mt-1">
+            Всего за выходные: {formatMoney(weekendTotal, base, { compact: true })}
+          </div>
+        </div>
+        <div className="card card-pad">
+          <div className="label mb-1">Соотношение</div>
+          <div className="stat-num">
+            {weekdayAvg > 0 ? `${(weekendAvg / weekdayAvg).toFixed(2)}×` : "—"}
+          </div>
+          <div className="text-xs text-muted mt-1">
+            {weekendAvg > weekdayAvg
+              ? "В выходные тратите больше за день"
+              : "В будни тратите больше за день"}
+          </div>
+        </div>
+      </div>
+
+      <HourOfWeekHeatmap cells={howCells} kind={kind} base={base} />
+    </div>
+  );
+}
+
+function HourOfWeekHeatmap({
+  cells,
+  kind,
+  base,
+}: {
+  cells: { dow: number; hour: number; total: number; count: number }[];
+  kind: "expense" | "income";
+  base: string;
+}) {
+  const max = cells.reduce((m, c) => Math.max(m, c.total), 0);
+  const palette =
+    kind === "expense"
+      ? [
+          "rgb(var(--c-panel2))",
+          "rgba(239, 68, 68, 0.10)",
+          "rgba(239, 68, 68, 0.20)",
+          "rgba(239, 68, 68, 0.32)",
+          "rgba(239, 68, 68, 0.46)",
+          "rgba(239, 68, 68, 0.60)",
+          "rgba(239, 68, 68, 0.74)",
+          "rgba(239, 68, 68, 0.88)",
+          "rgba(220, 38, 38, 1)",
+        ]
+      : [
+          "rgb(var(--c-panel2))",
+          "rgba(16, 185, 129, 0.10)",
+          "rgba(16, 185, 129, 0.20)",
+          "rgba(16, 185, 129, 0.32)",
+          "rgba(16, 185, 129, 0.46)",
+          "rgba(16, 185, 129, 0.60)",
+          "rgba(16, 185, 129, 0.74)",
+          "rgba(16, 185, 129, 0.88)",
+          "rgba(5, 150, 105, 1)",
+        ];
+
+  const positives = cells
+    .map((c) => c.total)
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  const thresholds: number[] = [];
+  for (let i = 1; i <= palette.length - 2; i++) {
+    const idx = Math.floor((i / (palette.length - 1)) * positives.length);
+    thresholds.push(positives[Math.min(idx, positives.length - 1)] || 0);
+  }
+
+  function color(v: number): string {
+    if (v <= 0) return palette[0];
+    for (let i = 0; i < thresholds.length; i++) {
+      if (v <= thresholds[i]) return palette[i + 1];
+    }
+    return palette[palette.length - 1];
+  }
+
+  const dowOrder = [1, 2, 3, 4, 5, 6, 0];
+  const dowNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+  return (
+    <div className="card card-pad">
+      <div className="font-semibold mb-1">Час недели</div>
+      <div className="text-xs text-muted mb-3">
+        Когда вы {kind === "expense" ? "тратите" : "получаете"}: 7 дней × 24 часа. Время — из поля
+        createdDate.
+      </div>
+      <div className="overflow-x-auto">
+        <div className="inline-grid gap-[2px]" style={{ gridTemplateColumns: `auto repeat(24, minmax(20px, 1fr))` }}>
+          <div></div>
+          {Array.from({ length: 24 }, (_, h) => (
+            <div key={h} className="text-[10px] text-muted text-center">
+              {h % 3 === 0 ? h : ""}
+            </div>
+          ))}
+          {dowOrder.map((dow, idx) => (
+            <Row key={dow} dow={dow} label={dowNames[idx]} cells={cells} max={max} colorFn={color} base={base} />
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 mt-3 text-xs text-muted justify-end">
+        <span>меньше</span>
+        {palette.map((c, i) => (
+          <span
+            key={i}
+            className="w-3 h-3 rounded-sm border border-border/30"
+            style={{ background: c }}
+          />
+        ))}
+        <span>больше</span>
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  dow,
+  label,
+  cells,
+  max,
+  colorFn,
+  base,
+}: {
+  dow: number;
+  label: string;
+  cells: { dow: number; hour: number; total: number; count: number }[];
+  max: number;
+  colorFn: (v: number) => string;
+  base: string;
+}) {
+  const row = cells.filter((c) => c.dow === dow);
+  return (
+    <>
+      <div className="text-[10px] text-muted pr-2 text-right self-center">{label}</div>
+      {row.map((c) => {
+        const pct = max > 0 ? (c.total / max) * 100 : 0;
+        return (
+          <div
+            key={c.hour}
+            title={
+              c.count > 0
+                ? `${label} ${String(c.hour).padStart(2, "0")}:00 — ${c.total.toLocaleString("ru-RU")} ${base}, ${c.count} оп.`
+                : `${label} ${String(c.hour).padStart(2, "0")}:00`
+            }
+            className="aspect-square rounded-[2px] border border-border/20"
+            style={{ background: colorFn(c.total) }}
+            data-pct={pct}
+          />
+        );
+      })}
+    </>
+  );
+}
