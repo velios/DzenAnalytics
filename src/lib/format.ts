@@ -66,6 +66,10 @@ export const chartTooltipStyle: CSSProperties = {
   border: "1px solid var(--tooltip-border)",
   borderRadius: 8,
   color: "rgb(var(--c-text))",
+  backdropFilter: "blur(10px)",
+  WebkitBackdropFilter: "blur(10px)",
+  boxShadow:
+    "0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08)",
 };
 
 export const chartTooltipProps = {
