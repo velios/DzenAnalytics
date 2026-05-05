@@ -108,6 +108,7 @@ export function TopPage() {
             defaultSortDir="desc"
             onRowClick={(c) => openCategoryFull(c.category)}
             limit={30}
+            exportName={`top_categories_${kind}`}
             columns={
               [
                 {
@@ -185,6 +186,7 @@ export function TopPage() {
             defaultSortKey="total"
             defaultSortDir="desc"
             onRowClick={(p) => openPayee(p.payee)}
+            exportName={`top_payees_${kind}`}
             columns={
               [
                 {
@@ -256,6 +258,7 @@ export function TopPage() {
             defaultSortKey="amount"
             defaultSortDir="desc"
             onRowClick={(t) => openSingle(t.id)}
+            exportName={`top_transactions_${kind}`}
             columns={
               [
                 {

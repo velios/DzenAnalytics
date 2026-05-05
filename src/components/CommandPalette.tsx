@@ -66,6 +66,7 @@ const PAGE_ITEMS: { path: string; title: string; icon: React.ComponentType<{ cla
   { path: "/duplicates", title: "Дубликаты", icon: Copy, aliases: ["duplicates"] },
   { path: "/uncategorized", title: "Без категории", icon: Tag, aliases: ["uncategorized"] },
   { path: "/sankey", title: "Потоки (Sankey)", icon: GitFork, aliases: ["sankey", "flow"] },
+  { path: "/wordcloud", title: "Облако слов", icon: Hash, aliases: ["wordcloud", "слова"] },
   { path: "/annotations", title: "Аннотации", icon: Bookmark, aliases: ["annotations"] },
   { path: "/compare", title: "Сравнение", icon: GitCompare, aliases: ["compare"] },
   { path: "/search", title: "Поиск", icon: SearchPageIcon, aliases: ["search", "поиск"] },

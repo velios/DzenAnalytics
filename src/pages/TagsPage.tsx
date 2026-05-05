@@ -92,6 +92,7 @@ export function TagsPage() {
           defaultSortKey="total"
           defaultSortDir="desc"
           onRowClick={(t) => openTag(t.tag)}
+          exportName="hashtags"
           columns={
             [
               {

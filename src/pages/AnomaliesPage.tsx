@@ -124,6 +124,7 @@ export function AnomaliesPage() {
               defaultSortDir="desc"
               onRowClick={(a) => openTx(a.tx.id)}
               limit={100}
+              exportName="anomalies"
               columns={
                 [
                   {
@@ -221,6 +222,7 @@ export function AnomaliesPage() {
               defaultSortKey="delta"
               defaultSortDir="desc"
               onRowClick={(s) => openCategoryMonth(s.category, s.ym)}
+              exportName="month_spikes"
               columns={
                 [
                   {

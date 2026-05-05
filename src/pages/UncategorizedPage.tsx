@@ -1,9 +1,14 @@
-import { useMemo } from "react";
-import { Tag, AlertCircle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Tag, AlertCircle, Sparkles, Wand2, CheckCircle2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
-import { detectUncategorized } from "../lib/aggregations";
-import { formatMoney, formatDate, formatNum } from "../lib/format";
+import { useCategoryRulesStore } from "../store/useCategoryRulesStore";
+import {
+  detectUncategorized,
+  suggestCategoriesForUncategorized,
+  type CategorySuggestion,
+} from "../lib/aggregations";
+import { formatMoney, formatDate, formatNum, formatPct } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { SortableTable, type Column } from "../components/SortableTable";
 import type { Transaction } from "../types";
@@ -19,6 +24,64 @@ export function UncategorizedPage() {
     .filter((t) => t.kind !== "transfer")
     .reduce((s, t) => s + t.amountBase, 0);
   const share = allTotal > 0 ? total / allTotal : 0;
+
+  const addRule = useCategoryRulesStore((s) => s.add);
+  const rulesLoaded = useCategoryRulesStore((s) => s.loaded);
+  const rulesHydrate = useCategoryRulesStore((s) => s.hydrate);
+  const reapplyRules = useDataStore((s) => s.reapplyRules);
+  useEffect(() => {
+    if (!rulesLoaded) rulesHydrate();
+  }, [rulesLoaded, rulesHydrate]);
+
+  const [showSuggestions, setShowSuggestions] = useState(true);
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const suggestions = useMemo<CategorySuggestion[]>(
+    () => (showSuggestions ? suggestCategoriesForUncategorized(transactions, list, 7) : []),
+    [transactions, list, showSuggestions]
+  );
+
+  async function applyOne(s: CategorySuggestion) {
+    if (!s.payee) return;
+    setBusy(true);
+    await addRule({
+      enabled: true,
+      field: "payee",
+      op: "contains",
+      value: s.payee,
+      caseInsensitive: true,
+      category: s.suggested,
+    });
+    setAppliedIds((prev) => new Set(prev).add(s.txId));
+    await reapplyRules();
+    setBusy(false);
+  }
+
+  async function applyAllConfident() {
+    const confident = suggestions.filter(
+      (s) => s.confidence >= 0.7 && s.payee && !appliedIds.has(s.txId)
+    );
+    if (confident.length === 0) return;
+    if (!confirm(`Создать ${confident.length} правил автоматически?`)) return;
+    setBusy(true);
+    const newIds = new Set(appliedIds);
+    for (const s of confident) {
+      if (!s.payee) continue;
+      await addRule({
+        enabled: true,
+        field: "payee",
+        op: "contains",
+        value: s.payee,
+        caseInsensitive: true,
+        category: s.suggested,
+      });
+      newIds.add(s.txId);
+    }
+    setAppliedIds(newIds);
+    await reapplyRules();
+    setBusy(false);
+  }
 
   if (transactions.length === 0) return <EmptyState />;
 
@@ -52,6 +115,103 @@ export function UncategorizedPage() {
         </div>
       </div>
 
+      {/* Smart suggestions */}
+      {list.length > 0 && suggestions.length > 0 && (
+        <div className="card card-pad bg-accent2/5 border-accent2/40">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+            <div>
+              <div className="font-semibold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-accent2" />
+                Подсказки категорий ({suggestions.length})
+              </div>
+              <div className="text-xs text-muted mt-1">
+                Подобраны по похожести получателя, комментария и категории. Применение
+                создаёт правило (по получателю) — можно отменить на странице «Правила».
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={applyAllConfident}
+                disabled={
+                  busy ||
+                  suggestions.filter((s) => s.confidence >= 0.7 && !appliedIds.has(s.txId)).length === 0
+                }
+                className="btn-primary text-xs"
+              >
+                <Wand2 className="w-3.5 h-3.5" />
+                Применить уверенные (
+                {suggestions.filter((s) => s.confidence >= 0.7 && !appliedIds.has(s.txId)).length}
+                )
+              </button>
+              <button
+                onClick={() => setShowSuggestions(false)}
+                className="btn-ghost text-xs text-muted"
+                title="Скрыть подсказки"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div className="max-h-96 overflow-y-auto space-y-1">
+            {suggestions.slice(0, 50).map((s) => {
+              const applied = appliedIds.has(s.txId);
+              return (
+                <div
+                  key={s.txId}
+                  className={`flex items-center gap-3 p-2 rounded text-sm ${
+                    applied ? "bg-income/10" : "bg-panel2/40 hover:bg-panel2/70"
+                  }`}
+                >
+                  <div className="text-xs text-muted whitespace-nowrap tabular-nums w-20">
+                    {formatDate(s.date, "short")}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate font-medium">{s.payee || "—"}</div>
+                    {s.comment && (
+                      <div className="text-xs text-muted truncate">{s.comment}</div>
+                    )}
+                  </div>
+                  <div className="text-xs whitespace-nowrap text-expense font-medium tabular-nums">
+                    {formatMoney(s.amount, s.currency)}
+                  </div>
+                  <div className="text-xs text-muted">→</div>
+                  <div className="pill text-xs whitespace-nowrap" title={s.suggested}>
+                    {s.suggested.length > 28 ? s.suggested.slice(0, 28) + "…" : s.suggested}
+                  </div>
+                  <div
+                    className={`text-xs tabular-nums w-12 text-right ${
+                      s.confidence >= 0.7
+                        ? "text-income"
+                        : s.confidence >= 0.4
+                          ? "text-warn"
+                          : "text-muted"
+                    }`}
+                    title={`Похожесть на: ${s.reasonExamples.join(", ") || "—"}`}
+                  >
+                    {formatPct(s.confidence, 0)}
+                  </div>
+                  <button
+                    onClick={() => applyOne(s)}
+                    disabled={busy || applied || !s.payee}
+                    className={`btn-ghost !p-1.5 text-xs ${
+                      applied ? "text-income" : ""
+                    }`}
+                    title={applied ? "Применено" : "Применить как правило"}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {suggestions.length > 50 && (
+            <div className="text-xs text-muted text-center mt-2">
+              Показано 50 из {suggestions.length}
+            </div>
+          )}
+        </div>
+      )}
+
       {list.length === 0 ? (
         <div className="card card-pad text-center py-12">
           <AlertCircle className="w-10 h-10 text-income mx-auto mb-3" />
@@ -77,6 +237,7 @@ export function UncategorizedPage() {
             defaultSortKey="date"
             defaultSortDir="desc"
             limit={200}
+            exportName="uncategorized"
             columns={
               [
                 {

@@ -11,8 +11,21 @@ import {
   Legend,
   ReferenceLine,
   Area,
+  AreaChart,
+  Cell,
 } from "recharts";
-import { TrendingDown, TrendingUp, Wallet, Hash, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  Hash,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  BarChart3,
+  Layers,
+  Sparkles,
+} from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useDrillStore } from "../store/useDrillStore";
@@ -24,7 +37,12 @@ import {
   buildScenarioForecast,
   yearOverYearMonthly,
   vsAverageStats,
+  buildWaterfall,
+  buildStreamData,
+  detectSeasonality,
+  cumulativeNetAt,
 } from "../lib/aggregations";
+import { useCalibrationStore } from "../store/useCalibrationStore";
 import { InsightsPanel } from "../components/InsightsPanel";
 import {
   formatMoney,
@@ -76,6 +94,49 @@ export function CashflowPage() {
     () => yearOverYearMonthly(transactions, yoyYear, yoyKind),
     [transactions, yoyYear, yoyKind]
   );
+
+  // Cash-flow visualization mode: bars (по умолчанию) или stream graph
+  const [vizMode, setVizMode] = useState<"bars" | "stream">("bars");
+  const stream = useMemo(() => buildStreamData(filtered, 10, "expense"), [filtered]);
+
+  // Waterfall: на выбранный месяц (последний доступный по умолчанию)
+  const calibration = useCalibrationStore((s) => s.calibration);
+  const calibLoaded = useCalibrationStore((s) => s.loaded);
+  const hydrateCalibration = useCalibrationStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!calibLoaded) hydrateCalibration();
+  }, [calibLoaded, hydrateCalibration]);
+
+  const allMonthYMs = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of transactions) if (t.date) set.add(t.date.slice(0, 7));
+    return Array.from(set).sort();
+  }, [transactions]);
+  const [waterfallYM, setWaterfallYM] = useState<string>(
+    () => allMonthYMs[allMonthYMs.length - 1] || ""
+  );
+  useEffect(() => {
+    if (allMonthYMs.length && !allMonthYMs.includes(waterfallYM)) {
+      setWaterfallYM(allMonthYMs[allMonthYMs.length - 1]);
+    }
+  }, [allMonthYMs, waterfallYM]);
+  const waterfall = useMemo(() => {
+    if (!waterfallYM) return [];
+    const lastDayOfPrevMonth = (() => {
+      const [y, m] = waterfallYM.split("-").map(Number);
+      const prev = new Date(y, m - 1, 0);
+      return prev.toISOString().slice(0, 10);
+    })();
+    const rawAtStart = cumulativeNetAt(transactions, lastDayOfPrevMonth);
+    const offset =
+      calibration
+        ? calibration.amount - cumulativeNetAt(transactions, calibration.date)
+        : 0;
+    return buildWaterfall(transactions, waterfallYM, rawAtStart + offset, 8);
+  }, [transactions, waterfallYM, calibration]);
+
+  // Seasonality
+  const seasonality = useMemo(() => detectSeasonality(transactions), [transactions]);
 
   function openMonth(ym: string) {
     const txs = filtered.filter((t) => ymKey(t.date) === ym);
@@ -160,14 +221,39 @@ export function CashflowPage() {
       <InsightsPanel insights={insights} base={base} />
 
       <div className="card card-pad">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="font-semibold">Доходы и расходы по месяцам</div>
-            <div className="text-xs text-muted">Столбцы — суммы, линия — чистый поток</div>
+            <div className="font-semibold">
+              {vizMode === "bars" ? "Доходы и расходы по месяцам" : "Stream graph по категориям"}
+            </div>
+            <div className="text-xs text-muted">
+              {vizMode === "bars"
+                ? "Столбцы — суммы, линия — чистый поток"
+                : "Категории как реки расходов во времени"}
+            </div>
           </div>
-          <div className="text-xs text-muted">{months.length} месяцев</div>
+          <div className="flex items-center gap-3">
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setVizMode("bars")}
+                className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${vizMode === "bars" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                <BarChart3 className="w-3 h-3" />
+                Бары
+              </button>
+              <button
+                onClick={() => setVizMode("stream")}
+                className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${vizMode === "stream" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                <Layers className="w-3 h-3" />
+                Stream
+              </button>
+            </div>
+            <div className="text-xs text-muted">{months.length} мес.</div>
+          </div>
         </div>
         <div className="h-80">
+          {vizMode === "bars" ? (
           <ResponsiveContainer>
             <ComposedChart
               data={chartData}
@@ -242,6 +328,56 @@ export function CashflowPage() {
               ))}
             </ComposedChart>
           </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer>
+              <AreaChart
+                data={stream.data}
+                stackOffset="silhouette"
+                onClick={(e: unknown) => {
+                  const ev = e as { activePayload?: { payload?: { ym?: string } }[] } | undefined;
+                  const ym = ev?.activePayload?.[0]?.payload?.ym;
+                  if (ym) openMonth(ym);
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+                <XAxis
+                  dataKey="label"
+                  stroke={chartAxisStroke}
+                  fontSize={11}
+                  tickFormatter={(d) => monthLabel(String(d))}
+                  minTickGap={40}
+                />
+                <YAxis hide />
+                <Tooltip
+                  {...chartTooltipProps}
+                  labelFormatter={(d) => monthLabel(String(d))}
+                  formatter={(v: unknown, n: unknown) => [
+                    formatMoney(toNum(v), base, { compact: true }),
+                    String(n),
+                  ]}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {stream.categories.map((cat, i) => {
+                  const colors = [
+                    "#22D3EE", "#A78BFA", "#F59E0B", "#10B981", "#EF4444",
+                    "#EC4899", "#3B82F6", "#84CC16", "#F97316", "#14B8A6", "#6B7280",
+                  ];
+                  return (
+                    <Area
+                      key={cat}
+                      type="monotone"
+                      dataKey={cat}
+                      stackId="stream"
+                      stroke={colors[i % colors.length]}
+                      fill={colors[i % colors.length]}
+                      fillOpacity={0.75}
+                    />
+                  );
+                })}
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </div>
         {vsAvg.current && vsAvg.avg.expense > 0 && (
           <div className="text-xs mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-muted">
@@ -367,6 +503,188 @@ export function CashflowPage() {
         </div>
       )}
 
+      {/* Waterfall — деление месяца на потоки */}
+      {waterfall.length > 0 && (
+        <div className="card card-pad">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <div className="font-semibold">Waterfall месяца</div>
+              <div className="text-xs text-muted">
+                Открытие → доходы → траты по категориям → закрытие
+                {!calibration && (
+                  <span className="text-warn"> · «открытие» = от 0 без калибровки</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() =>
+                  setWaterfallYM((y) => {
+                    const idx = allMonthYMs.indexOf(y);
+                    return idx > 0 ? allMonthYMs[idx - 1] : y;
+                  })
+                }
+                disabled={allMonthYMs.indexOf(waterfallYM) <= 0}
+                className="p-1 hover:text-accent disabled:opacity-30"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-3 text-sm font-medium tabular-nums">
+                {waterfallYM ? monthLabel(waterfallYM) : "—"}
+              </span>
+              <button
+                onClick={() =>
+                  setWaterfallYM((y) => {
+                    const idx = allMonthYMs.indexOf(y);
+                    return idx < allMonthYMs.length - 1 ? allMonthYMs[idx + 1] : y;
+                  })
+                }
+                disabled={allMonthYMs.indexOf(waterfallYM) >= allMonthYMs.length - 1}
+                className="p-1 hover:text-accent disabled:opacity-30"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="h-80">
+            <ResponsiveContainer>
+              <ComposedChart
+                data={waterfall.map((s) => ({
+                  label: s.label,
+                  base: Math.min(s.start, s.end),
+                  delta: Math.abs(s.end - s.start),
+                  cumulative: s.cumulative,
+                  kind: s.kind,
+                  value: s.value,
+                }))}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+                <XAxis
+                  dataKey="label"
+                  stroke={chartAxisStroke}
+                  fontSize={10}
+                  interval={0}
+                  angle={-20}
+                  textAnchor="end"
+                  height={70}
+                />
+                <YAxis
+                  stroke={chartAxisStroke}
+                  fontSize={11}
+                  tickFormatter={(v) => formatNum(v, { compact: true })}
+                />
+                <Tooltip
+                  {...chartTooltipProps}
+                  formatter={(v: unknown, n: unknown, p: { payload?: { kind?: string; value?: number; cumulative?: number } }) => {
+                    if (n === "delta") {
+                      const k = p.payload?.kind;
+                      const cum = p.payload?.cumulative ?? 0;
+                      const val = p.payload?.value ?? 0;
+                      const label =
+                        k === "open" || k === "close"
+                          ? "Баланс"
+                          : k === "income"
+                            ? "Доходы"
+                            : "Расход";
+                      return [
+                        `${formatMoney(val, base, { compact: true })} (после: ${formatMoney(cum, base, { compact: true })})`,
+                        label,
+                      ];
+                    }
+                    return [String(toNum(v)), String(n)];
+                  }}
+                />
+                <Bar dataKey="base" stackId="w" fill="transparent" />
+                <Bar dataKey="delta" stackId="w" radius={[4, 4, 0, 0]} activeBar={false}>
+                  {waterfall.map((s, i) => (
+                    <Cell
+                      key={i}
+                      fill={
+                        s.kind === "open" || s.kind === "close"
+                          ? "#22D3EE"
+                          : s.kind === "income"
+                            ? "#10B981"
+                            : "#EF4444"
+                      }
+                    />
+                  ))}
+                </Bar>
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Seasonality */}
+      {seasonality.some((s) => s.yearsSampled >= 2) && (
+        <div className="card card-pad">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <div className="font-semibold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-warn" />
+                Сезонность расходов
+              </div>
+              <div className="text-xs text-muted">
+                Средний расход по месяцу года, цветом — отклонение от общего среднего
+              </div>
+            </div>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer>
+              <ComposedChart data={seasonality}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
+                <XAxis dataKey="monthName" stroke={chartAxisStroke} fontSize={11} />
+                <YAxis
+                  stroke={chartAxisStroke}
+                  fontSize={11}
+                  tickFormatter={(v) => formatNum(v, { compact: true })}
+                />
+                <Tooltip
+                  {...chartTooltipProps}
+                  formatter={(v: unknown, _n: unknown, p: { payload?: { expenseDeviationPct?: number; yearsSampled?: number } }) => {
+                    const dev = p.payload?.expenseDeviationPct ?? 0;
+                    const ys = p.payload?.yearsSampled ?? 0;
+                    return [
+                      `${formatMoney(toNum(v), base, { compact: true })} · ${dev > 0 ? "+" : ""}${(dev * 100).toFixed(0)}% · ${ys} год${ys === 1 ? "" : "а"} в выборке`,
+                      "Расход",
+                    ];
+                  }}
+                />
+                <ReferenceLine y={0} stroke={chartGridStroke} />
+                <Bar dataKey="avgExpense" radius={[4, 4, 0, 0]} activeBar={false}>
+                  {seasonality.map((s, i) => {
+                    const dev = s.expenseDeviationPct;
+                    const color =
+                      dev > 0.15 ? "#EF4444" : dev < -0.15 ? "#10B981" : "#A78BFA";
+                    return <Cell key={i} fill={color} />;
+                  })}
+                </Bar>
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs mt-3">
+            {(() => {
+              const sorted = [...seasonality].sort(
+                (a, b) => Math.abs(b.expenseDeviationPct) - Math.abs(a.expenseDeviationPct)
+              );
+              const items = sorted
+                .filter((s) => s.yearsSampled >= 2 && Math.abs(s.expenseDeviationPct) > 0.1)
+                .slice(0, 3);
+              return items.map((s) => (
+                <div
+                  key={s.monthIdx}
+                  className={`p-2 rounded ${s.expenseDeviationPct > 0 ? "bg-expense/10 text-expense" : "bg-income/10 text-income"}`}
+                >
+                  <strong>{s.monthName}</strong>:{" "}
+                  {s.expenseDeviationPct > 0 ? "выше" : "ниже"} среднего на{" "}
+                  {(Math.abs(s.expenseDeviationPct) * 100).toFixed(0)}%
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
       <div className="card card-pad">
         <div className="font-semibold mb-3">Помесячная сводка</div>
         <SortableTable<MonthBucket>
@@ -375,6 +693,7 @@ export function CashflowPage() {
           defaultSortKey="ym"
           defaultSortDir="desc"
           onRowClick={(m) => openMonth(m.ym)}
+          exportName="cashflow_monthly"
           columns={[
             {
               key: "ym",

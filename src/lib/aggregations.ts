@@ -194,6 +194,390 @@ export interface CalibrationInput {
   amount: number;
 }
 
+// ============= Waterfall =============
+
+export interface WaterfallStep {
+  label: string;
+  value: number;
+  cumulative: number;
+  kind: "open" | "income" | "expense" | "close";
+  start: number;
+  end: number;
+}
+
+export function buildWaterfall(
+  txs: Transaction[],
+  monthYM: string,
+  openingBalance: number,
+  topCategories = 8
+): WaterfallStep[] {
+  const monthTxs = txs.filter((t) => t.date.startsWith(monthYM));
+
+  let totalIncome = 0;
+  const expenseByCategory = new Map<string, number>();
+  for (const t of monthTxs) {
+    if (t.kind === "income") totalIncome += t.amountBase;
+    else if (t.kind === "expense") {
+      expenseByCategory.set(
+        t.category,
+        (expenseByCategory.get(t.category) || 0) + t.amountBase
+      );
+    }
+  }
+
+  const sortedCats = Array.from(expenseByCategory.entries()).sort(
+    (a, b) => b[1] - a[1]
+  );
+  const top = sortedCats.slice(0, topCategories);
+  const otherSum = sortedCats.slice(topCategories).reduce((s, [, v]) => s + v, 0);
+
+  const steps: WaterfallStep[] = [];
+  let cumulative = openingBalance;
+
+  steps.push({
+    label: "Начало",
+    value: openingBalance,
+    cumulative,
+    kind: "open",
+    start: 0,
+    end: cumulative,
+  });
+
+  if (totalIncome > 0) {
+    const start = cumulative;
+    cumulative += totalIncome;
+    steps.push({
+      label: "Доходы",
+      value: totalIncome,
+      cumulative,
+      kind: "income",
+      start,
+      end: cumulative,
+    });
+  }
+
+  for (const [cat, value] of top) {
+    const start = cumulative;
+    cumulative -= value;
+    steps.push({
+      label: cat,
+      value,
+      cumulative,
+      kind: "expense",
+      start: cumulative,
+      end: start,
+    });
+  }
+
+  if (otherSum > 0) {
+    const start = cumulative;
+    cumulative -= otherSum;
+    steps.push({
+      label: "Прочие",
+      value: otherSum,
+      cumulative,
+      kind: "expense",
+      start: cumulative,
+      end: start,
+    });
+  }
+
+  steps.push({
+    label: "Конец",
+    value: cumulative,
+    cumulative,
+    kind: "close",
+    start: 0,
+    end: cumulative,
+  });
+
+  return steps;
+}
+
+// ============= Stream graph data =============
+
+export interface StreamPoint {
+  ym: string;
+  label: string;
+  [category: string]: number | string;
+}
+
+export function buildStreamData(
+  txs: Transaction[],
+  topCategories = 10,
+  kind: "expense" | "income" = "expense"
+): { data: StreamPoint[]; categories: string[] } {
+  const monthsSet = new Set<string>();
+  const totals = new Map<string, number>();
+  const byMonthCat = new Map<string, Map<string, number>>();
+
+  for (const t of txs) {
+    if (t.kind !== kind) continue;
+    const ym = t.date.slice(0, 7);
+    if (!ym) continue;
+    monthsSet.add(ym);
+    totals.set(t.category, (totals.get(t.category) || 0) + t.amountBase);
+    let m = byMonthCat.get(ym);
+    if (!m) {
+      m = new Map();
+      byMonthCat.set(ym, m);
+    }
+    m.set(t.category, (m.get(t.category) || 0) + t.amountBase);
+  }
+
+  const topCats = Array.from(totals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, topCategories)
+    .map(([k]) => k);
+  const topSet = new Set(topCats);
+
+  const months = Array.from(monthsSet).sort();
+  const data: StreamPoint[] = months.map((ym) => {
+    const m = byMonthCat.get(ym) || new Map();
+    const point: StreamPoint = { ym, label: ym };
+    for (const cat of topCats) point[cat] = Math.round(m.get(cat) || 0);
+    let other = 0;
+    for (const [cat, v] of m) if (!topSet.has(cat)) other += v;
+    point["Прочие"] = Math.round(other);
+    return point;
+  });
+
+  return { data, categories: [...topCats, "Прочие"] };
+}
+
+// ============= Seasonality =============
+
+export interface SeasonalityPoint {
+  monthIdx: number;
+  monthName: string;
+  avgExpense: number;
+  avgIncome: number;
+  yearsSampled: number;
+  expenseDeviationPct: number;
+}
+
+const SEASON_MONTH_NAMES = [
+  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+];
+
+export function detectSeasonality(txs: Transaction[]): SeasonalityPoint[] {
+  const monthly = new Map<string, { income: number; expense: number }>();
+  for (const t of txs) {
+    if (t.kind === "transfer") continue;
+    const ym = t.date.slice(0, 7);
+    if (!ym) continue;
+    let m = monthly.get(ym);
+    if (!m) {
+      m = { income: 0, expense: 0 };
+      monthly.set(ym, m);
+    }
+    if (t.kind === "income") m.income += t.amountBase;
+    else m.expense += t.amountBase;
+  }
+
+  const byMonth: { income: number[]; expense: number[] }[] = Array.from(
+    { length: 12 },
+    () => ({ income: [], expense: [] })
+  );
+
+  for (const [ym, vals] of monthly) {
+    const m = Number(ym.slice(5, 7)) - 1;
+    if (m < 0 || m > 11) continue;
+    byMonth[m].income.push(vals.income);
+    byMonth[m].expense.push(vals.expense);
+  }
+
+  const overallAvgExpense =
+    Array.from(monthly.values()).reduce((s, m) => s + m.expense, 0) /
+    Math.max(monthly.size, 1);
+
+  return byMonth.map((b, i) => {
+    const avgExpense =
+      b.expense.length > 0
+        ? b.expense.reduce((s, v) => s + v, 0) / b.expense.length
+        : 0;
+    const avgIncome =
+      b.income.length > 0
+        ? b.income.reduce((s, v) => s + v, 0) / b.income.length
+        : 0;
+    const dev =
+      overallAvgExpense > 0
+        ? (avgExpense - overallAvgExpense) / overallAvgExpense
+        : 0;
+    return {
+      monthIdx: i,
+      monthName: SEASON_MONTH_NAMES[i],
+      avgExpense,
+      avgIncome,
+      yearsSampled: b.expense.length,
+      expenseDeviationPct: dev,
+    };
+  });
+}
+
+// ============= Word cloud =============
+
+const RU_STOPWORDS = new Set([
+  "и","в","на","с","по","для","к","от","за","до","из","о","но","а","что","это","как","или","же","бы","ли","не","ни","во","со","ко","во","со","о","у","во","над","под","при","между","через","также","ещё","еще","там","тут","где","куда","сюда","туда","когда","тогда","сейчас","потом","уже","вот","есть","будет","был","была","было","были","быть","буду","будут","можно","нужно","надо","даже","или","если","потому","чтобы","того","этой","этом","эта","этот","эти","всё","все","всех","весь","вся","моя","моё","наш","наша","ваш","ваша","его","её","их","чей","меня","мне","мы","нам","нас","ты","вы","вас","вам","я","он","она","оно","они","них","ним","ему","ей","ей","им","ими","себя","сам","сама",
+  "the","a","an","of","to","in","on","for","with","at","by","from","is","are","was","were","be","been","being","have","has","had","do","does","did","will","would","can","could","should","may","might","must","this","that","these","those","it","its","i","my","you","your","he","she","they","we",
+  "руб","р","₽","шт","ст","оп","нет","да","все","всё",
+]);
+
+export interface WordcloudWord {
+  text: string;
+  count: number;
+  totalAmount: number;
+  txIds: string[];
+}
+
+export function buildWordcloud(
+  txs: Transaction[],
+  minLength = 3,
+  topN = 100
+): WordcloudWord[] {
+  const map = new Map<string, WordcloudWord>();
+
+  for (const t of txs) {
+    if (t.kind === "transfer") continue;
+    if (!t.comment) continue;
+    const seen = new Set<string>();
+    const tokens = t.comment
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s#-]+/gu, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+    for (const raw of tokens) {
+      const w = raw.replace(/^[#-]+|[#-]+$/g, "");
+      if (w.length < minLength) continue;
+      if (RU_STOPWORDS.has(w)) continue;
+      if (/^\d+$/.test(w)) continue;
+      if (seen.has(w)) continue;
+      seen.add(w);
+      let entry = map.get(w);
+      if (!entry) {
+        entry = { text: w, count: 0, totalAmount: 0, txIds: [] };
+        map.set(w, entry);
+      }
+      entry.count++;
+      entry.totalAmount += t.amountBase;
+      if (entry.txIds.length < 200) entry.txIds.push(t.id);
+    }
+  }
+
+  return Array.from(map.values())
+    .filter((w) => w.count >= 2)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, topN);
+}
+
+// ============= Smart category suggestions =============
+
+export interface CategorySuggestion {
+  txId: string;
+  payee: string;
+  comment: string;
+  amount: number;
+  currency: string;
+  date: string;
+  suggested: string;
+  confidence: number;
+  reasonExamples: string[];
+}
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    (text || "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !RU_STOPWORDS.has(w) && !/^\d+$/.test(w))
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+export function suggestCategoriesForUncategorized(
+  txs: Transaction[],
+  uncategorized: Transaction[],
+  k = 5
+): CategorySuggestion[] {
+  const corpus = txs
+    .filter((t) => {
+      if (t.kind === "transfer") return false;
+      const cat = t.categoryFull || "";
+      if (!cat) return false;
+      if (/^\s*$/.test(cat)) return false;
+      if (/^прочи|без катего|other|misc/i.test(cat)) return false;
+      return true;
+    })
+    .map((t) => ({
+      tx: t,
+      tokens: tokenize(`${t.payee} ${t.comment} ${t.categoryFull}`),
+      payee: (t.payee || "").toLowerCase(),
+    }));
+
+  const suggestions: CategorySuggestion[] = [];
+
+  for (const u of uncategorized) {
+    const uTokens = tokenize(`${u.payee} ${u.comment}`);
+    const uPayee = (u.payee || "").toLowerCase();
+
+    const scored = corpus
+      .map((c) => {
+        const sim = jaccard(uTokens, c.tokens);
+        const payeeBoost =
+          uPayee && c.payee && (uPayee === c.payee || c.payee.includes(uPayee) || uPayee.includes(c.payee))
+            ? 0.5
+            : 0;
+        return { tx: c.tx, score: sim + payeeBoost };
+      })
+      .filter((x) => x.score > 0.05)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, k);
+
+    if (scored.length === 0) continue;
+
+    const votes = new Map<string, { score: number; examples: string[] }>();
+    for (const s of scored) {
+      const cat = s.tx.categoryFull;
+      let v = votes.get(cat);
+      if (!v) {
+        v = { score: 0, examples: [] };
+        votes.set(cat, v);
+      }
+      v.score += s.score;
+      if (v.examples.length < 3 && s.tx.payee) v.examples.push(s.tx.payee);
+    }
+    const winner = Array.from(votes.entries()).sort(
+      (a, b) => b[1].score - a[1].score
+    )[0];
+    if (!winner) continue;
+
+    const totalScore = scored.reduce((s, x) => s + x.score, 0);
+    const conf = totalScore > 0 ? winner[1].score / totalScore : 0;
+
+    suggestions.push({
+      txId: u.id,
+      payee: u.payee,
+      comment: u.comment,
+      amount: u.amount,
+      currency: u.currency,
+      date: u.date,
+      suggested: winner[0],
+      confidence: conf,
+      reasonExamples: winner[1].examples,
+    });
+  }
+
+  return suggestions.sort((a, b) => b.confidence - a.confidence);
+}
+
 export interface DuplicateGroup {
   signature: string;
   txs: Transaction[];

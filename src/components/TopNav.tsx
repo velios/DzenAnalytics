@@ -23,6 +23,7 @@ import {
   Bookmark,
   Wand2,
   HelpCircle,
+  Cloud,
   Menu,
   X,
 } from "lucide-react";
@@ -50,6 +51,7 @@ const SECONDARY = [
   { to: "/recurring", label: "Регулярные", icon: Repeat },
   { to: "/annotations", label: "Аннотации", icon: Bookmark },
   { to: "/tags", label: "Хэштеги", icon: Hash },
+  { to: "/wordcloud", label: "Облако слов", icon: Cloud },
   { to: "/compare", label: "Сравнение", icon: GitCompare },
   { to: "/top", label: "Топ", icon: TrendingUp },
   { to: "/rules", label: "Правила", icon: Wand2 },

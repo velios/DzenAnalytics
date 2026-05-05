@@ -25,6 +25,7 @@ import { SankeyPage } from "./pages/SankeyPage";
 import { AnnotationsPage } from "./pages/AnnotationsPage";
 import { HelpPage } from "./pages/HelpPage";
 import { RulesPage } from "./pages/RulesPage";
+import { WordcloudPage } from "./pages/WordcloudPage";
 import { useDataStore } from "./store/useDataStore";
 import { useThemeStore } from "./store/useThemeStore";
 
@@ -91,6 +92,7 @@ function App() {
             <Route path="/top" element={<TopPage />} />
             <Route path="/trends" element={<TrendsPage />} />
             <Route path="/sankey" element={<SankeyPage />} />
+            <Route path="/wordcloud" element={<WordcloudPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

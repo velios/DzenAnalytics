@@ -125,6 +125,7 @@ export function RecurringPage() {
             defaultSortKey="totalSpent"
             defaultSortDir="desc"
             onRowClick={openCandidate}
+            exportName="recurring_payments"
             columns={
               [
                 {
