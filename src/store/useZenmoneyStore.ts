@@ -9,6 +9,7 @@ import * as db from "../lib/db";
 import { fetchDiff, checkToken, ZenApiError } from "../lib/zenmoney";
 import { mapZenmoneyDiff } from "../lib/zenmoneyMap";
 import { useDataStore } from "./useDataStore";
+import { useCalibrationStore } from "./useCalibrationStore";
 import type { ImportMeta } from "../types";
 
 const TOKEN_KEY = "zenmoneyToken";
@@ -28,7 +29,7 @@ interface ZenmoneyState {
   saveToken: (token: string) => Promise<void>;
   validateAndSaveToken: (token: string) => Promise<boolean>;
   removeToken: () => Promise<void>;
-  sync: () => Promise<{ count: number }>;
+  sync: () => Promise<{ count: number; currentBalance: number }>;
 }
 
 export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
@@ -125,6 +126,17 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       useDataStore.setState({ rates: mapped.rates });
       await useDataStore.getState().setTransactions(mapped.transactions, meta);
 
+      // Auto-calibration: the API exposes current real balance per account,
+      // which CSV lacks. Set calibration to today + current total so the
+      // "Совокупный баланс" chart and KPIs show real values without manual
+      // entry. We overwrite any existing calibration since the API value is
+      // authoritative.
+      const today = new Date().toISOString().slice(0, 10);
+      await useCalibrationStore.getState().set({
+        date: today,
+        amount: Math.round(mapped.currentBalanceTotal),
+      });
+
       const now = new Date().toISOString();
       await db.saveJSON(TIMESTAMP_KEY, diff.serverTimestamp);
       await db.saveJSON(LAST_SYNC_KEY, now);
@@ -134,7 +146,10 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         status: "ok",
         error: null,
       });
-      return { count: mapped.transactions.length };
+      return {
+        count: mapped.transactions.length,
+        currentBalance: mapped.currentBalanceTotal,
+      };
     } catch (e) {
       let msg: string;
       if (e instanceof ZenApiError) {

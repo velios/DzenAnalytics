@@ -27,6 +27,8 @@ export interface MappedDiff {
   baseCurrency: string;
   // For optional calibration helper (sum of startBalances of active accounts in base)
   startBalanceTotal: number;
+  // Sum of *current* balances of active accounts in base — used for auto-calibration
+  currentBalanceTotal: number;
 }
 
 function buildCategory(
@@ -175,6 +177,11 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
     const cur = instr?.shortTitle || baseCurrency;
     return s + toBase(a.startBalance || 0, cur);
   }, 0);
+  const currentBalanceTotal = activeAccounts.reduce((s, a) => {
+    const instr = instrumentsById.get(a.instrument);
+    const cur = instr?.shortTitle || baseCurrency;
+    return s + toBase(a.balance || 0, cur);
+  }, 0);
 
   return {
     transactions: txs,
@@ -184,5 +191,6 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
     tagsTotal: diff.tag.length,
     baseCurrency,
     startBalanceTotal,
+    currentBalanceTotal,
   };
 }
