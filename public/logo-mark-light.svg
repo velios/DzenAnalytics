@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64" fill="none">
+  <title>DzenAnalytics</title>
+  <path d="M14 32 L26 18 L34 28 L42 14 L52 32" stroke="#4F46C7" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" fill="none"></path>
+  <path d="M14 36 L26 50 L34 40 L42 54 L52 36" stroke="#06B6D4" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" fill="none" opacity="0.9"></path>
+  <line x1="10" y1="34" x2="54" y2="34" stroke="#1A1730" stroke-width="1.5" opacity="0.2"></line>
+</svg>

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  BarChart3,
   PieChart,
   Wallet,
   TrendingUp,
@@ -35,6 +34,7 @@ import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
 import { formatNum } from "../lib/format";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import logoMark from "../assets/logo-mark.svg";
 
 const PRIMARY = [
   { to: "/", label: "Главная", icon: LayoutDashboard },
@@ -80,9 +80,13 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
     <header className="border-b border-border bg-panel/80 backdrop-blur sticky top-0 z-30">
       <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-3 flex items-center gap-3 md:gap-6">
         <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-accent2 flex items-center justify-center text-white font-bold">
-            <BarChart3 className="w-5 h-5" />
-          </div>
+          <img
+            src={logoMark}
+            alt="DzenAnalytics"
+            width={32}
+            height={32}
+            className="w-8 h-8 rounded-lg"
+          />
           <div className="hidden sm:block">
             <div className="text-sm font-semibold leading-none">DzenAnalytics</div>
             <div className="text-[10px] text-muted leading-none mt-0.5">
