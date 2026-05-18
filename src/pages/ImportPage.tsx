@@ -475,8 +475,7 @@ export function ImportPage() {
 
       {/* CSV import — alternative source */}
       <p className="text-muted text-sm -mt-2">
-        Или загрузить CSV-выгрузку из Дзен-мани (формат:{" "}
-        <code className="pill">date;categoryName;…</code>):
+        Или загрузить CSV-выгрузку из Дзен-мани:
       </p>
 
       {transactions.length > 0 && (
