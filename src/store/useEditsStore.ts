@@ -1,0 +1,66 @@
+// Per-transaction local overrides. The overlay is applied AFTER all
+// canonical post-processing (payee grouping, category rules), so user
+// edits "win" against everything else.
+//
+// In CSV mode they are the only way to fix anything. In API mode they
+// survive subsequent diffs (the mapper produces a fresh Transaction
+// from server data, the overlay re-applies on top). Push-to-Zenmoney
+// is intentionally NOT implemented here — it's a separate feature.
+
+import { create } from "zustand";
+import * as db from "../lib/db";
+import type { Transaction } from "../types";
+
+// Whitelisted editable fields. Keeping it explicit avoids accidentally
+// stomping derived fields like `amountBase` (we recompute that ourselves).
+export type EditableField =
+  | "date"
+  | "category"
+  | "subcategory"
+  | "categoryFull"
+  | "payee"
+  | "comment"
+  | "amount"
+  | "currency"
+  | "account";
+
+export type TransactionEdit = Partial<Pick<Transaction, EditableField>>;
+
+interface EditsState {
+  edits: Record<string, TransactionEdit>;
+  loaded: boolean;
+  hydrate: () => Promise<void>;
+  setEdit: (id: string, patch: TransactionEdit) => Promise<void>;
+  clearEdit: (id: string) => Promise<void>;
+  clearAll: () => Promise<void>;
+}
+
+const KEY = "transactionEdits";
+
+export const useEditsStore = create<EditsState>((set, get) => ({
+  edits: {},
+  loaded: false,
+
+  hydrate: async () => {
+    const data = await db.loadJSON<Record<string, TransactionEdit>>(KEY);
+    set({ edits: data || {}, loaded: true });
+  },
+
+  setEdit: async (id, patch) => {
+    const next = { ...get().edits, [id]: { ...get().edits[id], ...patch } };
+    await db.saveJSON(KEY, next);
+    set({ edits: next });
+  },
+
+  clearEdit: async (id) => {
+    const next = { ...get().edits };
+    delete next[id];
+    await db.saveJSON(KEY, next);
+    set({ edits: next });
+  },
+
+  clearAll: async () => {
+    await db.saveJSON(KEY, {});
+    set({ edits: {} });
+  },
+}));

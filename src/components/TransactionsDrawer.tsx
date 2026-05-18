@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { X, Search, ArrowUpDown, Download, Sparkles, Tag, User } from "lucide-react";
+import {
+  X,
+  Search,
+  ArrowUpDown,
+  Download,
+  Sparkles,
+  Tag,
+  User,
+  Pencil,
+  RotateCcw,
+  Save,
+} from "lucide-react";
 import { useDrillStore } from "../store/useDrillStore";
 import { useDataStore } from "../store/useDataStore";
+import { useEditsStore } from "../store/useEditsStore";
 import { formatMoney, formatDate } from "../lib/format";
 import type { Transaction } from "../types";
 
@@ -16,6 +28,13 @@ export function TransactionsDrawer() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const edits = useEditsStore((s) => s.edits);
+  const editsLoaded = useEditsStore((s) => s.loaded);
+  const hydrateEdits = useEditsStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!editsLoaded) hydrateEdits();
+  }, [editsLoaded, hydrateEdits]);
 
   useEffect(() => {
     if (!open) return;
@@ -34,13 +53,21 @@ export function TransactionsDrawer() {
     if (open) setSearch("");
   }, [open]);
 
+  // Drill store keeps a snapshot of transactions taken at the moment the drawer
+  // was opened. After an inline edit the canonical `useDataStore.transactions`
+  // is the source of truth, so we re-derive a fresh list by id-lookup.
+  const liveTransactions = useMemo(() => {
+    const byId = new Map(allTransactions.map((t) => [t.id, t]));
+    return transactions.map((t) => byId.get(t.id) || t);
+  }, [transactions, allTransactions]);
+
   const sorted = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = q
-      ? transactions.filter((t) =>
+      ? liveTransactions.filter((t) =>
           `${t.payee} ${t.comment} ${t.categoryFull} ${t.account}`.toLowerCase().includes(q)
         )
-      : transactions;
+      : liveTransactions;
     const cmp = (a: Transaction, b: Transaction) => {
       let r = 0;
       if (sortKey === "date") r = a.date.localeCompare(b.date);
@@ -50,7 +77,7 @@ export function TransactionsDrawer() {
       return sortDir === "asc" ? r : -r;
     };
     return [...filtered].sort(cmp);
-  }, [transactions, search, sortKey, sortDir]);
+  }, [liveTransactions, search, sortKey, sortDir]);
 
   const totals = useMemo(() => {
     let inc = 0;
@@ -99,6 +126,7 @@ export function TransactionsDrawer() {
   if (!open) return null;
 
   return (
+    <>
     <aside className="fixed inset-0 bg-bg z-50 flex flex-col animate-fade">
       <div className="px-6 py-4 border-b border-border flex items-start justify-between gap-4 sticky top-0 bg-panel/95 backdrop-blur z-10">
         <div className="min-w-0">
@@ -219,17 +247,26 @@ export function TransactionsDrawer() {
                   <th className="table-th">Комментарий</th>
                   <th className="table-th">Счёт</th>
                   <SortHead label="Сумма" k="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
+                  <th className="table-th w-8"></th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((t) => (
-                  <tr key={t.id} className="hover:bg-panel2/40 align-top">
+                {sorted.map((t) => {
+                  const isEdited = !!edits[t.id];
+                  return (
+                  <tr key={t.id} className="hover:bg-panel2/40 align-top group">
                     <td className="table-td whitespace-nowrap text-muted">
                       {formatDate(t.date, "short")}
                     </td>
                     <td className="table-td max-w-[180px]">
-                      <div className="truncate" title={t.categoryFull}>
+                      <div className="truncate flex items-center gap-1" title={t.categoryFull}>
                         {t.category}
+                        {isEdited && (
+                          <Pencil
+                            className="w-3 h-3 text-accent2"
+                            aria-label="Отредактировано"
+                          />
+                        )}
                       </div>
                       {t.subcategory && (
                         <div className="text-xs text-muted truncate" title={t.subcategory}>
@@ -260,13 +297,248 @@ export function TransactionsDrawer() {
                       {t.kind === "income" ? "+" : t.kind === "expense" ? "−" : "↔"}
                       {formatMoney(t.amount, t.currency)}
                     </td>
+                    <td className="table-td w-8 text-right">
+                      <button
+                        onClick={() => setEditing(t)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted hover:text-text"
+                        title="Редактировать"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
       </aside>
+      {editing && (
+        <EditTransactionModal
+          tx={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </>
+  );
+}
+
+interface EditModalProps {
+  tx: Transaction;
+  onClose: () => void;
+}
+
+function EditTransactionModal({ tx, onClose }: EditModalProps) {
+  const rates = useDataStore((s) => s.rates);
+  const reapply = useDataStore((s) => s.reapplyRules);
+  const setEdit = useEditsStore((s) => s.setEdit);
+  const clearEdit = useEditsStore((s) => s.clearEdit);
+  const existing = useEditsStore((s) => s.edits[tx.id]);
+  const hasEdit = !!existing;
+
+  const [date, setDate] = useState(tx.date);
+  const [category, setCategory] = useState(tx.category);
+  const [subcategory, setSubcategory] = useState(tx.subcategory ?? "");
+  const [payee, setPayee] = useState(tx.payee);
+  const [comment, setComment] = useState(tx.comment);
+  const [amount, setAmount] = useState(String(tx.amount));
+  const [currency, setCurrency] = useState(tx.currency);
+  const [account, setAccount] = useState(tx.account);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const amtNum = Number(amount.replace(",", "."));
+      const patch = {
+        date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : tx.date,
+        category: category.trim() || tx.category,
+        subcategory: subcategory.trim() || null,
+        payee: payee.trim(),
+        comment: comment.trim(),
+        amount: Number.isFinite(amtNum) && amtNum >= 0 ? amtNum : tx.amount,
+        currency: currency.trim() || tx.currency,
+        account: account.trim() || tx.account,
+      };
+      await setEdit(tx.id, patch);
+      await reapply();
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reset() {
+    if (!hasEdit) return;
+    setSaving(true);
+    try {
+      await clearEdit(tx.id);
+      await reapply();
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const currencyOptions = Array.from(
+    new Set([currency, ...Object.keys(rates.rates)])
+  );
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card w-full max-w-lg max-h-[90vh] overflow-y-auto"
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="font-semibold flex items-center gap-2">
+            <Pencil className="w-4 h-4 text-accent2" />
+            Редактирование операции
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-text">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-3">
+          <Field label="Дата (ГГГГ-ММ-ДД)">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="input text-sm w-full"
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Категория">
+              <input
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="input text-sm w-full"
+              />
+            </Field>
+            <Field label="Подкатегория">
+              <input
+                value={subcategory}
+                onChange={(e) => setSubcategory(e.target.value)}
+                placeholder="—"
+                className="input text-sm w-full"
+              />
+            </Field>
+          </div>
+          <Field label="Получатель">
+            <input
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+              className="input text-sm w-full"
+            />
+          </Field>
+          <Field label="Комментарий">
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              rows={2}
+              className="input text-sm w-full resize-y"
+            />
+          </Field>
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Сумма">
+              <input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                inputMode="decimal"
+                className="input text-sm w-full font-mono tabular-nums"
+              />
+            </Field>
+            <Field label="Валюта">
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="input text-sm w-full"
+              >
+                {currencyOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Тип">
+              <div className="input text-sm w-full bg-panel2 text-muted">
+                {tx.kind === "income"
+                  ? "доход"
+                  : tx.kind === "expense"
+                    ? "расход"
+                    : "перевод"}
+              </div>
+            </Field>
+          </div>
+          <Field label="Счёт">
+            <input
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              className="input text-sm w-full"
+            />
+          </Field>
+          <p className="text-[11px] text-muted">
+            Правки сохраняются локально как overlay поверх данных. Следующая
+            синхронизация с API их не затрёт. Изменить тип операции
+            (доход/расход/перевод) пока нельзя.
+          </p>
+        </div>
+        <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
+          {hasEdit ? (
+            <button
+              onClick={reset}
+              disabled={saving}
+              className="btn-ghost text-xs text-muted"
+              title="Откатить к исходному значению"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Сбросить правку
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="btn-ghost text-sm">
+              Отмена
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary text-sm"
+            >
+              <Save className="w-3.5 h-3.5" />
+              Сохранить
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="label block mb-1">{label}</label>
+      {children}
+    </div>
   );
 }
 
