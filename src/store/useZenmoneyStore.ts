@@ -116,6 +116,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         totalRows: diff.transaction.length,
         parsed: mapped.transactions.length,
         skipped: diff.transaction.length - mapped.transactions.length,
+        source: "api",
       };
       // Persist the rates that came with the diff so the next session boots
       // with up-to-date Zenmoney rates.

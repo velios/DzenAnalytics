@@ -82,6 +82,14 @@ export function ImportPage() {
 
   async function connectToken() {
     setSyncSuccess(null);
+    // Guard: existing CSV data will be replaced by API sync.
+    if (meta?.source === "csv" && transactions.length > 0) {
+      const ok = confirm(
+        `У вас сейчас ${formatNum(transactions.length)} операций, загруженных из CSV (${meta.fileName}). API-синк заменит их данными из Дзен-мани. Бюджеты, цели, аннотации и правила сохранятся.\n\nПродолжить?`
+      );
+      if (!ok) return;
+      await clearAll();
+    }
     const ok = await zenValidateAndSave(tokenDraft);
     if (ok) {
       setTokenDraft("");
@@ -200,6 +208,13 @@ export function ImportPage() {
   async function handleFile(file: File) {
     setError(null);
     setSuccess(null);
+    // Guard: API token connected → confirm before mixing.
+    if (zenToken) {
+      const ok = confirm(
+        "У вас подключён API Дзен-мани. CSV-импорт может затереть синхронизированные данные. Продолжить?\n\nЕсли импорт нужен, советуем сначала отключить API на этой странице, чтобы избежать путаницы."
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       const text = await file.text();
@@ -213,6 +228,7 @@ export function ImportPage() {
         totalRows: result.totalRows,
         parsed: result.parsed,
         skipped: result.skipped,
+        source: "csv" as const,
       };
       if (mode === "merge" && transactions.length > 0) {
         const r = await mergeTransactions(result.transactions, importMeta);

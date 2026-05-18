@@ -49,10 +49,14 @@ export interface CurrencyRates {
   rates: Record<Currency, number>;
 }
 
+export type DataSource = "csv" | "api";
+
 export interface ImportMeta {
   importedAt: string;
   fileName: string;
   totalRows: number;
   parsed: number;
   skipped: number;
+  /** Where this data came from. CSV-imported and API-synced datasets are mutually exclusive. */
+  source?: DataSource;
 }
