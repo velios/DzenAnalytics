@@ -5,6 +5,7 @@ import {
   ArrowRight,
   LayoutDashboard,
   LineChart,
+  ListChecks,
   PieChart,
   Wallet,
   Activity,
@@ -52,6 +53,7 @@ interface Props {
 
 const PAGE_ITEMS: { path: string; title: string; icon: React.ComponentType<{ className?: string }>; aliases: string[] }[] = [
   { path: "/", title: "Главная", icon: LayoutDashboard, aliases: ["dashboard", "home", "обзор"] },
+  { path: "/transactions", title: "Операции", icon: ListChecks, aliases: ["transactions", "лента", "операции", "operations"] },
   { path: "/cashflow", title: "Cash-flow", icon: LineChart, aliases: ["кешфлоу", "cashflow", "потоки"] },
   { path: "/categories", title: "Категории", icon: PieChart, aliases: ["categories"] },
   { path: "/accounts", title: "Счета", icon: Wallet, aliases: ["accounts"] },

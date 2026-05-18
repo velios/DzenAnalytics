@@ -6,6 +6,7 @@ import {
   TrendingUp,
   GitCompare,
   LineChart,
+  ListChecks,
   CalendarDays,
   Hash,
   Repeat,
@@ -38,7 +39,7 @@ import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
 
 const PRIMARY = [
   { to: "/", label: "Главная", icon: LayoutDashboard },
-  { to: "/cashflow", label: "Cash-flow", icon: LineChart },
+  { to: "/transactions", label: "Операции", icon: ListChecks },
   { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/categories", label: "Категории", icon: PieChart },
   { to: "/trends", label: "Тренды", icon: Activity },
@@ -46,6 +47,7 @@ const PRIMARY = [
 ];
 
 const SECONDARY = [
+  { to: "/cashflow", label: "Cash-flow", icon: LineChart },
   { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/whatif", label: "Что-если", icon: FlaskConical },
   { to: "/year-review", label: "Год в цифрах", icon: Sparkles },

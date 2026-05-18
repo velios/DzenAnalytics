@@ -6,6 +6,7 @@ import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette, useGlobalShortcuts } from "./components/CommandPalette";
 import { DashboardPage } from "./pages/DashboardPage";
 import { CashflowPage } from "./pages/CashflowPage";
+import { TransactionsPage } from "./pages/TransactionsPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { TopPage } from "./pages/TopPage";
@@ -105,6 +106,7 @@ function App() {
             <Route path="/digest" element={<DigestPage />} />
           </Route>
           <Route element={<FilteredLayout />}>
+            <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/cashflow" element={<CashflowPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
