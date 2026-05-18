@@ -474,85 +474,92 @@ export function ImportPage() {
       </div>
 
       {/* CSV import — alternative source */}
-      <p className="text-muted text-sm -mt-2">
-        Или загрузить CSV-выгрузку из Дзен-мани:
-      </p>
-
-      {transactions.length > 0 && (
-        <div className="card card-pad">
-          <div className="font-medium mb-3 flex items-center gap-2">
-            <Layers className="w-4 h-4 text-accent" />
-            Режим импорта
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <button
-              onClick={() => setMode("merge")}
-              className={`p-4 rounded-lg border text-left transition-colors ${
-                mode === "merge"
-                  ? "bg-accent/10 border-accent"
-                  : "bg-panel2 border-border hover:border-accent/50"
-              }`}
-            >
-              <div className="font-medium text-sm flex items-center gap-2">
-                <Layers className="w-4 h-4" />
-                Дополнить
-              </div>
-              <div className="text-xs text-muted mt-1">
-                Добавить новые операции к существующим. Дубликаты по id отбрасываются.
-              </div>
-            </button>
-            <button
-              onClick={() => setMode("replace")}
-              className={`p-4 rounded-lg border text-left transition-colors ${
-                mode === "replace"
-                  ? "bg-accent/10 border-accent"
-                  : "bg-panel2 border-border hover:border-accent/50"
-              }`}
-            >
-              <div className="font-medium text-sm flex items-center gap-2">
-                <Replace className="w-4 h-4" />
-                Заменить
-              </div>
-              <div className="text-xs text-muted mt-1">
-                Удалить текущие данные и загрузить файл с нуля.
-              </div>
-            </button>
-          </div>
+      <div className="card card-pad">
+        <div className="font-medium mb-3 flex items-center gap-2">
+          <Upload className="w-4 h-4 text-accent" />
+          Импорт CSV-выгрузки{" "}
+          <span className="text-muted text-xs font-normal">(офлайн-синхронизация)</span>
         </div>
-      )}
-
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        onClick={() => fileRef.current?.click()}
-        className={`card card-pad cursor-pointer transition-all border-2 border-dashed ${
-          dragOver ? "border-accent bg-accent/5" : "border-border hover:border-accent/50"
-        }`}
-      >
-        <div className="flex flex-col items-center text-center py-10 gap-3">
-          <Upload className="w-12 h-12 text-accent" />
-          <div className="font-medium">
-            {busy ? "Обрабатываю..." : "Перетащите CSV-файл сюда или кликните для выбора"}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+          {/* Left: mode toggle + status */}
+          <div className="flex flex-col justify-center gap-3">
+            {transactions.length > 0 ? (
+              <>
+                <div>
+                  <div className="label mb-1.5">Режим</div>
+                  <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
+                    <button
+                      onClick={() => setMode("merge")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
+                        mode === "merge"
+                          ? "bg-accent text-accent-fg"
+                          : "text-muted hover:text-text"
+                      }`}
+                      title="Добавить новые операции, дубликаты по id отбрасываются"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      Дополнить
+                    </button>
+                    <button
+                      onClick={() => setMode("replace")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
+                        mode === "replace"
+                          ? "bg-accent text-accent-fg"
+                          : "text-muted hover:text-text"
+                      }`}
+                      title="Удалить все текущие данные и загрузить файл с нуля"
+                    >
+                      <Replace className="w-3.5 h-3.5" />
+                      Заменить
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-muted">
+                  В базе: <strong className="text-text">{formatNum(transactions.length)}</strong>{" "}
+                  операций.{" "}
+                  {mode === "merge"
+                    ? "Новый файл добавит свежие операции, дубликаты по id будут отброшены."
+                    : "Новый файл полностью заменит текущие данные."}
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-muted">
+                Файл обрабатывается локально, в браузере — никуда не отправляется. Подходит любая
+                CSV-выгрузка из Дзен-мани (формат:{" "}
+                <code className="pill">date;categoryName;…</code>).
+              </div>
+            )}
           </div>
-          <div className="text-xs text-muted">
-            {transactions.length > 0
-              ? `Сейчас в базе: ${formatNum(transactions.length)} операций. Режим: ${mode === "merge" ? "дополнить" : "заменить"}.`
-              : "Файл обрабатывается локально, в браузере. Никуда не отправляется."}
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleFile(file);
+          {/* Right: dropzone */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
             }}
-          />
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+            className={`cursor-pointer transition-all border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center px-4 py-5 gap-1.5 min-h-[120px] ${
+              dragOver
+                ? "border-accent bg-accent/5"
+                : "border-border hover:border-accent/50 hover:bg-panel2/30"
+            }`}
+          >
+            <Upload className="w-7 h-7 text-accent" />
+            <div className="text-sm font-medium">
+              {busy ? "Обрабатываю..." : "Перетащите CSV или кликните"}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+          </div>
         </div>
       </div>
 
