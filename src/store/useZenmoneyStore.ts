@@ -8,6 +8,13 @@ import { create } from "zustand";
 import * as db from "../lib/db";
 import { fetchDiff, checkToken, ZenApiError } from "../lib/zenmoney";
 import { mapZenmoneyDiff } from "../lib/zenmoneyMap";
+import {
+  loadZenCache,
+  saveZenCache,
+  clearZenCache,
+  applyDiff,
+  cacheToDiffResponse,
+} from "../lib/zenmoneyCache";
 import { useDataStore } from "./useDataStore";
 import { useCalibrationStore } from "./useCalibrationStore";
 import type { ImportMeta } from "../types";
@@ -17,6 +24,20 @@ const TIMESTAMP_KEY = "zenmoneyServerTimestamp";
 const LAST_SYNC_KEY = "zenmoneyLastSyncAt";
 
 export type SyncStatus = "idle" | "checking" | "syncing" | "ok" | "error";
+
+export interface SyncResult {
+  count: number;
+  currentBalance: number;
+  /** True if this was a full sync (cache was empty or {force:true} was passed). */
+  full: boolean;
+  /** Delta sizes — how many entities arrived this round (helpful for "Свежее: +N"). */
+  delta: {
+    transactions: number;
+    accounts: number;
+    tags: number;
+    deletions: number;
+  };
+}
 
 interface ZenmoneyState {
   token: string | null;
@@ -29,7 +50,13 @@ interface ZenmoneyState {
   saveToken: (token: string) => Promise<void>;
   validateAndSaveToken: (token: string) => Promise<boolean>;
   removeToken: () => Promise<void>;
-  sync: () => Promise<{ count: number; currentBalance: number }>;
+  /**
+   * Synchronise with Zenmoney. By default uses the last `serverTimestamp`
+   * for an incremental diff; pass `{force: true}` to drop the local cache
+   * and re-pull everything (useful after suspected corruption / renames /
+   * for support).
+   */
+  sync: (opts?: { force?: boolean }) => Promise<SyncResult>;
 }
 
 export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
@@ -87,6 +114,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     await db.saveJSON(TOKEN_KEY, null);
     await db.saveJSON(TIMESTAMP_KEY, 0);
     await db.saveJSON(LAST_SYNC_KEY, null);
+    await clearZenCache();
     set({
       token: null,
       serverTimestamp: 0,
@@ -96,7 +124,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     });
   },
 
-  sync: async () => {
+  sync: async (opts = {}) => {
     const token = get().token;
     if (!token) {
       set({ status: "error", error: "Сначала подключите токен" });
@@ -104,19 +132,25 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     }
     set({ status: "syncing", error: null });
     try {
-      // Full sync each time — simpler and always consistent. With ~10k
-      // transactions the response is ~8 MB / ~1 second to download.
-      const diff = await fetchDiff(token, 0);
-      const mapped = mapZenmoneyDiff(diff);
+      // Incremental by default. `force: true` (or no cache yet) → full sync
+      // by sending serverTimestamp=0. The merged cache is then re-mapped
+      // in full so renames/deletions propagate everywhere.
+      const prevCache = opts.force ? null : await loadZenCache();
+      const fromTs = prevCache?.serverTimestamp || 0;
+      const diff = await fetchDiff(token, fromTs);
+      const nextCache = applyDiff(prevCache, diff);
+      await saveZenCache(nextCache);
+      const mapped = mapZenmoneyDiff(cacheToDiffResponse(nextCache));
+      const isFull = fromTs === 0;
 
       // Push transactions + rates into the main data store. setTransactions
       // already runs payee grouping + category rules + recomputes amountBase.
       const meta: ImportMeta = {
         importedAt: new Date().toISOString(),
         fileName: `Zen-мани API · ${mapped.accountsActive} счетов · ${mapped.tagsTotal} тегов`,
-        totalRows: diff.transaction.length,
+        totalRows: nextCache.transactions.length,
         parsed: mapped.transactions.length,
-        skipped: diff.transaction.length - mapped.transactions.length,
+        skipped: nextCache.transactions.length - mapped.transactions.length,
         source: "api",
       };
       // Persist the rates that came with the diff so the next session boots
@@ -149,6 +183,13 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       return {
         count: mapped.transactions.length,
         currentBalance: mapped.currentBalanceTotal,
+        full: isFull,
+        delta: {
+          transactions: diff.transaction?.length || 0,
+          accounts: diff.account?.length || 0,
+          tags: diff.tag?.length || 0,
+          deletions: diff.deletion?.length || 0,
+        },
       };
     } catch (e) {
       let msg: string;

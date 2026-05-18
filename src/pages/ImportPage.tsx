@@ -80,6 +80,23 @@ export function ImportPage() {
   const [tokenVisible, setTokenVisible] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
 
+  function formatSyncResult(r: {
+    count: number;
+    full: boolean;
+    delta: { transactions: number; deletions: number };
+  }): string {
+    if (r.full) return `Полный синк: ${formatNum(r.count)} операций.`;
+    if (r.delta.transactions === 0 && r.delta.deletions === 0) {
+      return `Свежее: ничего нового. Всего ${formatNum(r.count)} операций.`;
+    }
+    const parts: string[] = [];
+    if (r.delta.transactions > 0)
+      parts.push(`+${formatNum(r.delta.transactions)} новых/изменённых`);
+    if (r.delta.deletions > 0)
+      parts.push(`${formatNum(r.delta.deletions)} удалено`);
+    return `Синхронизировано: ${parts.join(", ")}. Всего ${formatNum(r.count)} операций.`;
+  }
+
   async function connectToken() {
     setSyncSuccess(null);
     // Guard: existing CSV data will be replaced by API sync.
@@ -93,10 +110,9 @@ export function ImportPage() {
     const ok = await zenValidateAndSave(tokenDraft);
     if (ok) {
       setTokenDraft("");
-      // Start initial sync right after connect
       try {
-        const r = await zenSync();
-        setSyncSuccess(`Загружено ${formatNum(r.count)} операций из Дзен-мани`);
+        const r = await zenSync({ force: true });
+        setSyncSuccess(formatSyncResult(r));
       } catch {
         /* error already in store */
       }
@@ -107,7 +123,23 @@ export function ImportPage() {
     setSyncSuccess(null);
     try {
       const r = await zenSync();
-      setSyncSuccess(`Синхронизировано: ${formatNum(r.count)} операций`);
+      setSyncSuccess(formatSyncResult(r));
+    } catch {
+      /* error already in store */
+    }
+  }
+
+  async function runFullSync() {
+    setSyncSuccess(null);
+    if (
+      !confirm(
+        "Полный синк сбросит локальный кэш и заново скачает все данные. Используйте, если данные не сходятся или после массовых переименований категорий в Дзен-мани. Продолжить?"
+      )
+    )
+      return;
+    try {
+      const r = await zenSync({ force: true });
+      setSyncSuccess(formatSyncResult(r));
     } catch {
       /* error already in store */
     }
@@ -373,18 +405,28 @@ export function ImportPage() {
                 </span>
               )}
             </div>
-            <button
-              onClick={runSync}
-              disabled={zenStatus === "syncing"}
-              className="btn-primary text-sm ml-auto"
-            >
-              {zenStatus === "syncing" ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="w-3.5 h-3.5" />
-              )}
-              {zenStatus === "syncing" ? "Синхронизирую..." : "Синхронизировать"}
-            </button>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={runFullSync}
+                disabled={zenStatus === "syncing"}
+                className="btn-ghost text-xs text-muted"
+                title="Сбросить локальный кэш и скачать всё заново"
+              >
+                Полный синк
+              </button>
+              <button
+                onClick={runSync}
+                disabled={zenStatus === "syncing"}
+                className="btn-primary text-sm"
+              >
+                {zenStatus === "syncing" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                {zenStatus === "syncing" ? "Синхронизирую..." : "Синхронизировать"}
+              </button>
+            </div>
           </div>
         )}
 
