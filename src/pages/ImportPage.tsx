@@ -229,13 +229,13 @@ export function ImportPage() {
   }
 
   async function importBackup(file: File) {
-    if (!confirm("Восстановить из backup'а? Текущие данные будут заменены.")) return;
+    if (!confirm("Восстановить из бэкапа? Текущие данные будут заменены.")) return;
     setBackupBusy(true);
     setBackupMsg(null);
     try {
       const text = await file.text();
       const dump = JSON.parse(text);
-      if (!dump.version) throw new Error("Не похоже на backup DzenAnalytics");
+      if (!dump.version) throw new Error("Не похоже на бэкап DzenAnalytics");
       if (dump.transactions) await db.saveTransactions(dump.transactions);
       if (dump.rates) await db.saveRates(dump.rates);
       if (dump.importMeta) await db.saveImportMeta(dump.importMeta);
@@ -825,7 +825,7 @@ export function ImportPage() {
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
           <Database className="w-5 h-5 text-accent" />
-          <span className="font-medium">Backup всех данных</span>
+          <span className="font-medium">Бэкап всех данных</span>
         </div>
         <p className="text-xs text-muted mb-3">
           Экспортирует JSON со всеми транзакциями, бюджетами, целями, калибровкой, видами,
@@ -839,7 +839,7 @@ export function ImportPage() {
             className="btn-primary text-sm"
           >
             <Download className="w-4 h-4" />
-            Скачать backup
+            Скачать бэкап
           </button>
           <button
             onClick={() => backupRef.current?.click()}
@@ -847,7 +847,7 @@ export function ImportPage() {
             className="btn-ghost text-sm"
           >
             <Upload className="w-4 h-4" />
-            Восстановить из backup
+            Восстановить из бэкапа
           </button>
           <input
             ref={backupRef}
