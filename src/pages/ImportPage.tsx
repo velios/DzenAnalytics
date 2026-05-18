@@ -13,6 +13,15 @@ import {
   Download,
   Database,
   Percent,
+  Cloud,
+  RefreshCw,
+  Loader2,
+  KeyRound,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Link as LinkIcon,
+  Unlink,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { useDataStore } from "../store/useDataStore";
@@ -23,6 +32,7 @@ import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { formatMoney, formatNum, formatDate } from "../lib/format";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import * as db from "../lib/db";
@@ -50,6 +60,56 @@ export function ImportPage() {
   useEffect(() => {
     if (!inflationLoaded) hydrateInflation();
   }, [inflationLoaded, hydrateInflation]);
+
+  // Zenmoney API sync state
+  const zenToken = useZenmoneyStore((s) => s.token);
+  const zenStatus = useZenmoneyStore((s) => s.status);
+  const zenError = useZenmoneyStore((s) => s.error);
+  const zenLastSyncAt = useZenmoneyStore((s) => s.lastSyncAt);
+  const zenLoaded = useZenmoneyStore((s) => s.loaded);
+  const zenHydrate = useZenmoneyStore((s) => s.hydrate);
+  const zenValidateAndSave = useZenmoneyStore((s) => s.validateAndSaveToken);
+  const zenSync = useZenmoneyStore((s) => s.sync);
+  const zenRemoveToken = useZenmoneyStore((s) => s.removeToken);
+
+  useEffect(() => {
+    if (!zenLoaded) zenHydrate();
+  }, [zenLoaded, zenHydrate]);
+
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [tokenVisible, setTokenVisible] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+
+  async function connectToken() {
+    setSyncSuccess(null);
+    const ok = await zenValidateAndSave(tokenDraft);
+    if (ok) {
+      setTokenDraft("");
+      // Start initial sync right after connect
+      try {
+        const r = await zenSync();
+        setSyncSuccess(`Загружено ${formatNum(r.count)} операций из Дзен-мани`);
+      } catch {
+        /* error already in store */
+      }
+    }
+  }
+
+  async function runSync() {
+    setSyncSuccess(null);
+    try {
+      const r = await zenSync();
+      setSyncSuccess(`Синхронизировано: ${formatNum(r.count)} операций`);
+    } catch {
+      /* error already in store */
+    }
+  }
+
+  async function disconnectToken() {
+    if (!confirm("Отключить токен Дзен-мани? Данные останутся, но автосинк станет недоступен.")) return;
+    await zenRemoveToken();
+    setSyncSuccess(null);
+  }
 
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -188,9 +248,151 @@ export function ImportPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold mb-1">Импорт CSV</h1>
+        <h1 className="text-2xl font-bold mb-1">Загрузка данных</h1>
         <p className="text-muted text-sm">
-          Загрузите выгрузку транзакций из приложения Дзен-мани (формат:{" "}
+          Выберите один из двух способов: онлайн-синхронизация с Дзен-мани по API или
+          импорт CSV-выгрузки. Можно переключаться в любой момент.
+        </p>
+      </div>
+
+      {/* Zenmoney API integration */}
+      <div className="card card-pad border-accent/30 bg-accent/[0.03]">
+        <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+          <div>
+            <div className="font-semibold flex items-center gap-2">
+              <Cloud className="w-4 h-4 text-accent" />
+              Дзен-мани API (онлайн-синхронизация)
+            </div>
+            <p className="text-xs text-muted mt-1 max-w-prose">
+              Качает данные напрямую из вашего аккаунта Дзен-мани. Кроме операций
+              получим также курсы валют, баланс счетов, регулярные платежи и
+              иерархию категорий — без выгрузки CSV.
+            </p>
+          </div>
+          {zenToken && zenStatus !== "syncing" && (
+            <button
+              onClick={disconnectToken}
+              className="btn-ghost text-xs text-muted"
+              title="Удалить токен из браузера"
+            >
+              <Unlink className="w-3.5 h-3.5" />
+              Отключить
+            </button>
+          )}
+        </div>
+
+        {!zenToken ? (
+          <div className="space-y-3">
+            <div className="text-xs text-muted">
+              <KeyRound className="w-3.5 h-3.5 inline align-text-bottom mr-1" />
+              Личный токен — это длинная строка из букв и цифр. Получить можно в{" "}
+              <a
+                href="https://zerro.app/token"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:underline inline-flex items-center gap-0.5"
+              >
+                zerro.app/token <ExternalLink className="w-3 h-3" />
+              </a>{" "}
+              (войдите своим логином от Дзен-мани, скопируйте токен). Хранится только в этом
+              браузере — никуда не отправляется.
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={tokenVisible ? "text" : "password"}
+                  value={tokenDraft}
+                  onChange={(e) => setTokenDraft(e.target.value)}
+                  placeholder="Вставьте токен"
+                  className="input text-sm pr-9 w-full font-mono"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={zenStatus === "checking" || zenStatus === "syncing"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setTokenVisible((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                  title={tokenVisible ? "Скрыть" : "Показать"}
+                >
+                  {tokenVisible ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+              <button
+                onClick={connectToken}
+                disabled={
+                  !tokenDraft.trim() ||
+                  zenStatus === "checking" ||
+                  zenStatus === "syncing"
+                }
+                className="btn-primary text-sm whitespace-nowrap"
+              >
+                {zenStatus === "checking" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : zenStatus === "syncing" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <LinkIcon className="w-3.5 h-3.5" />
+                )}
+                {zenStatus === "checking"
+                  ? "Проверяю..."
+                  : zenStatus === "syncing"
+                    ? "Качаю данные..."
+                    : "Подключить и синхронизировать"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle2 className="w-4 h-4 text-income" />
+              <span className="text-text">Подключено</span>
+              {zenLastSyncAt && (
+                <span className="text-xs text-muted">
+                  · последний синк {new Date(zenLastSyncAt).toLocaleString("ru-RU")}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={runSync}
+              disabled={zenStatus === "syncing"}
+              className="btn-primary text-sm ml-auto"
+            >
+              {zenStatus === "syncing" ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              {zenStatus === "syncing" ? "Синхронизирую..." : "Синхронизировать"}
+            </button>
+          </div>
+        )}
+
+        {zenError && (
+          <div className="mt-3 text-xs text-expense flex items-start gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{zenError}</span>
+          </div>
+        )}
+        {syncSuccess && (
+          <div className="mt-3 text-xs text-income flex items-start gap-2">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{syncSuccess}</span>
+          </div>
+        )}
+      </div>
+
+      {/* CSV import — alternative source */}
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2 px-1">
+          Или загрузить CSV-файл
+        </div>
+        <p className="text-muted text-sm mb-3">
+          Файл выгрузки транзакций из приложения Дзен-мани (формат:{" "}
           <code className="pill">date;categoryName;…</code>).
         </p>
       </div>
