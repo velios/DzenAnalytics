@@ -24,6 +24,7 @@ import {
   Wand2,
   HelpCircle,
   Cloud,
+  HeartPulse,
   Menu,
   X,
 } from "lucide-react";
@@ -41,6 +42,7 @@ const PRIMARY = [
 ];
 
 const SECONDARY = [
+  { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/budgets", label: "Бюджеты", icon: Target },
   { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/calendar", label: "Календарь", icon: CalendarDays },

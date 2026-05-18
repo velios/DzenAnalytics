@@ -26,6 +26,7 @@ import { AnnotationsPage } from "./pages/AnnotationsPage";
 import { HelpPage } from "./pages/HelpPage";
 import { RulesPage } from "./pages/RulesPage";
 import { WordcloudPage } from "./pages/WordcloudPage";
+import { HealthPage } from "./pages/HealthPage";
 import { useDataStore } from "./store/useDataStore";
 import { useThemeStore } from "./store/useThemeStore";
 
@@ -82,6 +83,7 @@ function App() {
             <Route path="/annotations" element={<AnnotationsPage />} />
             <Route path="/help" element={<HelpPage />} />
             <Route path="/rules" element={<RulesPage />} />
+            <Route path="/health" element={<HealthPage />} />
           </Route>
           <Route element={<FilteredLayout />}>
             <Route path="/cashflow" element={<CashflowPage />} />
