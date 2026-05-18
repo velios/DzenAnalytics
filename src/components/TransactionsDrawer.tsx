@@ -336,11 +336,36 @@ interface EditModalProps {
 
 function EditTransactionModal({ tx, onClose }: EditModalProps) {
   const rates = useDataStore((s) => s.rates);
+  const allTransactions = useDataStore((s) => s.transactions);
   const reapply = useDataStore((s) => s.reapplyRules);
   const setEdit = useEditsStore((s) => s.setEdit);
   const clearEdit = useEditsStore((s) => s.clearEdit);
   const existing = useEditsStore((s) => s.edits[tx.id]);
   const hasEdit = !!existing;
+
+  // Collect known categories / subcategories from the dataset so the user can
+  // pick from a list instead of typing free-form (typos break aggregations).
+  // Free-form input is still allowed — that's the value of <datalist>.
+  const { categoryOptions, subcatByCategory } = useMemo(() => {
+    const cats = new Set<string>();
+    const subByCat = new Map<string, Set<string>>();
+    for (const t of allTransactions) {
+      if (!t.category) continue;
+      cats.add(t.category);
+      if (t.subcategory) {
+        let bucket = subByCat.get(t.category);
+        if (!bucket) {
+          bucket = new Set<string>();
+          subByCat.set(t.category, bucket);
+        }
+        bucket.add(t.subcategory);
+      }
+    }
+    return {
+      categoryOptions: Array.from(cats).sort((a, b) => a.localeCompare(b, "ru")),
+      subcatByCategory: subByCat,
+    };
+  }, [allTransactions]);
 
   const [date, setDate] = useState(tx.date);
   const [category, setCategory] = useState(tx.category);
@@ -426,17 +451,42 @@ function EditTransactionModal({ tx, onClose }: EditModalProps) {
             <Field label="Категория">
               <input
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCategory(next);
+                  // If the user picked a new category, the previous subcategory
+                  // probably no longer fits — clear it unless it's still valid.
+                  if (
+                    subcategory &&
+                    !subcatByCategory.get(next)?.has(subcategory)
+                  ) {
+                    setSubcategory("");
+                  }
+                }}
+                list="dz-edit-categories"
                 className="input text-sm w-full"
               />
+              <datalist id="dz-edit-categories">
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
             </Field>
             <Field label="Подкатегория">
               <input
                 value={subcategory}
                 onChange={(e) => setSubcategory(e.target.value)}
                 placeholder="—"
+                list="dz-edit-subcats"
                 className="input text-sm w-full"
               />
+              <datalist id="dz-edit-subcats">
+                {Array.from(subcatByCategory.get(category) || [])
+                  .sort((a, b) => a.localeCompare(b, "ru"))
+                  .map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+              </datalist>
             </Field>
           </div>
           <Field label="Получатель">
