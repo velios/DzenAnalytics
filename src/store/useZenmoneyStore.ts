@@ -25,6 +25,40 @@ const LAST_SYNC_KEY = "zenmoneyLastSyncAt";
 
 export type SyncStatus = "idle" | "checking" | "syncing" | "ok" | "error";
 
+export interface LiveAccount {
+  /** Account title — matches Transaction.account / outcomeAccount / incomeAccount. */
+  title: string;
+  /** Current balance in the account's native currency. */
+  balance: number;
+  /** ISO short code of the account's native currency. */
+  currency: string;
+  /** Account type from Zenmoney (ccard / debit / cash / loan / deposit / …). */
+  type: string;
+  /** True for accounts archived in Zenmoney. We surface these last/dimmed. */
+  archive: boolean;
+  /** Whether Zenmoney itself includes this account in the user's net worth. */
+  inBalance: boolean;
+}
+
+/**
+ * Returns the live per-account snapshot from the local Zenmoney cache, or null
+ * if the cache is empty / user is in CSV mode. Reading from cache happens
+ * lazily — call this from a hook or `useEffect`.
+ */
+export async function getLiveAccountsFromCache(): Promise<LiveAccount[] | null> {
+  const cache = await loadZenCache();
+  if (!cache) return null;
+  const instrumentsById = new Map(cache.instruments.map((i) => [i.id, i]));
+  return cache.accounts.map((a) => ({
+    title: a.title,
+    balance: a.balance || 0,
+    currency: instrumentsById.get(a.instrument)?.shortTitle || "RUB",
+    type: a.type,
+    archive: a.archive,
+    inBalance: a.inBalance,
+  }));
+}
+
 export interface SyncResult {
   count: number;
   currentBalance: number;

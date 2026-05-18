@@ -45,7 +45,12 @@ import {
   dailyExpenseMap,
   buildForecast,
   applyCategoryFlags,
+  balancesByAccount,
 } from "../lib/aggregations";
+import {
+  getLiveAccountsFromCache,
+  type LiveAccount,
+} from "../store/useZenmoneyStore";
 import {
   formatMoney,
   formatNum,
@@ -263,6 +268,57 @@ export function DashboardPage() {
     return applyCategoryFlags(lastTxs, fixed, disc);
   }, [flags, months, transactions]);
   const dayMap = useMemo(() => dailyExpenseMap(transactions), [transactions]);
+
+  // Account balances. If the Zenmoney cache is present, prefer real
+  // per-account balances from the API (they include startBalance and any
+  // server-side reconciliation). Otherwise fall back to the CSV-style
+  // flow-derived totals.
+  const [liveAccounts, setLiveAccounts] = useState<LiveAccount[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getLiveAccountsFromCache().then((data) => {
+      if (!cancelled) setLiveAccounts(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
+  const baseRates = useDataStore((s) => s.rates);
+  const accountRows = useMemo(() => {
+    if (liveAccounts && liveAccounts.length > 0) {
+      // Convert to base currency and sort by |balance| desc.
+      return liveAccounts
+        .filter((a) => a.inBalance && !a.archive)
+        .map((a) => ({
+          title: a.title,
+          balanceBase:
+            a.currency === baseRates.base
+              ? a.balance
+              : a.balance * (baseRates.rates[a.currency] || 1),
+          nativeBalance: a.balance,
+          nativeCurrency: a.currency,
+          type: a.type,
+        }))
+        .sort((a, b) => Math.abs(b.balanceBase) - Math.abs(a.balanceBase));
+    }
+    return balancesByAccount(transactions).map((a) => ({
+      title: a.account,
+      balanceBase: a.balance,
+      nativeBalance: a.balance,
+      nativeCurrency: base,
+      type: "",
+    }));
+  }, [liveAccounts, transactions, base, baseRates]);
+  const [showAllAccounts, setShowAllAccounts] = useState(false);
+  function openAccount(title: string) {
+    const txs = transactions.filter(
+      (t) =>
+        t.account === title ||
+        t.outcomeAccount === title ||
+        t.incomeAccount === title
+    );
+    showDrill(title, txs, "Операции по счёту");
+  }
 
   if (transactions.length === 0) return <EmptyState />;
 
@@ -669,6 +725,73 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Account balances */}
+      {accountRows.length > 0 && (
+        <div className="card card-pad">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="font-semibold flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-accent" />
+              Балансы счетов{" "}
+              <span className="text-muted text-xs font-normal">
+                {liveAccounts && liveAccounts.length > 0
+                  ? "· реальные из Дзен-мани"
+                  : "· по данным операций"}
+              </span>
+            </div>
+            <Link
+              to="/accounts"
+              className="text-xs text-accent hover:underline flex items-center gap-1"
+            >
+              все <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+            {(showAllAccounts ? accountRows : accountRows.slice(0, 8)).map((a) => {
+              const isNegative = a.balanceBase < 0;
+              const hasFx = a.nativeCurrency !== base;
+              return (
+                <button
+                  key={a.title}
+                  onClick={() => openAccount(a.title)}
+                  className="text-left p-3 rounded-lg border border-border bg-panel2/30 hover:bg-panel2/70 hover:border-accent/50 transition-colors group"
+                >
+                  <div
+                    className="text-xs text-muted truncate mb-1"
+                    title={a.title}
+                  >
+                    {a.title}
+                  </div>
+                  <div
+                    className={`font-semibold tabular-nums text-sm ${
+                      isNegative ? "text-expense" : "text-text"
+                    } group-hover:text-accent`}
+                  >
+                    {formatMoney(a.balanceBase, base, { compact: true })}
+                  </div>
+                  {hasFx && (
+                    <div className="text-[10px] text-muted tabular-nums mt-0.5">
+                      {formatMoney(a.nativeBalance, a.nativeCurrency, {
+                        compact: true,
+                      })}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {accountRows.length > 8 && (
+            <button
+              onClick={() => setShowAllAccounts((v) => !v)}
+              className="btn-ghost text-xs mt-3 mx-auto block text-muted"
+            >
+              {showAllAccounts
+                ? "Свернуть"
+                : `Показать ещё ${accountRows.length - 8}`}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card card-pad">
