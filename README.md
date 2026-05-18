@@ -356,10 +356,10 @@ worker.
 
 ### Visualization
 - **Recharts** — все графики (line/area/bar/pie/treemap/sankey/radar)
-- Кастомные компоненты:
-  - `Sparkline` — мини-линии в карточках счетов
-  - `MiniHeatmap` — компактная тепловая карта 90 дней
-  - `HourOfWeekHeatmap` — 24×7 матрица в Trends
+- Кастомные SVG-компоненты:
+  - `Sparkline` (отдельный компонент) — мини-линии в карточках счетов
+  - `MiniHeatmap` (inline в DashboardPage) — компактная тепловая карта 90 дней
+  - `HourOfWeekHeatmap` (inline в TrendsPage) — 24×7 матрица
 
 ### Data
 - **PapaParse** — парсинг CSV
@@ -383,88 +383,129 @@ worker.
 ```
 DzenAnalytics/
 ├── src/
-│   ├── pages/              # 23 маршрута
-│   │   ├── DashboardPage.tsx          # / — главный дашборд
-│   │   ├── CashflowPage.tsx           # /cashflow
-│   │   ├── CategoriesPage.tsx         # /categories
-│   │   ├── AccountsPage.tsx           # /accounts
-│   │   ├── TrendsPage.tsx             # /trends
-│   │   ├── BudgetsPage.tsx            # /budgets
-│   │   ├── GoalsPage.tsx              # /goals + FIRE
-│   │   ├── HealthPage.tsx             # /health — здоровье 0–100
-│   │   ├── WhatIfPage.tsx             # /whatif — что-если сценарии
-│   │   ├── YearReviewPage.tsx         # /year-review — итог года
-│   │   ├── DigestPage.tsx             # /digest — дайджесты недель/месяцев
-│   │   ├── CalendarPage.tsx           # /calendar
-│   │   ├── TopPage.tsx                # /top
-│   │   ├── TagsPage.tsx               # /tags
-│   │   ├── WordcloudPage.tsx          # /wordcloud
-│   │   ├── RecurringPage.tsx          # /recurring
-│   │   ├── AnomaliesPage.tsx          # /anomalies
-│   │   ├── DuplicatesPage.tsx         # /duplicates
-│   │   ├── UncategorizedPage.tsx      # /uncategorized
-│   │   ├── SankeyPage.tsx             # /sankey
-│   │   ├── AnnotationsPage.tsx        # /annotations
-│   │   ├── ComparePage.tsx            # /compare
-│   │   ├── SearchPage.tsx             # /search
-│   │   ├── RulesPage.tsx              # /rules
-│   │   ├── HelpPage.tsx               # /help
-│   │   └── ImportPage.tsx             # /import
-│   ├── components/         # переиспользуемые компоненты
+│   ├── pages/                         # 26 маршрутов
+│   │   │
+│   │   │   # Основное (top-nav)
+│   │   ├── DashboardPage.tsx          # /              главный дашборд
+│   │   ├── CashflowPage.tsx           # /cashflow      cash-flow, прогноз, waterfall, stream
+│   │   ├── CategoriesPage.tsx         # /categories    donut + treemap + bar + флаги 🔒/☕
+│   │   ├── TrendsPage.tsx             # /trends        дни недели, час недели, radar
+│   │   ├── GoalsPage.tsx              # /goals         цели накопления + блок FIRE
+│   │   │
+│   │   │   # Планирование и подушки
+│   │   ├── BudgetsPage.tsx            # /budgets       месячные лимиты по категориям
+│   │   ├── AccountsPage.tsx           # /accounts      счета + калибровка совокупного баланса
+│   │   ├── RecurringPage.tsx          # /recurring     авто-детект подписок и платежей
+│   │   │
+│   │   │   # Здоровье и сценарии (v0.2.0)
+│   │   ├── HealthPage.tsx             # /health        интегральный score 0–100, A+…E
+│   │   ├── WhatIfPage.tsx             # /whatif        слайдеры → real-time пересчёт
+│   │   │
+│   │   │   # Отчёты (v0.2.0)
+│   │   ├── YearReviewPage.tsx         # /year-review   итоги года + PNG-экспорт
+│   │   ├── DigestPage.tsx             # /digest        дайджесты недель/месяцев
+│   │   │
+│   │   │   # Аналитика и срезы
+│   │   ├── CalendarPage.tsx           # /calendar      GitHub-style тепловая карта года
+│   │   ├── TopPage.tsx                # /top           топ-категории/получатели/операции
+│   │   ├── ComparePage.tsx            # /compare       сравнение двух периодов
+│   │   ├── SankeyPage.tsx             # /sankey        потоки доход → расход
+│   │   ├── TagsPage.tsx               # /tags          хэштеги из комментариев
+│   │   ├── WordcloudPage.tsx          # /wordcloud     облако слов в комментариях
+│   │   │
+│   │   │   # Качество данных
+│   │   ├── AnomaliesPage.tsx          # /anomalies     z-score > 2.5σ + MoM-всплески
+│   │   ├── DuplicatesPage.tsx         # /duplicates    похожие операции
+│   │   ├── UncategorizedPage.tsx      # /uncategorized дыры + smart suggestions
+│   │   │
+│   │   │   # Прочее
+│   │   ├── AnnotationsPage.tsx        # /annotations   заметки на временной шкале
+│   │   ├── RulesPage.tsx              # /rules         правила категоризации
+│   │   ├── SearchPage.tsx             # /search        глобальный полнотекст
+│   │   ├── HelpPage.tsx               # /help          встроенная справка по меню
+│   │   └── ImportPage.tsx             # /import        импорт CSV + настройки + backup
+│   │
+│   ├── components/                    # 11 переиспользуемых компонентов
 │   │   ├── TopNav.tsx                 # шапка с брендовым лого
 │   │   ├── GlobalFilters.tsx          # фильтры с шевронами месяцев + saved views
 │   │   ├── TransactionsDrawer.tsx     # fullscreen drawer для drill-down
 │   │   ├── SortableTable.tsx          # сортируемая таблица + CSV-экспорт
-│   │   ├── CommandPalette.tsx         # ⌘K палитра
+│   │   ├── CommandPalette.tsx         # ⌘K палитра + горячие клавиши
 │   │   ├── QuickCalibration.tsx       # баннер калибровки
-│   │   ├── InsightsPanel.tsx          # авто-наблюдения
+│   │   ├── InsightsPanel.tsx          # авто-наблюдения на главной
 │   │   ├── ThemeSwitcher.tsx          # светлая/тёмная/авто
-│   │   ├── Sparkline.tsx              # SVG мини-линия
+│   │   ├── Sparkline.tsx              # SVG-мини-линия (в карточках счетов)
 │   │   ├── Stat.tsx                   # KPI-карточка
 │   │   └── EmptyState.tsx             # «нет данных»
-│   ├── store/              # Zustand-сторы
+│   │
+│   ├── store/                         # 12 Zustand-сторов (все персистятся в IndexedDB)
 │   │   ├── useDataStore.ts            # transactions + rates + base currency
-│   │   ├── useFiltersStore.ts         # период/счета/категории/поиск
+│   │   ├── useFiltersStore.ts         # период / счета / категории / поиск
 │   │   ├── useDrillStore.ts           # drawer state
-│   │   ├── useThemeStore.ts           # тема
-│   │   ├── useBudgetsStore.ts
-│   │   ├── useGoalsStore.ts
-│   │   ├── useCalibrationStore.ts
-│   │   ├── useSavedViewsStore.ts
-│   │   ├── useAnnotationsStore.ts
-│   │   ├── useCategoryFlagsStore.ts
-│   │   ├── useCategoryRulesStore.ts
-│   │   └── useInflationStore.ts
-│   ├── lib/
-│   │   ├── aggregations.ts            # все группировки и расчёты
-│   │   ├── health.ts                  # финансовое здоровье
-│   │   ├── whatif.ts                  # что-если симулятор
+│   │   ├── useThemeStore.ts           # тема + auto-by-time
+│   │   ├── useBudgetsStore.ts         # лимиты по категориям
+│   │   ├── useGoalsStore.ts           # цели накопления
+│   │   ├── useCalibrationStore.ts     # калибровка совокупного баланса
+│   │   ├── useSavedViewsStore.ts      # сохранённые комбинации фильтров
+│   │   ├── useAnnotationsStore.ts     # заметки на временной шкале
+│   │   ├── useCategoryFlagsStore.ts   # флаги 🔒/☕
+│   │   ├── useCategoryRulesStore.ts   # правила перезаписи категорий
+│   │   └── useInflationStore.ts       # CPI по годам + поправка
+│   │
+│   ├── lib/                           # чистая логика, без React
+│   │   ├── aggregations.ts            # все группировки и расчёты (~30 экспортов)
+│   │   ├── health.ts                  # финансовое здоровье (5 компонентов)
+│   │   ├── whatif.ts                  # what-if симулятор
 │   │   ├── yearReview.ts              # годовой отчёт
 │   │   ├── digest.ts                  # дайджесты недель/месяцев
-│   │   ├── csv.ts                     # парсер CSV
-│   │   ├── db.ts                      # IndexedDB обёртка
-│   │   ├── format.ts                  # форматирование чисел/дат/валют
+│   │   ├── csv.ts                     # парсер Дзен-мани CSV
+│   │   ├── db.ts                      # IndexedDB через `idb`
+│   │   ├── format.ts                  # числа / даты / валюты / темовые цвета
 │   │   └── payeeNormalize.ts          # fuzzy-grouping получателей
+│   │
 │   ├── assets/
-│   │   └── logo-mark.svg              # брендовый mark (инлайнится при сборке)
-│   ├── App.tsx
-│   ├── main.tsx
-│   ├── types.ts
-│   └── index.css
-├── public/                 # favicon-набор + лого + PWA-манифест
+│   │   └── logo-mark.svg              # брендовый mark (инлайнится Vite в standalone)
+│   │
+│   ├── App.tsx                        # роутер (BrowserRouter↔HashRouter авто)
+│   ├── main.tsx                       # entrypoint + SW registration
+│   ├── types.ts                       # глобальные типы (Transaction, RawRow, …)
+│   └── index.css                      # Tailwind + CSS-переменные тем
+│
+├── public/                            # статика, отдаётся «как есть» из корня сайта
+│   ├── favicon.svg                    # векторный фавикон
+│   ├── favicon-16.png / -32.png / -48.png
+│   ├── apple-touch-icon.png           # 180×180 для iOS home screen
+│   ├── icon-192.png / icon-512.png    # PWA-иконки (maskable)
+│   ├── logo-{horizontal,horizontal-dark,mark,mark-light,mark-mono,wordmark}.svg
+│   ├── manifest.webmanifest           # PWA-манифест с брендовыми цветами
+│   └── sw.js                          # service worker (offline-кеш)
+│
 ├── scripts/
 │   ├── build-release.js               # собирает release/*.zip standalone-релиза
 │   └── gen-demo-csv.mjs               # генерирует синтетический демо-CSV
+│
 ├── sample/
-│   └── demo-2021-2026.csv             # синтетические данные за 5 лет
-├── docs/assets/
-│   └── banner.png                     # README-баннер
-├── package.json
-├── tsconfig.json
-├── tailwind.config.js
-├── vite.config.ts
-└── README.md
+│   └── demo-2021-2026.csv             # синтетические данные за 5 лет (~7 500 операций)
+│
+├── docs/
+│   └── assets/
+│       └── banner.png                 # README-баннер
+│
+├── index.html                         # template для Vite
+├── vite.config.ts                     # base, singlefile-плагин, инлайн ассетов
+├── tsconfig.json                      # references → app + node
+├── tsconfig.app.json                  # src/ под bundler-режим
+├── tsconfig.node.json                 # для конфигов vite/eslint
+├── tailwind.config.js                 # темы через CSS-переменные
+├── postcss.config.js                  # tailwind + autoprefixer
+├── eslint.config.js                   # flat-config, react-hooks + typescript-eslint
+├── package.json                       # скрипты: dev / build / build:standalone / release:zip
+├── LICENSE                            # MIT
+└── README.md                          # этот файл
 ```
+
+Не в git: `node_modules/`, `dist/` (обычная сборка), `dist-standalone/` (standalone),
+`release/` (готовые zip-архивы).
 
 ---
 
