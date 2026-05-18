@@ -39,18 +39,19 @@ import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
 const PRIMARY = [
   { to: "/", label: "Главная", icon: LayoutDashboard },
   { to: "/cashflow", label: "Cash-flow", icon: LineChart },
+  { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/categories", label: "Категории", icon: PieChart },
   { to: "/trends", label: "Тренды", icon: Activity },
+  { to: "/goals", label: "Цели", icon: Target },
+  { to: "/help", label: "Справка", icon: HelpCircle },
 ];
 
 const SECONDARY = [
-  { to: "/goals", label: "Цели", icon: Target },
   { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/whatif", label: "Что-если", icon: FlaskConical },
   { to: "/year-review", label: "Год в цифрах", icon: Sparkles },
   { to: "/digest", label: "Дайджест", icon: Newspaper },
   { to: "/budgets", label: "Бюджеты", icon: Target },
-  { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/calendar", label: "Календарь", icon: CalendarDays },
   { to: "/sankey", label: "Потоки", icon: GitFork },
   { to: "/anomalies", label: "Аномалии", icon: Zap },
@@ -63,7 +64,6 @@ const SECONDARY = [
   { to: "/compare", label: "Сравнение", icon: GitCompare },
   { to: "/top", label: "Топ", icon: TrendingUp },
   { to: "/rules", label: "Правила", icon: Wand2 },
-  { to: "/help", label: "Справка", icon: HelpCircle },
 ];
 
 export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
