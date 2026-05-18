@@ -125,7 +125,10 @@ export function CashflowPage() {
     const lastDayOfPrevMonth = (() => {
       const [y, m] = waterfallYM.split("-").map(Number);
       const prev = new Date(y, m - 1, 0);
-      return prev.toISOString().slice(0, 10);
+      const yyyy = prev.getFullYear();
+      const mm = String(prev.getMonth() + 1).padStart(2, "0");
+      const dd = String(prev.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
     })();
     const rawAtStart = cumulativeNetAt(transactions, lastDayOfPrevMonth);
     const offset =

@@ -47,7 +47,8 @@ export function WordcloudPage() {
   }
 
   function openWord(w: WordcloudWord) {
-    const re = new RegExp(`(^|\\s|[.,!?;:#-])${w.text}($|[.,!?;:\\s-])`, "iu");
+    const escaped = w.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(^|\\s|[.,!?;:#-])${escaped}($|[.,!?;:\\s-])`, "iu");
     const txs = filtered.filter((t) => t.comment && re.test(t.comment));
     showDrill(`«${w.text}»`, txs, "Слово в комментариях");
   }

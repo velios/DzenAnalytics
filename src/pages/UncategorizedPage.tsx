@@ -26,6 +26,7 @@ export function UncategorizedPage() {
   const share = allTotal > 0 ? total / allTotal : 0;
 
   const addRule = useCategoryRulesStore((s) => s.add);
+  const addManyRules = useCategoryRulesStore((s) => s.addMany);
   const rulesLoaded = useCategoryRulesStore((s) => s.loaded);
   const rulesHydrate = useCategoryRulesStore((s) => s.hydrate);
   const reapplyRules = useDataStore((s) => s.reapplyRules);
@@ -65,20 +66,21 @@ export function UncategorizedPage() {
     if (confident.length === 0) return;
     if (!confirm(`Создать ${confident.length} правил автоматически?`)) return;
     setBusy(true);
-    const newIds = new Set(appliedIds);
-    for (const s of confident) {
-      if (!s.payee) continue;
-      await addRule({
+    await addManyRules(
+      confident.map((s) => ({
         enabled: true,
         field: "payee",
         op: "contains",
         value: s.payee,
         caseInsensitive: true,
         category: s.suggested,
-      });
-      newIds.add(s.txId);
-    }
-    setAppliedIds(newIds);
+      }))
+    );
+    setAppliedIds((prev) => {
+      const next = new Set(prev);
+      for (const s of confident) next.add(s.txId);
+      return next;
+    });
     await reapplyRules();
     setBusy(false);
   }

@@ -32,8 +32,12 @@ interface Props<T> {
 
 function csvEscape(v: unknown): string {
   if (v === null || v === undefined) return "";
-  const s = String(v);
-  if (s.includes(";") || s.includes('"') || s.includes("\n")) {
+  let s = String(v);
+  // Defuse CSV/spreadsheet formula injection: prefix risky leading chars with '
+  if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
+    s = "'" + s;
+  }
+  if (s.includes(";") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
