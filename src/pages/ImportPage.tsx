@@ -36,6 +36,7 @@ export function ImportPage() {
   const clearAll = useDataStore((s) => s.clearAll);
   const rates = useDataStore((s) => s.rates);
   const setRate = useDataStore((s) => s.setRate);
+  const setBase = useDataStore((s) => s.setBase);
   const transactions = useDataStore((s) => s.transactions);
   const meta = useDataStore((s) => s.importMeta);
   const payeeGrouping = useDataStore((s) => s.payeeGroupingEnabled);
@@ -516,6 +517,30 @@ export function ImportPage() {
           Используются для сведения операций в разных валютах в единую базу. Меняйте здесь, если
           нужны точные курсы. Все суммы пересчитываются автоматически.
         </p>
+        <div className="mb-4">
+          <label className="label block mb-1">Базовая валюта</label>
+          <div className="flex items-center gap-2">
+            <select
+              value={rates.base}
+              onChange={(e) => {
+                const next = e.target.value;
+                setBase(next).catch((err: Error) => alert(err.message));
+              }}
+              className="input text-sm"
+            >
+              {Object.keys(rates.rates)
+                .sort()
+                .map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+            </select>
+            <span className="text-xs text-muted">
+              В этой валюте показываются все KPI и графики
+            </span>
+          </div>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {Object.entries(rates.rates).map(([cur, val]) => (
             <div key={cur}>

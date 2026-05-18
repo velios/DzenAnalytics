@@ -4,9 +4,17 @@ import type { Currency } from "../types";
 const symbolByCurrency: Record<string, string> = {
   RUB: "₽",
   USD: "$",
-  CNY: "¥",
-  TRY: "₺",
   EUR: "€",
+  GBP: "£",
+  CNY: "¥",
+  JPY: "¥",
+  KZT: "₸",
+  BYN: "Br",
+  GEL: "₾",
+  AMD: "֏",
+  AED: "د.إ",
+  TRY: "₺",
+  THB: "฿",
 };
 
 export function formatMoney(amount: number, currency: Currency = "RUB", opts?: { compact?: boolean; signed?: boolean }): string {
