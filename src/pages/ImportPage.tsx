@@ -36,7 +36,8 @@ import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
-import { formatMoney, formatNum, formatDate } from "../lib/format";
+import { Combobox } from "../components/Combobox";
+import { formatNum, formatDate } from "../lib/format";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import * as db from "../lib/db";
 
@@ -621,18 +622,29 @@ export function ImportPage() {
               </div>
             </div>
           </div>
-          <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
-            <button
-              onClick={async () => {
-                if (confirm("Удалить все загруженные транзакции?")) {
-                  await clearAll();
-                }
-              }}
-              className="btn-danger text-xs"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Очистить данные
-            </button>
+          <div className="mt-4 pt-4 border-t border-border flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <button
+                onClick={async () => {
+                  if (
+                    confirm(
+                      "Удалить все локально сохранённые транзакции из этого браузера?\n\nДанные в Дзен-мани НЕ пострадают — мы вообще ничего туда не пишем."
+                    )
+                  ) {
+                    await clearAll();
+                  }
+                }}
+                className="btn-danger text-xs"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Очистить локальные данные
+              </button>
+              <div className="text-[11px] text-muted mt-2 max-w-prose">
+                Удалит только локальную копию операций в этом браузере.{" "}
+                <strong className="text-text">Данные в облаке Дзен-мани не трогаем</strong>
+                {" "}— приложение работает в режиме «только чтение» из API и ничего туда не пишет.
+              </div>
+            </div>
             <button onClick={() => nav("/")} className="btn-primary text-sm">
               Открыть аналитику →
             </button>
@@ -657,22 +669,17 @@ export function ImportPage() {
         <div className={zenToken ? "" : "mb-4"}>
           <label className="label block mb-1">Базовая валюта</label>
           <div className="flex items-center gap-2">
-            <select
-              value={rates.base}
-              onChange={(e) => {
-                const next = e.target.value;
-                setBase(next).catch((err: Error) => alert(err.message));
-              }}
-              className="input text-sm"
-            >
-              {Object.keys(rates.rates)
-                .sort()
-                .map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-            </select>
+            <div className="w-32">
+              <Combobox
+                value={rates.base}
+                options={Object.keys(rates.rates).sort()}
+                onChange={(next) => {
+                  setBase(next).catch((err: Error) => alert(err.message));
+                }}
+                allowCustom={false}
+                maxHeight="min(40vh, 280px)"
+              />
+            </div>
             <span className="text-xs text-muted">
               В этой валюте показываются все KPI и графики
             </span>
@@ -909,50 +916,6 @@ export function ImportPage() {
         </div>
       </div>
 
-      {transactions.length > 0 && (
-        <div className="card card-pad">
-          <div className="font-medium mb-3">Превью (последние 10 операций)</div>
-          <div className="overflow-x-auto -mx-2">
-            <table className="w-full text-sm">
-              <thead>
-                <tr>
-                  <th className="table-th">Дата</th>
-                  <th className="table-th">Категория</th>
-                  <th className="table-th">Получатель</th>
-                  <th className="table-th text-right">Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions
-                  .slice()
-                  .sort((a, b) => b.date.localeCompare(a.date))
-                  .slice(0, 10)
-                  .map((t) => (
-                    <tr key={t.id}>
-                      <td className="table-td whitespace-nowrap text-muted">
-                        {formatDate(t.date, "short")}
-                      </td>
-                      <td className="table-td truncate max-w-[200px]">{t.categoryFull}</td>
-                      <td className="table-td truncate max-w-[200px]">{t.payee || "—"}</td>
-                      <td
-                        className={`table-td text-right font-medium tabular-nums ${
-                          t.kind === "income"
-                            ? "text-income"
-                            : t.kind === "expense"
-                              ? "text-expense"
-                              : ""
-                        }`}
-                      >
-                        {t.kind === "income" ? "+" : t.kind === "expense" ? "−" : ""}
-                        {formatMoney(t.amount, t.currency)}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

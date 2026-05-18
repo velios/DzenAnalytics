@@ -10,12 +10,11 @@ import {
   Pencil,
   RotateCcw,
   Save,
-  ChevronDown,
 } from "lucide-react";
-import { useRef } from "react";
 import { useDrillStore } from "../store/useDrillStore";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
+import { Combobox } from "./Combobox";
 import { formatMoney, formatDate } from "../lib/format";
 import type { Transaction } from "../types";
 
@@ -585,125 +584,6 @@ function Field({
     <div>
       <label className="label block mb-1">{label}</label>
       {children}
-    </div>
-  );
-}
-
-interface ComboboxProps {
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-  placeholder?: string;
-}
-
-/**
- * Simple text input + filterable dropdown. Solves three things <datalist>
- * couldn't:
- *   - Click the chevron OR click on a non-empty value still opens the list
- *     (so the user doesn't have to clear the field to pick a different one).
- *   - Bounded height: list maxes out at ~50vh with internal scroll, not the
- *     full viewport.
- *   - Custom values are still allowed — typing something not in the list
- *     just sets that as the value.
- */
-function Combobox({ value, options, onChange, placeholder }: ComboboxProps) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState(value);
-  // Only apply the substring filter when the user has actively typed *after*
-  // opening (so clicking the chevron on a populated field shows ALL options,
-  // not just the one matching the current value).
-  const [filtering, setFiltering] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Keep input in sync when parent updates value externally.
-  useEffect(() => {
-    setQuery(value);
-  }, [value]);
-
-  // Close on outside click.
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-
-  const filtered = useMemo(() => {
-    if (!filtering) return options;
-    const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => o.toLowerCase().includes(q));
-  }, [filtering, query, options]);
-
-  function commit(next: string) {
-    setQuery(next);
-    onChange(next);
-    setFiltering(false);
-    setOpen(false);
-  }
-
-  return (
-    <div ref={containerRef} className="relative">
-      <div className="relative">
-        <input
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            onChange(e.target.value);
-            setFiltering(true);
-            if (!open) setOpen(true);
-          }}
-          onFocus={() => {
-            setFiltering(false);
-            setOpen(true);
-          }}
-          onClick={() => {
-            setFiltering(false);
-            setOpen(true);
-          }}
-          placeholder={placeholder}
-          className="input text-sm w-full pr-7"
-        />
-        <button
-          type="button"
-          onMouseDown={(e) => {
-            // mouseDown to avoid losing focus before toggle
-            e.preventDefault();
-            setFiltering(false);
-            setOpen((v) => !v);
-          }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-          tabIndex={-1}
-        >
-          <ChevronDown
-            className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`}
-          />
-        </button>
-      </div>
-      {open && filtered.length > 0 && (
-        <div
-          className="absolute z-10 mt-1 w-full bg-panel border border-border rounded-lg shadow-lg overflow-y-auto"
-          style={{ maxHeight: "min(50vh, 320px)" }}
-        >
-          {filtered.map((opt) => {
-            const isCurrent = opt === value;
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => commit(opt)}
-                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-panel2 ${
-                  isCurrent ? "bg-panel2/60 text-accent" : ""
-                }`}
-              >
-                {opt}
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
