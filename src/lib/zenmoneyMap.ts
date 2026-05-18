@@ -134,31 +134,46 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       account = inAcc?.title || "";
     }
 
-    let cat = buildCategory(zt.tag, tagsById);
-    // Force consistent labels for two special cases:
-    // 1) Transfers between accounts — Zenmoney typically leaves them untagged
-    //    so they end up as "Без категории"; we surface a clear "Перевод" instead.
-    // 2) Operations on a loan/credit account — those are debt activity (taking
-    //    on / paying off the loan). Override to "Долг" regardless of tag.
-    if (isTransfer) {
-      cat = { category: "Перевод", subcategory: null, full: "Перевод" };
-    } else {
-      const outIsDebt = outAcc?.type === "loan" || outAcc?.type === "credit" || outAcc?.type === "debt";
-      const inIsDebt = inAcc?.type === "loan" || inAcc?.type === "credit" || inAcc?.type === "debt";
-      if ((kind === "expense" && outIsDebt) || (kind === "income" && inIsDebt)) {
-        cat = { category: "Долг", subcategory: null, full: "Долг" };
-      }
+    const cat = buildCategory(zt.tag, tagsById);
+    // Display-only overrides. The transaction's tag/category from Zenmoney is
+    // preserved in `*Original` fields below (for category rules to match
+    // against), but the visible `category` / `categoryFull` are forced to our
+    // local-only labels for two systemically-miscategorised cases:
+    //
+    //   "Долг"    — anything touching a loan/credit/debt account, including
+    //               transfers in or out of that account (paying off, taking
+    //               on, paying interest, etc.). Takes priority over Перевод
+    //               so loan payments don't look like generic transfers.
+    //   "Перевод" — kind=transfer that doesn't involve a debt account.
+    //
+    // These never round-trip to Zenmoney — there's no push code path. The
+    // original tag is kept in `*Original` for rules, search, and reset.
+    const DEBT_TYPES = ["loan", "credit", "debt"];
+    const involvesDebt =
+      DEBT_TYPES.includes(outAcc?.type || "") ||
+      DEBT_TYPES.includes(inAcc?.type || "");
+    let display = cat;
+    if (involvesDebt) {
+      display = { category: "Долг", subcategory: null, full: "Долг" };
+    } else if (isTransfer) {
+      display = { category: "Перевод", subcategory: null, full: "Перевод" };
     }
 
+    // `applyCategoryRules` later in the pipeline resets `category` to
+    // `categoryOriginal` whenever no enabled rule matches, so to keep our
+    // local "Перевод"/"Долг" labels visible we have to write them into the
+    // original fields too. That's fine because in practice the source Zen
+    // tag for these flows is empty/"Без категории" anyway — nothing of value
+    // gets shadowed. None of this leaves the device: there's no push code.
     txs.push({
       id: zt.id,
       date: zt.date,
-      category: cat.category,
-      subcategory: cat.subcategory,
-      categoryFull: cat.full,
-      categoryOriginal: cat.category,
-      subcategoryOriginal: cat.subcategory,
-      categoryFullOriginal: cat.full,
+      category: display.category,
+      subcategory: display.subcategory,
+      categoryFull: display.full,
+      categoryOriginal: display.category,
+      subcategoryOriginal: display.subcategory,
+      categoryFullOriginal: display.full,
       payee: zt.payee || "",
       payeeOriginal: zt.payee || "",
       comment: zt.comment || "",

@@ -254,7 +254,12 @@ export function TransactionsDrawer() {
                 {sorted.map((t) => {
                   const isEdited = !!edits[t.id];
                   return (
-                  <tr key={t.id} className="hover:bg-panel2/40 align-top group">
+                  <tr
+                    key={t.id}
+                    onDoubleClick={() => setEditing(t)}
+                    className="hover:bg-panel2/40 align-top group cursor-pointer"
+                    title="Двойной клик — редактировать"
+                  >
                     <td className="table-td whitespace-nowrap text-muted">
                       {formatDate(t.date, "short")}
                     </td>

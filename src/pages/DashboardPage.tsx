@@ -721,12 +721,7 @@ export function DashboardPage() {
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div className="font-semibold flex items-center gap-2">
               <Wallet className="w-4 h-4 text-accent" />
-              Балансы счетов{" "}
-              <span className="text-muted text-xs font-normal">
-                {liveAccounts && liveAccounts.length > 0
-                  ? "· из Дзен-мани"
-                  : "· по операциям"}
-              </span>
+              Балансы счетов
             </div>
             <Link
               to="/accounts"
