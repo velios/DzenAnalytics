@@ -59,7 +59,7 @@ const SECTIONS: Section[] = [
     id: "page-dashboard",
     group: "main",
     icon: LayoutDashboard,
-    title: "Главная (/)",
+    title: "Главная",
     body: (
       <>
         <p>
@@ -109,7 +109,7 @@ const SECTIONS: Section[] = [
     id: "page-cashflow",
     group: "main",
     icon: LineChart,
-    title: "Cash-flow (/cashflow)",
+    title: "Cash-flow",
     body: (
       <>
         <p>
@@ -149,7 +149,7 @@ const SECTIONS: Section[] = [
     id: "page-categories",
     group: "main",
     icon: PieChart,
-    title: "Категории (/categories)",
+    title: "Категории",
     body: (
       <>
         <p>
@@ -171,7 +171,7 @@ const SECTIONS: Section[] = [
     id: "page-trends",
     group: "main",
     icon: Activity,
-    title: "Тренды (/trends)",
+    title: "Тренды",
     body: (
       <>
         <p>Паттерны трат во времени и по дням недели.</p>
@@ -189,7 +189,7 @@ const SECTIONS: Section[] = [
     id: "page-goals",
     group: "main",
     icon: Target,
-    title: "Цели (/goals) + FIRE",
+    title: "Цели + FIRE",
     body: (
       <>
         <p>
@@ -220,7 +220,7 @@ const SECTIONS: Section[] = [
     id: "page-budgets",
     group: "more",
     icon: Target,
-    title: "Бюджеты (/budgets)",
+    title: "Бюджеты",
     body: (
       <p>
         Месячные лимиты по категориям с цветным прогрессом
@@ -233,7 +233,7 @@ const SECTIONS: Section[] = [
     id: "page-accounts",
     group: "more",
     icon: Wallet,
-    title: "Счета (/accounts)",
+    title: "Счета",
     body: (
       <>
         <p>
@@ -252,7 +252,7 @@ const SECTIONS: Section[] = [
     id: "page-calendar",
     group: "more",
     icon: CalendarDays,
-    title: "Календарь (/calendar)",
+    title: "Календарь",
     body: (
       <p>
         GitHub-style тепловая карта по дням всего года, 9 градаций цвета (квантильное
@@ -265,7 +265,7 @@ const SECTIONS: Section[] = [
     id: "page-sankey",
     group: "more",
     icon: GitFork,
-    title: "Потоки (/sankey)",
+    title: "Потоки",
     body: (
       <p>
         Sankey-диаграмма: источники доходов → суммарный бюджет → категории расходов.
@@ -278,7 +278,7 @@ const SECTIONS: Section[] = [
     id: "page-anomalies",
     group: "more",
     icon: Zap,
-    title: "Аномалии (/anomalies)",
+    title: "Аномалии",
     body: (
       <p>
         Подсветка операций-выбросов и резких всплесков по категориям. Подробное
@@ -290,7 +290,7 @@ const SECTIONS: Section[] = [
     id: "page-duplicates",
     group: "more",
     icon: Copy,
-    title: "Дубликаты (/duplicates)",
+    title: "Дубликаты",
     body: (
       <p>
         Авто-детект подозрительно похожих операций: <em>одинаковая сумма + получатель
@@ -303,7 +303,7 @@ const SECTIONS: Section[] = [
     id: "page-uncategorized",
     group: "more",
     icon: Tag,
-    title: "Без категории (/uncategorized)",
+    title: "Без категории",
     body: (
       <>
         <p>
@@ -323,7 +323,7 @@ const SECTIONS: Section[] = [
     id: "page-recurring",
     group: "more",
     icon: Repeat,
-    title: "Регулярные (/recurring)",
+    title: "Регулярные",
     body: (
       <p>
         Авто-детект подписок и регулярных трат + прогноз ближайших платежей + общая
@@ -336,7 +336,7 @@ const SECTIONS: Section[] = [
     id: "page-annotations",
     group: "more",
     icon: Bookmark,
-    title: "Аннотации (/annotations)",
+    title: "Аннотации",
     body: (
       <p>
         Заметки на временной шкале. «Зарплата выросла», «Купил машину», «Поменяли
@@ -349,7 +349,7 @@ const SECTIONS: Section[] = [
     id: "page-tags",
     group: "more",
     icon: Hash,
-    title: "Хэштеги (/tags)",
+    title: "Хэштеги",
     body: (
       <p>
         Если в комментариях к операциям пишете теги вида <code>#Mazda3</code>,{" "}
@@ -363,7 +363,7 @@ const SECTIONS: Section[] = [
     id: "page-wordcloud",
     group: "more",
     icon: Cloud,
-    title: "Облако слов (/wordcloud)",
+    title: "Облако слов",
     body: (
       <p>
         Самые частые слова в комментариях. Размер — частота, цвет — для чтения,
@@ -376,7 +376,7 @@ const SECTIONS: Section[] = [
     id: "page-compare",
     group: "more",
     icon: GitCompare,
-    title: "Сравнение (/compare)",
+    title: "Сравнение",
     body: (
       <p>
         Сравнить два периода. Пресеты: текущий месяц / предыдущий, YTD vs прошлый YTD,
@@ -389,7 +389,7 @@ const SECTIONS: Section[] = [
     id: "page-top",
     group: "more",
     icon: TrendingUp,
-    title: "Топ (/top)",
+    title: "Топ",
     body: (
       <p>
         Три сортируемые таблицы: топ-категории, топ-получатели, топ-операции. Все
@@ -402,7 +402,7 @@ const SECTIONS: Section[] = [
     id: "page-rules",
     group: "more",
     icon: Wand2,
-    title: "Правила (/rules)",
+    title: "Правила",
     body: (
       <p>
         Управление правилами перезаписи категорий. Подробности — раздел «Правила
@@ -414,14 +414,14 @@ const SECTIONS: Section[] = [
     id: "page-help",
     group: "more",
     icon: HelpCircle,
-    title: "Справка (/help)",
+    title: "Справка",
     body: <p>Этот документ.</p>,
   },
   {
     id: "page-import",
     group: "more",
     icon: Upload,
-    title: "Импорт (/import)",
+    title: "Импорт",
     body: (
       <>
         <p>
@@ -724,7 +724,7 @@ const SECTIONS: Section[] = [
     id: "concept-search",
     group: "concepts",
     icon: Search,
-    title: "Глобальный поиск (/search)",
+    title: "Глобальный поиск",
     body: (
       <>
         <p>
