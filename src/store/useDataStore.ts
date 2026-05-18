@@ -4,6 +4,8 @@ import * as db from "../lib/db";
 import { toBase } from "../lib/csv";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import { applyCategoryRules, type CategoryRule } from "./useCategoryRulesStore";
+import { applyEdits } from "../lib/applyEdits";
+import { useEditsStore } from "./useEditsStore";
 
 // Rough cross-rates relative to RUB — purely a starting point so the rates UI
 // is populated out of the box. Users adjust to their own actual rates.
@@ -52,7 +54,14 @@ function ensureCurrenciesInRates(rates: CurrencyRates, txs: Transaction[]): Curr
 }
 
 interface DataState {
+  /** Post-rules transactions with user edits applied. This is what charts/pages render. */
   transactions: Transaction[];
+  /**
+   * Post-rules transactions WITHOUT user edits applied. Mirrors what's in IDB.
+   * Pipeline actions always start from this so edits don't compound and so
+   * `clearEdit` can correctly revert to original values.
+   */
+  transactionsRaw: Transaction[];
   rates: CurrencyRates;
   importMeta: ImportMeta | null;
   payeeGroupingEnabled: boolean;
@@ -79,6 +88,19 @@ async function loadRules(): Promise<CategoryRule[]> {
   return data || [];
 }
 
+async function loadEditsFromStore(): Promise<
+  Record<string, import("./useEditsStore").TransactionEdit>
+> {
+  // Prefer the in-memory copy (set by hydrate); fall back to disk for the
+  // very first call before any store hydration ran.
+  const mem = useEditsStore.getState().edits;
+  if (Object.keys(mem).length > 0 || useEditsStore.getState().loaded) return mem;
+  const disk = await db.loadJSON<
+    Record<string, import("./useEditsStore").TransactionEdit>
+  >("transactionEdits");
+  return disk || {};
+}
+
 function applyPayeeGrouping(txs: Transaction[], enabled: boolean): Transaction[] {
   if (!enabled) {
     return txs.map((t) =>
@@ -101,6 +123,7 @@ function applyPayeeGrouping(txs: Transaction[], enabled: boolean): Transaction[]
 
 export const useDataStore = create<DataState>((set, get) => ({
   transactions: [],
+  transactionsRaw: [],
   rates: DEFAULT_RATES,
   importMeta: null,
   payeeGroupingEnabled: false,
@@ -115,11 +138,13 @@ export const useDataStore = create<DataState>((set, get) => ({
       loadRules(),
     ]);
     const rates = mergeRatesWithDefaults(savedRates);
-    let recalc = recalcBase(txs, rates);
-    recalc = applyPayeeGrouping(recalc, grouping || false);
-    recalc = applyCategoryRules(recalc, rules);
+    let raw = recalcBase(txs, rates);
+    raw = applyPayeeGrouping(raw, grouping || false);
+    raw = applyCategoryRules(raw, rules);
+    const final = applyEdits(raw, await loadEditsFromStore(), rates);
     set({
-      transactions: recalc,
+      transactions: final,
+      transactionsRaw: raw,
       rates,
       importMeta: meta,
       payeeGroupingEnabled: grouping || false,
@@ -132,39 +157,46 @@ export const useDataStore = create<DataState>((set, get) => ({
     const rates = ensureCurrenciesInRates(get().rates, txs);
     if (rates !== get().rates) await db.saveRates(rates);
     const rules = await loadRules();
-    let recalc = recalcBase(txs, rates);
-    recalc = applyPayeeGrouping(recalc, payeeGroupingEnabled);
-    recalc = applyCategoryRules(recalc, rules);
-    await db.saveTransactions(recalc);
+    let raw = recalcBase(txs, rates);
+    raw = applyPayeeGrouping(raw, payeeGroupingEnabled);
+    raw = applyCategoryRules(raw, rules);
+    await db.saveTransactions(raw);
     await db.saveImportMeta(meta);
-    set({ transactions: recalc, rates, importMeta: meta });
+    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    set({ transactions: final, transactionsRaw: raw, rates, importMeta: meta });
   },
 
   mergeTransactions: async (incoming, meta) => {
-    const { payeeGroupingEnabled, transactions: existing } = get();
+    const { payeeGroupingEnabled, transactionsRaw: existing } = get();
     const rates = ensureCurrenciesInRates(get().rates, incoming);
     if (rates !== get().rates) await db.saveRates(rates);
     const rules = await loadRules();
     const existingIds = new Set(existing.map((t) => t.id));
     const fresh = incoming.filter((t) => !existingIds.has(t.id));
     const combined = [...existing, ...fresh];
-    let recalc = recalcBase(combined, rates);
-    recalc = applyPayeeGrouping(recalc, payeeGroupingEnabled);
-    recalc = applyCategoryRules(recalc, rules);
-    await db.saveTransactions(recalc);
+    let raw = recalcBase(combined, rates);
+    raw = applyPayeeGrouping(raw, payeeGroupingEnabled);
+    raw = applyCategoryRules(raw, rules);
+    await db.saveTransactions(raw);
     const mergedMeta: ImportMeta = {
       ...meta,
       parsed: existing.length + fresh.length,
       totalRows: meta.totalRows,
     };
     await db.saveImportMeta(mergedMeta);
-    set({ transactions: recalc, rates, importMeta: mergedMeta });
+    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    set({
+      transactions: final,
+      transactionsRaw: raw,
+      rates,
+      importMeta: mergedMeta,
+    });
     return { added: fresh.length, duplicates: incoming.length - fresh.length };
   },
 
   clearAll: async () => {
     await db.clearTransactions();
-    set({ transactions: [], importMeta: null });
+    set({ transactions: [], transactionsRaw: [], importMeta: null });
   },
 
   setRate: async (currency, value) => {
@@ -174,11 +206,12 @@ export const useDataStore = create<DataState>((set, get) => ({
     };
     await db.saveRates(rates);
     const rules = await loadRules();
-    let recalc = recalcBase(get().transactions, rates);
-    recalc = applyPayeeGrouping(recalc, get().payeeGroupingEnabled);
-    recalc = applyCategoryRules(recalc, rules);
-    await db.saveTransactions(recalc);
-    set({ rates, transactions: recalc });
+    let raw = recalcBase(get().transactionsRaw, rates);
+    raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled);
+    raw = applyCategoryRules(raw, rules);
+    await db.saveTransactions(raw);
+    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    set({ rates, transactions: final, transactionsRaw: raw });
   },
 
   setBase: async (newBase) => {
@@ -201,31 +234,34 @@ export const useDataStore = create<DataState>((set, get) => ({
     const rates: CurrencyRates = { base: newBase, rates: nextRates };
     await db.saveRates(rates);
     const rules = await loadRules();
-    let recalc = recalcBase(get().transactions, rates);
-    recalc = applyPayeeGrouping(recalc, get().payeeGroupingEnabled);
-    recalc = applyCategoryRules(recalc, rules);
-    await db.saveTransactions(recalc);
-    set({ rates, transactions: recalc });
+    let raw = recalcBase(get().transactionsRaw, rates);
+    raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled);
+    raw = applyCategoryRules(raw, rules);
+    await db.saveTransactions(raw);
+    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    set({ rates, transactions: final, transactionsRaw: raw });
   },
 
   setPayeeGrouping: async (enabled) => {
     await db.saveJSON("payeeGrouping", enabled);
-    const { transactions: existing, rates } = get();
+    const { transactionsRaw: existing, rates } = get();
     const rules = await loadRules();
-    let recalc = recalcBase(existing, rates);
-    recalc = applyPayeeGrouping(recalc, enabled);
-    recalc = applyCategoryRules(recalc, rules);
-    await db.saveTransactions(recalc);
-    set({ payeeGroupingEnabled: enabled, transactions: recalc });
+    let raw = recalcBase(existing, rates);
+    raw = applyPayeeGrouping(raw, enabled);
+    raw = applyCategoryRules(raw, rules);
+    await db.saveTransactions(raw);
+    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    set({ payeeGroupingEnabled: enabled, transactions: final, transactionsRaw: raw });
   },
 
   reapplyRules: async () => {
-    const { transactions: existing, rates, payeeGroupingEnabled } = get();
+    const { transactionsRaw: existing, rates, payeeGroupingEnabled } = get();
     const rules = await loadRules();
-    let recalc = recalcBase(existing, rates);
-    recalc = applyPayeeGrouping(recalc, payeeGroupingEnabled);
-    recalc = applyCategoryRules(recalc, rules);
-    await db.saveTransactions(recalc);
-    set({ transactions: recalc });
+    let raw = recalcBase(existing, rates);
+    raw = applyPayeeGrouping(raw, payeeGroupingEnabled);
+    raw = applyCategoryRules(raw, rules);
+    await db.saveTransactions(raw);
+    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    set({ transactions: final, transactionsRaw: raw });
   },
 }));

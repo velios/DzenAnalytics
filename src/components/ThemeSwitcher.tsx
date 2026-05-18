@@ -1,41 +1,45 @@
-import { Sun, Moon, Monitor } from "lucide-react";
-import clsx from "clsx";
-import { useThemeStore, type ThemeMode } from "../store/useThemeStore";
+import { Sun, Moon } from "lucide-react";
+import { useThemeStore } from "../store/useThemeStore";
 
-const items: { mode: ThemeMode; label: string; icon: typeof Sun }[] = [
-  { mode: "light", label: "Светлая", icon: Sun },
-  { mode: "dark", label: "Тёмная", icon: Moon },
-  { mode: "auto", label: "Авто", icon: Monitor },
-];
-
+/**
+ * Compact pill toggle: sun (light) on the left, moon (dark) on the right,
+ * with a sliding thumb. Click anywhere to flip between modes.
+ *
+ * The store still supports an "auto" mode internally, but it's rarely used
+ * and would complicate a binary UI. Toggling here explicitly picks "light"
+ * or "dark" — if a user genuinely wants OS-follow they can set it via
+ * the command palette / DevTools (`useThemeStore.getState().setMode("auto")`).
+ */
 export function ThemeSwitcher() {
-  const mode = useThemeStore((s) => s.mode);
-  const setMode = useThemeStore((s) => s.setMode);
   const resolved = useThemeStore((s) => s.resolved);
+  const setMode = useThemeStore((s) => s.setMode);
+  const isDark = resolved === "dark";
 
   return (
-    <div className="flex bg-panel2 border border-border rounded-lg p-0.5">
-      {items.map(({ mode: m, label, icon: Icon }) => {
-        const active = mode === m;
-        return (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            title={
-              m === "auto"
-                ? `Авто (сейчас ${resolved === "dark" ? "тёмная" : "светлая"})`
-                : label
-            }
-            className={clsx(
-              "flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors",
-              active ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
-            )}
-          >
-            <Icon className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">{label}</span>
-          </button>
-        );
-      })}
-    </div>
+    <button
+      type="button"
+      onClick={() => setMode(isDark ? "light" : "dark")}
+      title={isDark ? "Тёмная → светлая" : "Светлая → тёмная"}
+      aria-label={`Тема: ${isDark ? "тёмная" : "светлая"}`}
+      className="relative inline-flex items-center w-14 h-7 shrink-0 rounded-full bg-panel2 border border-border transition-colors hover:border-accent/50"
+    >
+      {/* Sliding thumb */}
+      <span
+        className="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-bg shadow border border-border transition-transform duration-200 ease-out"
+        style={{ transform: isDark ? "translateX(28px)" : "translateX(0)" }}
+      />
+      {/* Sun (left) */}
+      <Sun
+        className={`absolute left-1.5 w-4 h-4 transition-opacity ${
+          isDark ? "opacity-40 text-muted" : "opacity-100 text-warn"
+        }`}
+      />
+      {/* Moon (right) */}
+      <Moon
+        className={`absolute right-1.5 w-4 h-4 transition-opacity ${
+          isDark ? "opacity-100 text-accent" : "opacity-40 text-muted"
+        }`}
+      />
+    </button>
   );
 }

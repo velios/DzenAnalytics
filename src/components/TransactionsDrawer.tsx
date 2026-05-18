@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { X, Search, ArrowUpDown, Download, Sparkles, Tag, User } from "lucide-react";
+import {
+  X,
+  Search,
+  ArrowUpDown,
+  Download,
+  Sparkles,
+  Tag,
+  User,
+  Pencil,
+} from "lucide-react";
 import { useDrillStore } from "../store/useDrillStore";
 import { useDataStore } from "../store/useDataStore";
+import { useEditsStore } from "../store/useEditsStore";
+import { CategoryDot } from "./CategoryDot";
+import { EditTransactionModal } from "./EditTransactionModal";
 import { formatMoney, formatDate } from "../lib/format";
 import type { Transaction } from "../types";
 
@@ -16,6 +28,13 @@ export function TransactionsDrawer() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const edits = useEditsStore((s) => s.edits);
+  const editsLoaded = useEditsStore((s) => s.loaded);
+  const hydrateEdits = useEditsStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!editsLoaded) hydrateEdits();
+  }, [editsLoaded, hydrateEdits]);
 
   useEffect(() => {
     if (!open) return;
@@ -34,13 +53,21 @@ export function TransactionsDrawer() {
     if (open) setSearch("");
   }, [open]);
 
+  // Drill store keeps a snapshot of transactions taken at the moment the drawer
+  // was opened. After an inline edit the canonical `useDataStore.transactions`
+  // is the source of truth, so we re-derive a fresh list by id-lookup.
+  const liveTransactions = useMemo(() => {
+    const byId = new Map(allTransactions.map((t) => [t.id, t]));
+    return transactions.map((t) => byId.get(t.id) || t);
+  }, [transactions, allTransactions]);
+
   const sorted = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = q
-      ? transactions.filter((t) =>
+      ? liveTransactions.filter((t) =>
           `${t.payee} ${t.comment} ${t.categoryFull} ${t.account}`.toLowerCase().includes(q)
         )
-      : transactions;
+      : liveTransactions;
     const cmp = (a: Transaction, b: Transaction) => {
       let r = 0;
       if (sortKey === "date") r = a.date.localeCompare(b.date);
@@ -50,7 +77,7 @@ export function TransactionsDrawer() {
       return sortDir === "asc" ? r : -r;
     };
     return [...filtered].sort(cmp);
-  }, [transactions, search, sortKey, sortDir]);
+  }, [liveTransactions, search, sortKey, sortDir]);
 
   const totals = useMemo(() => {
     let inc = 0;
@@ -99,6 +126,7 @@ export function TransactionsDrawer() {
   if (!open) return null;
 
   return (
+    <>
     <aside className="fixed inset-0 bg-bg z-50 flex flex-col animate-fade">
       <div className="px-6 py-4 border-b border-border flex items-start justify-between gap-4 sticky top-0 bg-panel/95 backdrop-blur z-10">
         <div className="min-w-0">
@@ -219,17 +247,32 @@ export function TransactionsDrawer() {
                   <th className="table-th">Комментарий</th>
                   <th className="table-th">Счёт</th>
                   <SortHead label="Сумма" k="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
+                  <th className="table-th w-8"></th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((t) => (
-                  <tr key={t.id} className="hover:bg-panel2/40 align-top">
+                {sorted.map((t) => {
+                  const isEdited = !!edits[t.id];
+                  return (
+                  <tr
+                    key={t.id}
+                    onDoubleClick={() => setEditing(t)}
+                    className="hover:bg-panel2/40 align-top group cursor-pointer"
+                    title="Двойной клик — редактировать"
+                  >
                     <td className="table-td whitespace-nowrap text-muted">
                       {formatDate(t.date, "short")}
                     </td>
                     <td className="table-td max-w-[180px]">
-                      <div className="truncate" title={t.categoryFull}>
-                        {t.category}
+                      <div className="truncate flex items-center gap-2" title={t.categoryFull}>
+                        <CategoryDot category={t.category} size="w-5 h-5" />
+                        <span className="truncate">{t.category}</span>
+                        {isEdited && (
+                          <Pencil
+                            className="w-3 h-3 text-accent2 shrink-0"
+                            aria-label="Отредактировано"
+                          />
+                        )}
                       </div>
                       {t.subcategory && (
                         <div className="text-xs text-muted truncate" title={t.subcategory}>
@@ -260,13 +303,30 @@ export function TransactionsDrawer() {
                       {t.kind === "income" ? "+" : t.kind === "expense" ? "−" : "↔"}
                       {formatMoney(t.amount, t.currency)}
                     </td>
+                    <td className="table-td w-8 text-right">
+                      <button
+                        onClick={() => setEditing(t)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted hover:text-text"
+                        title="Редактировать"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
       </aside>
+      {editing && (
+        <EditTransactionModal
+          tx={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </>
   );
 }
 

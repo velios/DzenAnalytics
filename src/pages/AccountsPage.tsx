@@ -24,6 +24,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import {
   balancesByAccount,
   dailyBalanceSeries,
@@ -68,6 +69,13 @@ export function AccountsPage() {
   const setCalibration = useCalibrationStore((s) => s.set);
   const clearCalibration = useCalibrationStore((s) => s.clear);
   const hydrateCalibration = useCalibrationStore((s) => s.hydrate);
+  // API auto-calibrates on every sync — hide the manual UI when connected.
+  const zenToken = useZenmoneyStore((s) => s.token);
+  const zenHydrate = useZenmoneyStore((s) => s.hydrate);
+  const zenLoaded = useZenmoneyStore((s) => s.loaded);
+  useEffect(() => {
+    if (!zenLoaded) zenHydrate();
+  }, [zenLoaded, zenHydrate]);
   const calibLoaded = useCalibrationStore((s) => s.loaded);
 
   useEffect(() => {
@@ -147,9 +155,11 @@ export function AccountsPage() {
         <div>
           <h1 className="text-2xl font-bold">Совокупный баланс</h1>
           <p className="text-muted text-sm mt-1">
-            {calibration
-              ? `Откалибровано: на ${calibration.date} баланс был ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
-              : "Стартовая точка — 0 (CSV не содержит начальных остатков). Используйте калибровку, чтобы привязать график к реальной сумме."}
+            {zenToken
+              ? "Совокупный баланс подтянут из Дзен-мани, обновляется при каждой синхронизации."
+              : calibration
+                ? `Откалибровано: на ${calibration.date} баланс был ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
+                : "Стартовая точка — 0 (CSV не содержит начальных остатков). Используйте калибровку, чтобы привязать график к реальной сумме."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -183,18 +193,20 @@ export function AccountsPage() {
               Совокупно
             </button>
           </div>
-          <button
-            onClick={() => setCalibOpen((o) => !o)}
-            className={`btn-ghost text-xs ${calibration ? "border-accent2 text-accent2" : ""}`}
-            title="Привязать график к фактическому балансу"
-          >
-            <Settings2 className="w-3.5 h-3.5" />
-            {calibration ? "Калибровка вкл." : "Калибровка"}
-          </button>
+          {!zenToken && (
+            <button
+              onClick={() => setCalibOpen((o) => !o)}
+              className={`btn-ghost text-xs ${calibration ? "border-accent2 text-accent2" : ""}`}
+              title="Привязать график к фактическому балансу"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              {calibration ? "Калибровка вкл." : "Калибровка"}
+            </button>
+          )}
         </div>
       </div>
 
-      {calibOpen && (
+      {calibOpen && !zenToken && (
         <div className="card card-pad bg-accent2/5 border-accent2/40">
           <div className="font-semibold mb-2 flex items-center gap-2">
             <Settings2 className="w-4 h-4 text-accent2" />

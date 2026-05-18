@@ -42,9 +42,18 @@
 }
 
 html, body, #root {
-  height: 100%;
+  min-height: 100%;
   background: rgb(var(--c-bg));
   color: rgb(var(--c-text));
+}
+
+/* Always reserve scrollbar space (both `scrollbar-gutter` for modern
+   browsers and `overflow-y: scroll` as a belt-and-braces fallback) so the
+   header/content doesn't shift left ↔ right when switching between long
+   and short pages. */
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
 }
 
 body {

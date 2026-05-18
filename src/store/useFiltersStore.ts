@@ -25,11 +25,18 @@ interface FiltersState {
   reset: () => void;
 }
 
+function currentMonthYM(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 const initial = {
-  preset: "12m" as DatePreset,
+  // Default to the current calendar month — most actions are about
+  // "what's happening NOW", and 12-month view drowns the present.
+  preset: "month" as DatePreset,
   from: null,
   to: null,
-  monthYM: null as string | null,
+  monthYM: currentMonthYM() as string | null,
   accounts: new Set<string>(),
   categories: new Set<string>(),
   currencies: new Set<string>(),
@@ -64,7 +71,7 @@ export const useFiltersStore = create<FiltersState>((set, get) => ({
     set(() => ({ [kind]: new Set<string>() }) as Pick<FiltersState, typeof kind>),
   setSearch: (search) => set({ search }),
   setExcludeTransfers: (excludeTransfers) => set({ excludeTransfers }),
-  reset: () => set(initial),
+  reset: () => set({ ...initial, monthYM: currentMonthYM() }),
 }));
 
 function monthRange(ym: string): { from: string; to: string } {

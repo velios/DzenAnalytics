@@ -17,12 +17,25 @@ const symbolByCurrency: Record<string, string> = {
   THB: "฿",
 };
 
-export function formatMoney(amount: number, currency: Currency = "RUB", opts?: { compact?: boolean; signed?: boolean }): string {
+export function formatMoney(
+  amount: number,
+  currency: Currency = "RUB",
+  opts?: { compact?: boolean; signed?: boolean; decimals?: number }
+): string {
   const sign = opts?.signed && amount > 0 ? "+" : "";
   const abs = Math.abs(amount);
   const fmt = new Intl.NumberFormat("ru-RU", {
     notation: opts?.compact ? "compact" : "standard",
-    maximumFractionDigits: opts?.compact ? 1 : abs >= 1000 ? 0 : 2,
+    minimumFractionDigits:
+      opts?.decimals !== undefined ? opts.decimals : undefined,
+    maximumFractionDigits:
+      opts?.decimals !== undefined
+        ? opts.decimals
+        : opts?.compact
+          ? 1
+          : abs >= 1000
+            ? 0
+            : 2,
   });
   const symbol = symbolByCurrency[currency] || currency;
   const value = fmt.format(amount < 0 ? -abs : abs);

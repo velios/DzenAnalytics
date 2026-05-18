@@ -37,12 +37,9 @@ import {
   buildScenarioForecast,
   yearOverYearMonthly,
   vsAverageStats,
-  buildWaterfall,
   buildStreamData,
   detectSeasonality,
-  cumulativeNetAt,
 } from "../lib/aggregations";
-import { useCalibrationStore } from "../store/useCalibrationStore";
 import { InsightsPanel } from "../components/InsightsPanel";
 import {
   formatMoney,
@@ -98,45 +95,6 @@ export function CashflowPage() {
   // Cash-flow visualization mode: bars (по умолчанию) или stream graph
   const [vizMode, setVizMode] = useState<"bars" | "stream">("bars");
   const stream = useMemo(() => buildStreamData(filtered, 10, "expense"), [filtered]);
-
-  // Waterfall: на выбранный месяц (последний доступный по умолчанию)
-  const calibration = useCalibrationStore((s) => s.calibration);
-  const calibLoaded = useCalibrationStore((s) => s.loaded);
-  const hydrateCalibration = useCalibrationStore((s) => s.hydrate);
-  useEffect(() => {
-    if (!calibLoaded) hydrateCalibration();
-  }, [calibLoaded, hydrateCalibration]);
-
-  const allMonthYMs = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of transactions) if (t.date) set.add(t.date.slice(0, 7));
-    return Array.from(set).sort();
-  }, [transactions]);
-  const [waterfallYM, setWaterfallYM] = useState<string>(
-    () => allMonthYMs[allMonthYMs.length - 1] || ""
-  );
-  useEffect(() => {
-    if (allMonthYMs.length && !allMonthYMs.includes(waterfallYM)) {
-      setWaterfallYM(allMonthYMs[allMonthYMs.length - 1]);
-    }
-  }, [allMonthYMs, waterfallYM]);
-  const waterfall = useMemo(() => {
-    if (!waterfallYM) return [];
-    const lastDayOfPrevMonth = (() => {
-      const [y, m] = waterfallYM.split("-").map(Number);
-      const prev = new Date(y, m - 1, 0);
-      const yyyy = prev.getFullYear();
-      const mm = String(prev.getMonth() + 1).padStart(2, "0");
-      const dd = String(prev.getDate()).padStart(2, "0");
-      return `${yyyy}-${mm}-${dd}`;
-    })();
-    const rawAtStart = cumulativeNetAt(transactions, lastDayOfPrevMonth);
-    const offset =
-      calibration
-        ? calibration.amount - cumulativeNetAt(transactions, calibration.date)
-        : 0;
-    return buildWaterfall(transactions, waterfallYM, rawAtStart + offset, 8);
-  }, [transactions, waterfallYM, calibration]);
 
   // Seasonality
   const seasonality = useMemo(() => detectSeasonality(transactions), [transactions]);
@@ -500,118 +458,6 @@ export function CashflowPage() {
                   radius={[4, 4, 0, 0]}
                   activeBar={false}
                 />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Waterfall — деление месяца на потоки */}
-      {waterfall.length > 0 && (
-        <div className="card card-pad">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-            <div>
-              <div className="font-semibold">Waterfall месяца</div>
-              <div className="text-xs text-muted">
-                Открытие → доходы → траты по категориям → закрытие
-                {!calibration && (
-                  <span className="text-warn"> · «открытие» = от 0 без калибровки</span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 bg-panel2 rounded-lg p-1 border border-border">
-              <button
-                onClick={() =>
-                  setWaterfallYM((y) => {
-                    const idx = allMonthYMs.indexOf(y);
-                    return idx > 0 ? allMonthYMs[idx - 1] : y;
-                  })
-                }
-                disabled={allMonthYMs.indexOf(waterfallYM) <= 0}
-                className="p-1 hover:text-accent disabled:opacity-30"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="px-3 text-sm font-medium tabular-nums">
-                {waterfallYM ? monthLabel(waterfallYM) : "—"}
-              </span>
-              <button
-                onClick={() =>
-                  setWaterfallYM((y) => {
-                    const idx = allMonthYMs.indexOf(y);
-                    return idx < allMonthYMs.length - 1 ? allMonthYMs[idx + 1] : y;
-                  })
-                }
-                disabled={allMonthYMs.indexOf(waterfallYM) >= allMonthYMs.length - 1}
-                className="p-1 hover:text-accent disabled:opacity-30"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-          <div className="h-80">
-            <ResponsiveContainer>
-              <ComposedChart
-                data={waterfall.map((s) => ({
-                  label: s.label,
-                  base: Math.min(s.start, s.end),
-                  delta: Math.abs(s.end - s.start),
-                  cumulative: s.cumulative,
-                  kind: s.kind,
-                  value: s.value,
-                }))}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
-                <XAxis
-                  dataKey="label"
-                  stroke={chartAxisStroke}
-                  fontSize={10}
-                  interval={0}
-                  angle={-20}
-                  textAnchor="end"
-                  height={70}
-                />
-                <YAxis
-                  stroke={chartAxisStroke}
-                  fontSize={11}
-                  tickFormatter={(v) => formatNum(v, { compact: true })}
-                />
-                <Tooltip
-                  {...chartTooltipProps}
-                  formatter={(v: unknown, n: unknown, p: { payload?: { kind?: string; value?: number; cumulative?: number } }) => {
-                    if (n === "delta") {
-                      const k = p.payload?.kind;
-                      const cum = p.payload?.cumulative ?? 0;
-                      const val = p.payload?.value ?? 0;
-                      const label =
-                        k === "open" || k === "close"
-                          ? "Баланс"
-                          : k === "income"
-                            ? "Доходы"
-                            : "Расход";
-                      return [
-                        `${formatMoney(val, base, { compact: true })} (после: ${formatMoney(cum, base, { compact: true })})`,
-                        label,
-                      ];
-                    }
-                    return [String(toNum(v)), String(n)];
-                  }}
-                />
-                <Bar dataKey="base" stackId="w" fill="transparent" />
-                <Bar dataKey="delta" stackId="w" radius={[4, 4, 0, 0]} activeBar={false}>
-                  {waterfall.map((s, i) => (
-                    <Cell
-                      key={i}
-                      fill={
-                        s.kind === "open" || s.kind === "close"
-                          ? "#22D3EE"
-                          : s.kind === "income"
-                            ? "#10B981"
-                            : "#EF4444"
-                      }
-                    />
-                  ))}
-                </Bar>
               </ComposedChart>
             </ResponsiveContainer>
           </div>

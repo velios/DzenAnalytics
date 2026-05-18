@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="200" viewBox="0 0 360 80" fill="none">
+  <title>DzenAnalytics</title>
+  <g transform="translate(8 8)">
+    <rect width="64" height="64" rx="14" fill="#1A1730"></rect>
+    <path d="M14 32 L26 18 L34 28 L42 14 L52 32" stroke="#06B6D4" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" fill="none"></path>
+    <path d="M14 36 L26 50 L34 40 L42 54 L52 36" stroke="#7C73E6" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" fill="none" opacity="0.9"></path>
+    <line x1="10" y1="34" x2="54" y2="34" stroke="#FFFFFF" stroke-width="1.5" opacity="0.3"></line>
+  </g>
+  <text x="88" y="51" font-family="&#39;Fraunces&#39;,&#39;Cormorant Garamond&#39;,&#39;Times New Roman&#39;,serif" font-size="36" font-weight="500" letter-spacing="-0.4">
+    <tspan fill="#06B6D4">Dzen</tspan><tspan fill="#FAFAF7">Analytics</tspan>
+  </text>
+</svg>

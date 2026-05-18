@@ -13,6 +13,17 @@ import {
   Download,
   Database,
   Percent,
+  Cloud,
+  RefreshCw,
+  Loader2,
+  KeyRound,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Link as LinkIcon,
+  Unlink,
+  Clock,
+  Settings,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { useDataStore } from "../store/useDataStore";
@@ -23,7 +34,10 @@ import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
-import { formatMoney, formatNum, formatDate } from "../lib/format";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
+import { Combobox } from "../components/Combobox";
+import { formatNum, formatDate } from "../lib/format";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import * as db from "../lib/db";
 
@@ -50,6 +64,116 @@ export function ImportPage() {
   useEffect(() => {
     if (!inflationLoaded) hydrateInflation();
   }, [inflationLoaded, hydrateInflation]);
+
+  // Zenmoney API sync state
+  const zenToken = useZenmoneyStore((s) => s.token);
+  const zenStatus = useZenmoneyStore((s) => s.status);
+  const zenError = useZenmoneyStore((s) => s.error);
+  const zenLastSyncAt = useZenmoneyStore((s) => s.lastSyncAt);
+  const zenLoaded = useZenmoneyStore((s) => s.loaded);
+  const zenHydrate = useZenmoneyStore((s) => s.hydrate);
+  const zenValidateAndSave = useZenmoneyStore((s) => s.validateAndSaveToken);
+  const zenSync = useZenmoneyStore((s) => s.sync);
+  const zenRemoveToken = useZenmoneyStore((s) => s.removeToken);
+
+  useEffect(() => {
+    if (!zenLoaded) zenHydrate();
+  }, [zenLoaded, zenHydrate]);
+
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [tokenVisible, setTokenVisible] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+
+  function formatSyncResult(r: {
+    count: number;
+    full: boolean;
+    delta: { transactions: number; deletions: number };
+  }): string {
+    if (r.full) return `Полный синк: ${formatNum(r.count)} операций.`;
+    if (r.delta.transactions === 0 && r.delta.deletions === 0) {
+      return `Свежее: ничего нового. Всего ${formatNum(r.count)} операций.`;
+    }
+    const parts: string[] = [];
+    if (r.delta.transactions > 0)
+      parts.push(`+${formatNum(r.delta.transactions)} новых/изменённых`);
+    if (r.delta.deletions > 0)
+      parts.push(`${formatNum(r.delta.deletions)} удалено`);
+    return `Синхронизировано: ${parts.join(", ")}. Всего ${formatNum(r.count)} операций.`;
+  }
+
+  async function connectToken() {
+    setSyncSuccess(null);
+    // Guard: existing CSV data will be replaced by API sync.
+    if (meta?.source === "csv" && transactions.length > 0) {
+      const ok = confirm(
+        `У вас сейчас ${formatNum(transactions.length)} операций, загруженных из CSV (${meta.fileName}). API-синк заменит их данными из Дзен-мани. Бюджеты, цели, аннотации и правила сохранятся.\n\nПродолжить?`
+      );
+      if (!ok) return;
+      await clearAll();
+    }
+    const ok = await zenValidateAndSave(tokenDraft);
+    if (ok) {
+      setTokenDraft("");
+      try {
+        const r = await zenSync({ force: true });
+        setSyncSuccess(formatSyncResult(r));
+      } catch {
+        /* error already in store */
+      }
+    }
+  }
+
+  async function runSync() {
+    setSyncSuccess(null);
+    try {
+      const r = await zenSync();
+      setSyncSuccess(formatSyncResult(r));
+    } catch {
+      /* error already in store */
+    }
+  }
+
+  async function runFullSync() {
+    setSyncSuccess(null);
+    if (
+      !confirm(
+        "Полный синк сбросит локальный кэш и заново скачает все данные. Используйте, если данные не сходятся или после массовых переименований категорий в Дзен-мани. Продолжить?"
+      )
+    )
+      return;
+    try {
+      const r = await zenSync({ force: true });
+      setSyncSuccess(formatSyncResult(r));
+    } catch {
+      /* error already in store */
+    }
+  }
+
+  async function disconnectToken() {
+    if (!confirm("Отключить токен Дзен-мани? Данные останутся, но автосинк станет недоступен.")) return;
+    await zenRemoveToken();
+    setSyncSuccess(null);
+  }
+
+  // Scheduled backup
+  const backupInterval = useBackupStore((s) => s.interval);
+  const backupLastAt = useBackupStore((s) => s.lastBackupAt);
+  const backupLoaded = useBackupStore((s) => s.loaded);
+  const backupHydrate = useBackupStore((s) => s.hydrate);
+  const setBackupInterval = useBackupStore((s) => s.setInterval);
+  const runBackupNow = useBackupStore((s) => s.runNow);
+  useEffect(() => {
+    if (!backupLoaded) backupHydrate();
+  }, [backupLoaded, backupHydrate]);
+  const [scheduledMsg, setScheduledMsg] = useState<string | null>(null);
+  async function triggerScheduledNow() {
+    try {
+      const r = await runBackupNow();
+      setScheduledMsg(`Скачано ${r.fileName} (${Math.round(r.size / 1024)} КБ)`);
+    } catch (e) {
+      setScheduledMsg(e instanceof Error ? e.message : "Ошибка");
+    }
+  }
 
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -105,13 +229,13 @@ export function ImportPage() {
   }
 
   async function importBackup(file: File) {
-    if (!confirm("Восстановить из backup'а? Текущие данные будут заменены.")) return;
+    if (!confirm("Восстановить из бэкапа? Текущие данные будут заменены.")) return;
     setBackupBusy(true);
     setBackupMsg(null);
     try {
       const text = await file.text();
       const dump = JSON.parse(text);
-      if (!dump.version) throw new Error("Не похоже на backup DzenAnalytics");
+      if (!dump.version) throw new Error("Не похоже на бэкап DzenAnalytics");
       if (dump.transactions) await db.saveTransactions(dump.transactions);
       if (dump.rates) await db.saveRates(dump.rates);
       if (dump.importMeta) await db.saveImportMeta(dump.importMeta);
@@ -140,6 +264,13 @@ export function ImportPage() {
   async function handleFile(file: File) {
     setError(null);
     setSuccess(null);
+    // Guard: API token connected → confirm before mixing.
+    if (zenToken) {
+      const ok = confirm(
+        "У вас подключён API Дзен-мани. CSV-импорт может затереть синхронизированные данные. Продолжить?\n\nЕсли импорт нужен, советуем сначала отключить API на этой странице, чтобы избежать путаницы."
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       const text = await file.text();
@@ -153,6 +284,7 @@ export function ImportPage() {
         totalRows: result.totalRows,
         parsed: result.parsed,
         skipped: result.skipped,
+        source: "csv" as const,
       };
       if (mode === "merge" && transactions.length > 0) {
         const r = await mergeTransactions(result.transactions, importMeta);
@@ -186,90 +318,248 @@ export function ImportPage() {
   })();
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold mb-1">Импорт CSV</h1>
-        <p className="text-muted text-sm">
-          Загрузите выгрузку транзакций из приложения Дзен-мани (формат:{" "}
-          <code className="pill">date;categoryName;…</code>).
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <Settings className="w-6 h-6 text-accent shrink-0" />
+          Настройки
+        </h1>
+        <p className="text-muted text-sm mt-1">
+          Источник данных, валюты и курсы, резервные копии — всё, что относится
+          к настройке приложения.
         </p>
       </div>
 
-      {transactions.length > 0 && (
-        <div className="card card-pad">
-          <div className="font-medium mb-3 flex items-center gap-2">
-            <Layers className="w-4 h-4 text-accent" />
-            Режим импорта
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <button
-              onClick={() => setMode("merge")}
-              className={`p-4 rounded-lg border text-left transition-colors ${
-                mode === "merge"
-                  ? "bg-accent/10 border-accent"
-                  : "bg-panel2 border-border hover:border-accent/50"
-              }`}
-            >
-              <div className="font-medium text-sm flex items-center gap-2">
-                <Layers className="w-4 h-4" />
-                Дополнить
-              </div>
-              <div className="text-xs text-muted mt-1">
-                Добавить новые операции к существующим. Дубликаты по id отбрасываются.
-              </div>
-            </button>
-            <button
-              onClick={() => setMode("replace")}
-              className={`p-4 rounded-lg border text-left transition-colors ${
-                mode === "replace"
-                  ? "bg-accent/10 border-accent"
-                  : "bg-panel2 border-border hover:border-accent/50"
-              }`}
-            >
-              <div className="font-medium text-sm flex items-center gap-2">
-                <Replace className="w-4 h-4" />
-                Заменить
-              </div>
-              <div className="text-xs text-muted mt-1">
-                Удалить текущие данные и загрузить файл с нуля.
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
+      <SectionHeading>Источник данных</SectionHeading>
 
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        onClick={() => fileRef.current?.click()}
-        className={`card card-pad cursor-pointer transition-all border-2 border-dashed ${
-          dragOver ? "border-accent bg-accent/5" : "border-border hover:border-accent/50"
-        }`}
-      >
-        <div className="flex flex-col items-center text-center py-10 gap-3">
-          <Upload className="w-12 h-12 text-accent" />
-          <div className="font-medium">
-            {busy ? "Обрабатываю..." : "Перетащите CSV-файл сюда или кликните для выбора"}
+      {/* Zenmoney API integration */}
+      <div className="card card-pad border-accent/30 bg-accent/[0.03]">
+        <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+          <div>
+            <div className="font-semibold flex items-center gap-2">
+              <Cloud className="w-4 h-4 text-accent" />
+              Дзен-мани API (онлайн-синхронизация)
+            </div>
+            <p className="text-xs text-muted mt-1 max-w-prose">
+              Качает данные напрямую из вашего аккаунта Дзен-мани. Кроме операций
+              получим также курсы валют, баланс счетов, регулярные платежи и
+              иерархию категорий — без выгрузки CSV.
+            </p>
           </div>
-          <div className="text-xs text-muted">
-            {transactions.length > 0
-              ? `Сейчас в базе: ${formatNum(transactions.length)} операций. Режим: ${mode === "merge" ? "дополнить" : "заменить"}.`
-              : "Файл обрабатывается локально, в браузере. Никуда не отправляется."}
+          {zenToken && zenStatus !== "syncing" && (
+            <button
+              onClick={disconnectToken}
+              className="btn-ghost text-xs text-muted"
+              title="Удалить токен из браузера"
+            >
+              <Unlink className="w-3.5 h-3.5" />
+              Отключить
+            </button>
+          )}
+        </div>
+
+        {!zenToken ? (
+          <div className="space-y-3">
+            <div className="text-xs text-muted">
+              <KeyRound className="w-3.5 h-3.5 inline align-text-bottom mr-1" />
+              Личный токен — это длинная строка из букв и цифр. Получить можно в{" "}
+              <a
+                href="https://zerro.app/token"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:underline inline-flex items-center gap-0.5"
+              >
+                zerro.app/token <ExternalLink className="w-3 h-3" />
+              </a>{" "}
+              (войдите своим логином от Дзен-мани, скопируйте токен). Хранится только в этом
+              браузере — никуда не отправляется.
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={tokenVisible ? "text" : "password"}
+                  value={tokenDraft}
+                  onChange={(e) => setTokenDraft(e.target.value)}
+                  placeholder="Вставьте токен"
+                  className="input text-sm pr-9 w-full font-mono"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={zenStatus === "checking" || zenStatus === "syncing"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setTokenVisible((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                  title={tokenVisible ? "Скрыть" : "Показать"}
+                >
+                  {tokenVisible ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+              <button
+                onClick={connectToken}
+                disabled={
+                  !tokenDraft.trim() ||
+                  zenStatus === "checking" ||
+                  zenStatus === "syncing"
+                }
+                className="btn-primary text-sm whitespace-nowrap"
+              >
+                {zenStatus === "checking" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : zenStatus === "syncing" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <LinkIcon className="w-3.5 h-3.5" />
+                )}
+                {zenStatus === "checking"
+                  ? "Проверяю..."
+                  : zenStatus === "syncing"
+                    ? "Качаю данные..."
+                    : "Подключить и синхронизировать"}
+              </button>
+            </div>
           </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleFile(file);
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle2 className="w-4 h-4 text-income" />
+              <span className="text-text">Подключено</span>
+              {zenLastSyncAt && (
+                <span className="text-xs text-muted">
+                  · последний синк {new Date(zenLastSyncAt).toLocaleString("ru-RU")}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={runFullSync}
+                disabled={zenStatus === "syncing"}
+                className="btn-ghost text-xs text-muted"
+                title="Сбросить локальный кэш и скачать всё заново"
+              >
+                Полный синк
+              </button>
+              <button
+                onClick={runSync}
+                disabled={zenStatus === "syncing"}
+                className="btn-primary text-sm"
+              >
+                {zenStatus === "syncing" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                {zenStatus === "syncing" ? "Синхронизирую..." : "Синхронизировать"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {zenError && (
+          <div className="mt-3 text-xs text-expense flex items-start gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{zenError}</span>
+          </div>
+        )}
+        {syncSuccess && (
+          <div className="mt-3 text-xs text-income flex items-start gap-2">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{syncSuccess}</span>
+          </div>
+        )}
+      </div>
+
+      {/* CSV import — alternative source */}
+      <div className="card card-pad">
+        <div className="font-medium mb-3 flex items-center gap-2">
+          <Upload className="w-4 h-4 text-accent" />
+          Импорт CSV-выгрузки{" "}
+          <span className="text-muted text-xs font-normal">(офлайн-синхронизация)</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+          {/* Left: mode toggle + status */}
+          <div className="flex flex-col justify-center gap-3">
+            {transactions.length > 0 ? (
+              <>
+                <div>
+                  <div className="label mb-1.5">Режим</div>
+                  <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
+                    <button
+                      onClick={() => setMode("merge")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
+                        mode === "merge"
+                          ? "bg-accent text-accent-fg"
+                          : "text-muted hover:text-text"
+                      }`}
+                      title="Добавить новые операции, дубликаты по id отбрасываются"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      Дополнить
+                    </button>
+                    <button
+                      onClick={() => setMode("replace")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
+                        mode === "replace"
+                          ? "bg-accent text-accent-fg"
+                          : "text-muted hover:text-text"
+                      }`}
+                      title="Удалить все текущие данные и загрузить файл с нуля"
+                    >
+                      <Replace className="w-3.5 h-3.5" />
+                      Заменить
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-muted">
+                  В базе: <strong className="text-text">{formatNum(transactions.length)}</strong>{" "}
+                  операций.{" "}
+                  {mode === "merge"
+                    ? "Новый файл добавит свежие операции, дубликаты по id будут отброшены."
+                    : "Новый файл полностью заменит текущие данные."}
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-muted">
+                Файл обрабатывается локально, в браузере — никуда не отправляется. Подходит любая
+                CSV-выгрузка из Дзен-мани (формат:{" "}
+                <code className="pill">date;categoryName;…</code>).
+              </div>
+            )}
+          </div>
+          {/* Right: dropzone */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
             }}
-          />
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+            className={`cursor-pointer transition-all border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center px-4 py-5 gap-1.5 min-h-[120px] ${
+              dragOver
+                ? "border-accent bg-accent/5"
+                : "border-border hover:border-accent/50 hover:bg-panel2/30"
+            }`}
+          >
+            <Upload className="w-7 h-7 text-accent" />
+            <div className="text-sm font-medium">
+              {busy ? "Обрабатываю..." : "Перетащите CSV или кликните"}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -338,18 +628,29 @@ export function ImportPage() {
               </div>
             </div>
           </div>
-          <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
-            <button
-              onClick={async () => {
-                if (confirm("Удалить все загруженные транзакции?")) {
-                  await clearAll();
-                }
-              }}
-              className="btn-danger text-xs"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Очистить данные
-            </button>
+          <div className="mt-4 pt-4 border-t border-border flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <button
+                onClick={async () => {
+                  if (
+                    confirm(
+                      "Удалить все локально сохранённые транзакции из этого браузера?\n\nДанные в Дзен-мани НЕ пострадают — мы вообще ничего туда не пишем."
+                    )
+                  ) {
+                    await clearAll();
+                  }
+                }}
+                className="btn-danger text-xs"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Очистить локальные данные
+              </button>
+              <div className="text-[11px] text-muted mt-2 max-w-prose">
+                Удалит только локальную копию операций в этом браузере.{" "}
+                <strong className="text-text">Данные в облаке Дзен-мани не трогаем</strong>
+                {" "}— приложение работает в режиме «только чтение» из API и ничего туда не пишет.
+              </div>
+            </div>
             <button onClick={() => nav("/")} className="btn-primary text-sm">
               Открыть аналитику →
             </button>
@@ -357,99 +658,59 @@ export function ImportPage() {
         </div>
       )}
 
-      {transactions.length > 0 && (
-        <div className="card card-pad">
-          <div className="flex items-center gap-2 mb-3">
-            <Users className="w-5 h-5 text-accent2" />
-            <span className="font-medium">Группировка похожих получателей</span>
-          </div>
-          <p className="text-xs text-muted mb-3">
-            Объединяет варианты одного и того же получателя через нормализацию (удаление номеров,
-            пробелов, форм. суффиксов, лидирующих банков). Например, «Магнит #1234» и «MAGNIT-MOSCOW»
-            → один payee.
-          </p>
-          <label className="flex items-center gap-3 p-3 bg-panel2 rounded-lg border border-border cursor-pointer">
-            <input
-              type="checkbox"
-              checked={payeeGrouping}
-              onChange={(e) => setPayeeGrouping(e.target.checked)}
-              className="accent-accent w-4 h-4"
-            />
-            <div className="flex-1">
-              <div className="font-medium text-sm">
-                {payeeGrouping ? "Группировка включена" : "Группировка выключена"}
-              </div>
-              <div className="text-xs text-muted">
-                {aliasPreview && aliasPreview.size > 0
-                  ? `Найдено вариантов: ${aliasPreview.size}. Toggle обратимый — можно вернуть оригинальные имена.`
-                  : "Похожих получателей не найдено в текущих данных."}
-              </div>
-            </div>
-          </label>
-          {payeeGrouping && aliasPreview && aliasPreview.size > 0 && (
-            <details className="mt-3">
-              <summary className="text-xs text-accent cursor-pointer hover:underline">
-                Показать применённые объединения ({aliasPreview.size})
-              </summary>
-              <div className="mt-2 max-h-60 overflow-y-auto text-xs space-y-1">
-                {Array.from(aliasPreview.entries()).slice(0, 50).map(([from, to]) => (
-                  <div key={from} className="flex items-center gap-2 text-muted">
-                    <span className="truncate flex-1" title={from}>{from}</span>
-                    <span>→</span>
-                    <span className="text-text truncate flex-1" title={to}>{to}</span>
-                  </div>
-                ))}
-                {aliasPreview.size > 50 && (
-                  <div className="text-muted">…и ещё {aliasPreview.size - 50}</div>
-                )}
-              </div>
-            </details>
-          )}
-        </div>
-      )}
+      <SectionHeading>Валюты и инфляция</SectionHeading>
 
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
-          <Database className="w-5 h-5 text-accent" />
-          <span className="font-medium">Backup всех данных</span>
+          <Coins className="w-5 h-5 text-accent2" />
+          <span className="font-medium">
+            {zenToken ? "Валюта" : `Курсы валют (к ${rates.base})`}
+          </span>
         </div>
-        <p className="text-xs text-muted mb-3">
-          Экспортирует JSON со всеми транзакциями, бюджетами, целями, калибровкой, видами,
-          аннотациями, тегами категорий, инфляцией и настройкой группировки. Импорт восстанавливает
-          всё одним файлом.
+        <p className="text-xs text-muted mb-4">
+          {zenToken
+            ? "Курсы тянутся из Дзен-мани при каждой синхронизации — настраивать вручную не нужно. Здесь только выбор базовой валюты, в которой показываются KPI и графики."
+            : "Используются для сведения операций в разных валютах в единую базу. Меняйте здесь, если нужны точные курсы. Все суммы пересчитываются автоматически."}
         </p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={exportBackup}
-            disabled={backupBusy || transactions.length === 0}
-            className="btn-primary text-sm"
-          >
-            <Download className="w-4 h-4" />
-            Скачать backup
-          </button>
-          <button
-            onClick={() => backupRef.current?.click()}
-            disabled={backupBusy}
-            className="btn-ghost text-sm"
-          >
-            <Upload className="w-4 h-4" />
-            Восстановить из backup
-          </button>
-          <input
-            ref={backupRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importBackup(f);
-              e.target.value = "";
-            }}
-          />
-          {backupMsg && (
-            <span className="text-xs text-muted self-center">{backupMsg}</span>
-          )}
+        <div className={zenToken ? "" : "mb-4"}>
+          <label className="label block mb-1">Базовая валюта</label>
+          <div className="flex items-center gap-2">
+            <div className="w-32">
+              <Combobox
+                value={rates.base}
+                options={Object.keys(rates.rates).sort()}
+                onChange={(next) => {
+                  setBase(next).catch((err: Error) => alert(err.message));
+                }}
+                allowCustom={false}
+                maxHeight="min(40vh, 280px)"
+              />
+            </div>
+            <span className="text-xs text-muted">
+              В этой валюте показываются все KPI и графики
+            </span>
+          </div>
         </div>
+        {!zenToken && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Object.entries(rates.rates).map(([cur, val]) => (
+              <div key={cur}>
+                <label className="label block mb-1">1 {cur} =</label>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={val}
+                    onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
+                    disabled={cur === rates.base}
+                    className="input text-sm"
+                  />
+                  <span className="text-xs text-muted">{rates.base}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card card-pad">
@@ -508,103 +769,167 @@ export function ImportPage() {
         </div>
       </div>
 
-      <div className="card card-pad">
-        <div className="flex items-center gap-2 mb-3">
-          <Coins className="w-5 h-5 text-accent2" />
-          <span className="font-medium">Курсы валют (к {rates.base})</span>
-        </div>
-        <p className="text-xs text-muted mb-4">
-          Используются для сведения операций в разных валютах в единую базу. Меняйте здесь, если
-          нужны точные курсы. Все суммы пересчитываются автоматически.
-        </p>
-        <div className="mb-4">
-          <label className="label block mb-1">Базовая валюта</label>
-          <div className="flex items-center gap-2">
-            <select
-              value={rates.base}
-              onChange={(e) => {
-                const next = e.target.value;
-                setBase(next).catch((err: Error) => alert(err.message));
-              }}
-              className="input text-sm"
-            >
-              {Object.keys(rates.rates)
-                .sort()
-                .map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-            </select>
-            <span className="text-xs text-muted">
-              В этой валюте показываются все KPI и графики
-            </span>
+      {transactions.length > 0 && <SectionHeading>Обработка данных</SectionHeading>}
+      {transactions.length > 0 && (
+        <div className="card card-pad">
+          <div className="flex items-center gap-2 mb-3">
+            <Users className="w-5 h-5 text-accent2" />
+            <span className="font-medium">Группировка похожих получателей</span>
           </div>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {Object.entries(rates.rates).map(([cur, val]) => (
-            <div key={cur}>
-              <label className="label block mb-1">1 {cur} =</label>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  step="0.01"
-                  value={val}
-                  onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
-                  disabled={cur === rates.base}
-                  className="input text-sm"
-                />
-                <span className="text-xs text-muted">{rates.base}</span>
+          <p className="text-xs text-muted mb-3">
+            Объединяет варианты одного и того же получателя через нормализацию (удаление номеров,
+            пробелов, форм. суффиксов, лидирующих банков). Например, «Магнит #1234» и «MAGNIT-MOSCOW»
+            → один payee.
+          </p>
+          <label className="flex items-center gap-3 p-3 bg-panel2 rounded-lg border border-border cursor-pointer">
+            <input
+              type="checkbox"
+              checked={payeeGrouping}
+              onChange={(e) => setPayeeGrouping(e.target.checked)}
+              className="accent-accent w-4 h-4"
+            />
+            <div className="flex-1">
+              <div className="font-medium text-sm">
+                {payeeGrouping ? "Группировка включена" : "Группировка выключена"}
+              </div>
+              <div className="text-xs text-muted">
+                {aliasPreview && aliasPreview.size > 0
+                  ? `Найдено вариантов: ${aliasPreview.size}. Toggle обратимый — можно вернуть оригинальные имена.`
+                  : "Похожих получателей не найдено в текущих данных."}
               </div>
             </div>
-          ))}
+          </label>
+          {payeeGrouping && aliasPreview && aliasPreview.size > 0 && (
+            <details className="mt-3">
+              <summary className="text-xs text-accent cursor-pointer hover:underline">
+                Показать применённые объединения ({aliasPreview.size})
+              </summary>
+              <div className="mt-2 max-h-60 overflow-y-auto text-xs space-y-1">
+                {Array.from(aliasPreview.entries()).slice(0, 50).map(([from, to]) => (
+                  <div key={from} className="flex items-center gap-2 text-muted">
+                    <span className="truncate flex-1" title={from}>{from}</span>
+                    <span>→</span>
+                    <span className="text-text truncate flex-1" title={to}>{to}</span>
+                  </div>
+                ))}
+                {aliasPreview.size > 50 && (
+                  <div className="text-muted">…и ещё {aliasPreview.size - 50}</div>
+                )}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
+      <SectionHeading>Резервные копии</SectionHeading>
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <Database className="w-5 h-5 text-accent" />
+          <span className="font-medium">Бэкап всех данных</span>
+        </div>
+        <p className="text-xs text-muted mb-3">
+          Экспортирует JSON со всеми транзакциями, бюджетами, целями, калибровкой, видами,
+          аннотациями, тегами категорий, инфляцией и настройкой группировки. Импорт восстанавливает
+          всё одним файлом.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={exportBackup}
+            disabled={backupBusy || transactions.length === 0}
+            className="btn-primary text-sm"
+          >
+            <Download className="w-4 h-4" />
+            Скачать бэкап
+          </button>
+          <button
+            onClick={() => backupRef.current?.click()}
+            disabled={backupBusy}
+            className="btn-ghost text-sm"
+          >
+            <Upload className="w-4 h-4" />
+            Восстановить из бэкапа
+          </button>
+          <input
+            ref={backupRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importBackup(f);
+              e.target.value = "";
+            }}
+          />
+          {backupMsg && (
+            <span className="text-xs text-muted self-center">{backupMsg}</span>
+          )}
         </div>
       </div>
 
-      {transactions.length > 0 && (
-        <div className="card card-pad">
-          <div className="font-medium mb-3">Превью (последние 10 операций)</div>
-          <div className="overflow-x-auto -mx-2">
-            <table className="w-full text-sm">
-              <thead>
-                <tr>
-                  <th className="table-th">Дата</th>
-                  <th className="table-th">Категория</th>
-                  <th className="table-th">Получатель</th>
-                  <th className="table-th text-right">Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions
-                  .slice()
-                  .sort((a, b) => b.date.localeCompare(a.date))
-                  .slice(0, 10)
-                  .map((t) => (
-                    <tr key={t.id}>
-                      <td className="table-td whitespace-nowrap text-muted">
-                        {formatDate(t.date, "short")}
-                      </td>
-                      <td className="table-td truncate max-w-[200px]">{t.categoryFull}</td>
-                      <td className="table-td truncate max-w-[200px]">{t.payee || "—"}</td>
-                      <td
-                        className={`table-td text-right font-medium tabular-nums ${
-                          t.kind === "income"
-                            ? "text-income"
-                            : t.kind === "expense"
-                              ? "text-expense"
-                              : ""
-                        }`}
-                      >
-                        {t.kind === "income" ? "+" : t.kind === "expense" ? "−" : ""}
-                        {formatMoney(t.amount, t.currency)}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
+      {/* Scheduled backup */}
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock className="w-5 h-5 text-accent" />
+          <span className="font-medium">Бэкап по расписанию</span>
         </div>
-      )}
+        <p className="text-xs text-muted mb-3">
+          Автоматически скачивает JSON-бэкап с указанной периодичностью. Проверка
+          запускается при открытии приложения и каждые ~10 минут. Файл уходит в
+          стандартную папку загрузок браузера.
+          <br />
+          <strong>Важно:</strong> работает только пока вкладка открыта. Браузер
+          может показать уведомление о скачивании — это нормально.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+          {(["off", "hour", "day", "week"] as BackupInterval[]).map((i) => {
+            const label = {
+              off: "Выключен",
+              hour: "Каждый час",
+              day: "Каждый день",
+              week: "Каждую неделю",
+            }[i];
+            const active = backupInterval === i;
+            return (
+              <button
+                key={i}
+                onClick={() => setBackupInterval(i)}
+                className={`p-2 rounded-lg border text-xs text-left transition-colors ${
+                  active
+                    ? "bg-accent/10 border-accent text-accent"
+                    : "bg-panel2 border-border hover:border-accent/50"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <button
+            onClick={triggerScheduledNow}
+            disabled={transactions.length === 0}
+            className="btn-ghost"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Скачать сейчас
+          </button>
+          <span className="text-muted">
+            {backupLastAt
+              ? `Последний бэкап: ${new Date(backupLastAt).toLocaleString("ru-RU")}`
+              : "Бэкапов ещё не было"}
+          </span>
+          {scheduledMsg && <span className="text-income">{scheduledMsg}</span>}
+        </div>
+      </div>
+
     </div>
+  );
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-sm font-semibold uppercase tracking-wider text-muted px-1 pt-2">
+      {children}
+    </h2>
   );
 }

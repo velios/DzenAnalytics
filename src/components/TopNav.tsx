@@ -5,8 +5,8 @@ import {
   Wallet,
   TrendingUp,
   GitCompare,
-  Upload,
   LineChart,
+  ListChecks,
   CalendarDays,
   Hash,
   Repeat,
@@ -27,30 +27,32 @@ import {
   FlaskConical,
   Sparkles,
   Newspaper,
+  Settings,
   Menu,
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { useDataStore } from "../store/useDataStore";
-import { formatNum } from "../lib/format";
+import { useThemeStore } from "../store/useThemeStore";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import logoMark from "../assets/logo-mark.svg";
+import logoHorizontal from "../assets/logo-horizontal.svg";
+import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
 
 const PRIMARY = [
   { to: "/", label: "Главная", icon: LayoutDashboard },
-  { to: "/cashflow", label: "Cash-flow", icon: LineChart },
+  { to: "/transactions", label: "Операции", icon: ListChecks },
+  { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/categories", label: "Категории", icon: PieChart },
   { to: "/trends", label: "Тренды", icon: Activity },
   { to: "/goals", label: "Цели", icon: Target },
 ];
 
 const SECONDARY = [
+  { to: "/cashflow", label: "Cash-flow", icon: LineChart },
   { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/whatif", label: "Что-если", icon: FlaskConical },
   { to: "/year-review", label: "Год в цифрах", icon: Sparkles },
   { to: "/digest", label: "Дайджест", icon: Newspaper },
   { to: "/budgets", label: "Бюджеты", icon: Target },
-  { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/calendar", label: "Календарь", icon: CalendarDays },
   { to: "/sankey", label: "Потоки", icon: GitFork },
   { to: "/anomalies", label: "Аномалии", icon: Zap },
@@ -63,39 +65,24 @@ const SECONDARY = [
   { to: "/compare", label: "Сравнение", icon: GitCompare },
   { to: "/top", label: "Топ", icon: TrendingUp },
   { to: "/rules", label: "Правила", icon: Wand2 },
-  { to: "/help", label: "Справка", icon: HelpCircle },
-  { to: "/import", label: "Импорт", icon: Upload },
 ];
 
 export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
-  const txCount = useDataStore((s) => s.transactions.length);
-  const meta = useDataStore((s) => s.importMeta);
   const [moreOpen, setMoreOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const loc = useLocation();
+  const theme = useThemeStore((s) => s.resolved);
 
   const inSecondary = SECONDARY.some((s) => loc.pathname === s.to);
 
   return (
     <header className="border-b border-border bg-panel/80 backdrop-blur sticky top-0 z-30">
       <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-3 flex items-center gap-3 md:gap-6">
-        <div className="flex items-center gap-2 shrink-0">
-          <img
-            src={logoMark}
-            alt="DzenAnalytics"
-            width={32}
-            height={32}
-            className="w-8 h-8 rounded-lg"
-          />
-          <div className="hidden sm:block">
-            <div className="text-sm font-semibold leading-none">DzenAnalytics</div>
-            <div className="text-[10px] text-muted leading-none mt-0.5">
-              {txCount > 0
-                ? `${formatNum(txCount)} операций${meta ? ` · ${new Date(meta.importedAt).toLocaleDateString("ru-RU")}` : ""}`
-                : "Аналитика финансов"}
-            </div>
-          </div>
-        </div>
+        <img
+          src={theme === "dark" ? logoHorizontalDark : logoHorizontal}
+          alt="DzenAnalytics"
+          className="h-12 w-auto shrink-0"
+        />
 
         {/* Desktop nav */}
         <nav className="hidden lg:flex items-center gap-1 ml-2 flex-1">
@@ -180,6 +167,40 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </button>
 
         <ThemeSwitcher />
+
+        {/* Settings — animated gear */}
+        <NavLink
+          to="/import"
+          title="Настройки"
+          className={({ isActive }) =>
+            clsx(
+              "group relative p-1.5 rounded-lg border transition-all",
+              isActive
+                ? "border-transparent bg-gradient-to-br from-accent to-accent2 text-white shadow-sm"
+                : "border-border bg-panel2 text-muted hover:text-accent hover:border-accent/50"
+            )
+          }
+        >
+          <Settings
+            className="w-4 h-4 transition-transform duration-500 ease-out group-hover:rotate-90"
+          />
+        </NavLink>
+
+        {/* Help — animated question mark */}
+        <NavLink
+          to="/help"
+          title="Справка"
+          className={({ isActive }) =>
+            clsx(
+              "group relative p-1.5 rounded-lg border transition-all",
+              isActive
+                ? "border-transparent bg-gradient-to-br from-accent2 to-accent text-white shadow-sm"
+                : "border-border bg-panel2 text-muted hover:text-accent2 hover:border-accent2/50"
+            )
+          }
+        >
+          <HelpCircle className="w-4 h-4 transition-transform duration-300 ease-out group-hover:scale-110" />
+        </NavLink>
 
         {/* Mobile burger */}
         <button

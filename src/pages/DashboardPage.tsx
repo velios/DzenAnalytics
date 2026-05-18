@@ -25,7 +25,6 @@ import {
   Hash,
   GitCompare,
   PieChart,
-  TrendingDown as Down,
   Camera,
   Loader2,
 } from "lucide-react";
@@ -41,11 +40,17 @@ import {
   netWorthSeries,
   buildInsights,
   detectRecurring,
-  topTransactions,
   dailyExpenseMap,
   buildForecast,
   applyCategoryFlags,
+  balancesByAccount,
 } from "../lib/aggregations";
+import {
+  getLiveAccountsFromCache,
+  type LiveAccount,
+} from "../store/useZenmoneyStore";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { CategoryDot } from "../components/CategoryDot";
 import {
   formatMoney,
   formatNum,
@@ -77,6 +82,51 @@ const HEATMAP_COLORS = [
 
 const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTH_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+// Zenmoney account-type strings → Russian labels for the dashboard table.
+const ACCOUNT_TYPE_RU: Record<string, string> = {
+  ccard: "Карта",
+  debit: "Карта",
+  checking: "Счёт",
+  cash: "Наличные",
+  deposit: "Вклад",
+  loan: "Долг",
+  credit: "Долг",
+  debt: "Долг",
+  emoney: "Кошелёк",
+};
+
+function accountTypeLabel(type: string): string {
+  if (!type) return "—";
+  return ACCOUNT_TYPE_RU[type] || type;
+}
+
+/** Stable hash → hue for the avatar tint. */
+function hueFromString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+function AccountAvatar({ title, type }: { title: string; type: string }) {
+  const first = (title.trim()[0] || "?").toUpperCase();
+  const hue = hueFromString(title);
+  // Loans get a neutral grey tint to read as "не свои деньги".
+  const isDebt = type === "loan" || type === "credit" || type === "debt";
+  const bg = isDebt
+    ? "rgb(var(--c-panel2))"
+    : `hsl(${hue} 70% 92%)`;
+  const fg = isDebt ? "rgb(var(--c-muted))" : `hsl(${hue} 50% 35%)`;
+  return (
+    <div
+      className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0"
+      style={{ background: bg, color: fg }}
+      title={accountTypeLabel(type)}
+    >
+      {first}
+    </div>
+  );
+}
 
 function buildBins(values: number[], n = 8): number[] {
   const positives = values.filter((v) => v > 0).sort((a, b) => a - b);
@@ -227,6 +277,15 @@ export function DashboardPage() {
   const calibration = useCalibrationStore((s) => s.calibration);
   const hydrateCalibration = useCalibrationStore((s) => s.hydrate);
   const calibLoaded = useCalibrationStore((s) => s.loaded);
+  // API-mode users get auto-calibration on every sync, so the manual
+  // calibration banner becomes noise. Hide it.
+  const zenToken = useZenmoneyStore((s) => s.token);
+  const zenHydrate = useZenmoneyStore((s) => s.hydrate);
+  const zenLoaded = useZenmoneyStore((s) => s.loaded);
+  useEffect(() => {
+    if (!zenLoaded) zenHydrate();
+  }, [zenLoaded, zenHydrate]);
+  const apiConnected = !!zenToken;
   const flags = useCategoryFlagsStore((s) => s.flags);
   const flagsHydrate = useCategoryFlagsStore((s) => s.hydrate);
   const flagsLoaded = useCategoryFlagsStore((s) => s.loaded);
@@ -245,10 +304,14 @@ export function DashboardPage() {
     () => netWorthSeries(transactions, calibration),
     [transactions, calibration]
   );
-  const cats = useMemo(() => groupByCategory(transactions, "top"), [transactions]);
-  const insights = useMemo(() => buildInsights(transactions), [transactions]);
+  const insights = useMemo(() => {
+    // Insights are most actionable when scoped to the current calendar year —
+    // year-old MoM swings or annual totals are noise on a dashboard.
+    const year = new Date().getFullYear().toString();
+    const thisYear = transactions.filter((t) => t.date.startsWith(year));
+    return buildInsights(thisYear);
+  }, [transactions]);
   const recurring = useMemo(() => detectRecurring(transactions), [transactions]);
-  const topTx = useMemo(() => topTransactions(transactions, "expense", 5), [transactions]);
   const flagsBreakdown = useMemo(() => {
     const fixed = new Set<string>();
     const disc = new Set<string>();
@@ -264,6 +327,70 @@ export function DashboardPage() {
   }, [flags, months, transactions]);
   const dayMap = useMemo(() => dailyExpenseMap(transactions), [transactions]);
 
+  // Account balances. If the Zenmoney cache is present, prefer real
+  // per-account balances from the API (they include startBalance and any
+  // server-side reconciliation). Otherwise fall back to the CSV-style
+  // flow-derived totals.
+  const [liveAccounts, setLiveAccounts] = useState<LiveAccount[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getLiveAccountsFromCache().then((data) => {
+      if (!cancelled) setLiveAccounts(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
+  const baseRates = useDataStore((s) => s.rates);
+  const accountRows = useMemo(() => {
+    if (liveAccounts && liveAccounts.length > 0) {
+      // Convert to base currency and sort by |balance| desc.
+      return liveAccounts
+        .filter((a) => a.inBalance && !a.archive)
+        .map((a) => ({
+          title: a.title,
+          balanceBase:
+            a.currency === baseRates.base
+              ? a.balance
+              : a.balance * (baseRates.rates[a.currency] || 1),
+          nativeBalance: a.balance,
+          nativeCurrency: a.currency,
+          type: a.type,
+        }))
+        .sort((a, b) => Math.abs(b.balanceBase) - Math.abs(a.balanceBase));
+    }
+    return balancesByAccount(transactions).map((a) => ({
+      title: a.account,
+      balanceBase: a.balance,
+      nativeBalance: a.balance,
+      nativeCurrency: base,
+      type: "",
+    }));
+  }, [liveAccounts, transactions, base, baseRates]);
+  const [showAllAccounts, setShowAllAccounts] = useState(false);
+
+  // Top-10 categories of the CURRENT month (replaces all-time top-7).
+  const currentYM = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+  const catsThisMonth = useMemo(() => {
+    const thisMonthTxs = transactions.filter((t) => t.date.startsWith(currentYM));
+    return groupByCategory(thisMonthTxs, "top")
+      .filter((c) => c.expense > 0)
+      .slice(0, 10);
+  }, [transactions, currentYM]);
+
+  function openAccount(title: string) {
+    const txs = transactions.filter(
+      (t) =>
+        t.account === title ||
+        t.outcomeAccount === title ||
+        t.incomeAccount === title
+    );
+    showDrill(title, txs, "Операции по счёту");
+  }
+
   if (transactions.length === 0) return <EmptyState />;
 
   const last = months[months.length - 1];
@@ -278,12 +405,6 @@ export function DashboardPage() {
     .filter((r) => r.nextExpected >= today)
     .sort((a, b) => a.nextExpected.localeCompare(b.nextExpected))
     .slice(0, 5);
-
-  function openTx(id: string) {
-    const tx = transactions.find((t) => t.id === id);
-    if (!tx) return;
-    showDrill(tx.payee || tx.categoryFull, [tx], "Операция");
-  }
 
   function openCategory(name: string) {
     const txs = transactions.filter((t) => t.kind === "expense" && t.category === name);
@@ -361,9 +482,11 @@ export function DashboardPage() {
         </button>
       </div>
 
-      <div data-export-skip="1">
-        <QuickCalibration />
-      </div>
+      {!apiConnected && (
+        <div data-export-skip="1">
+          <QuickCalibration />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card card-pad">
@@ -493,6 +616,16 @@ export function DashboardPage() {
                   tickFormatter={(d) => formatDate(d, "short")}
                   minTickGap={50}
                 />
+                <YAxis
+                  stroke={chartAxisStroke}
+                  fontSize={11}
+                  width={72}
+                  // formatMoney with compact picks "тыс./млн/млрд" by magnitude,
+                  // so labels auto-scale to the user's actual balance range.
+                  tickFormatter={(v: number) =>
+                    formatMoney(v, base, { compact: true })
+                  }
+                />
                 <Tooltip
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
@@ -594,79 +727,182 @@ export function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Account balances — table */}
+        <div className="card card-pad">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="font-semibold flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-accent" />
+              Балансы счетов
+            </div>
+            <Link
+              to="/accounts"
+              className="text-xs text-accent hover:underline flex items-center gap-1"
+            >
+              все <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+          {accountRows.length === 0 ? (
+            <div className="text-sm text-muted text-center py-6">Нет счетов</div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted text-left">
+                      <th className="font-normal py-1 w-8"></th>
+                      <th className="font-normal py-1">Счёт</th>
+                      <th className="font-normal py-1">Тип</th>
+                      <th className="font-normal py-1 text-right">Баланс</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(showAllAccounts
+                      ? accountRows
+                      : accountRows.slice(0, 10)
+                    ).map((a) => {
+                      const isNegative = a.balanceBase < 0;
+                      const hasFx = a.nativeCurrency !== base;
+                      return (
+                        <tr
+                          key={a.title}
+                          onClick={() => openAccount(a.title)}
+                          className="border-t border-border hover:bg-panel2/50 cursor-pointer group"
+                        >
+                          <td className="py-2 pr-2">
+                            <AccountAvatar
+                              title={a.title}
+                              type={a.type}
+                            />
+                          </td>
+                          <td className="py-2 pr-2">
+                            <div
+                              className="font-medium truncate max-w-[180px] group-hover:text-accent"
+                              title={a.title}
+                            >
+                              {a.title}
+                            </div>
+                          </td>
+                          <td className="py-2 pr-2 text-xs text-muted whitespace-nowrap">
+                            {accountTypeLabel(a.type)}
+                          </td>
+                          <td className="py-2 text-right whitespace-nowrap">
+                            <div
+                              className={`font-semibold tabular-nums ${
+                                isNegative ? "text-expense" : "text-text"
+                              }`}
+                              title={formatMoney(a.balanceBase, base, {
+                                decimals: 2,
+                              })}
+                            >
+                              {Math.abs(a.balanceBase) >= 1_000_000
+                                ? formatMoney(a.balanceBase, base, {
+                                    compact: true,
+                                    decimals: 2,
+                                  })
+                                : formatMoney(a.balanceBase, base, {
+                                    decimals: 2,
+                                  })}
+                            </div>
+                            {hasFx && (
+                              <div
+                                className="text-[10px] text-muted tabular-nums"
+                                title={formatMoney(
+                                  a.nativeBalance,
+                                  a.nativeCurrency,
+                                  { decimals: 2 }
+                                )}
+                              >
+                                {Math.abs(a.nativeBalance) >= 1_000_000
+                                  ? formatMoney(
+                                      a.nativeBalance,
+                                      a.nativeCurrency,
+                                      { compact: true, decimals: 2 }
+                                    )
+                                  : formatMoney(
+                                      a.nativeBalance,
+                                      a.nativeCurrency,
+                                      { decimals: 2 }
+                                    )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {accountRows.length > 10 && (
+                <button
+                  onClick={() => setShowAllAccounts((v) => !v)}
+                  className="btn-ghost text-xs mt-3 mx-auto block text-muted"
+                >
+                  {showAllAccounts
+                    ? "Свернуть"
+                    : `Показать ещё ${accountRows.length - 10}`}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Top-10 categories of the current month */}
         <div className="card card-pad">
           <div className="flex items-center justify-between mb-3">
             <div className="font-semibold flex items-center gap-2">
               <PieChart className="w-4 h-4 text-accent" />
-              Топ-7 категорий расходов
+              Топ-10 категорий за{" "}
+              <span className="text-muted font-normal text-xs">
+                {monthLabel(currentYM)}
+              </span>
             </div>
-            <Link to="/categories" className="text-xs text-accent hover:underline flex items-center gap-1">
+            <Link
+              to="/categories"
+              className="text-xs text-accent hover:underline flex items-center gap-1"
+            >
               все <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
-          <div className="space-y-2">
-            {cats.slice(0, 7).map((c) => {
-              const pct = cats[0].expense > 0 ? c.expense / cats[0].expense : 0;
-              return (
-                <button
-                  key={c.category}
-                  onClick={() => openCategory(c.category)}
-                  className="w-full text-left text-sm group"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="truncate group-hover:text-accent">{c.category}</span>
-                    <span className="tabular-nums text-xs">
-                      {formatMoney(c.expense, base, { compact: true })}
-                    </span>
-                  </div>
-                  <div className="h-1.5 bg-panel2 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-expense rounded-full transition-all"
-                      style={{ width: `${pct * 100}%` }}
-                    />
-                  </div>
-                  <div className="text-[10px] text-muted mt-0.5">
-                    {c.count} оп.
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="card card-pad">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold flex items-center gap-2">
-              <Down className="w-4 h-4 text-expense" />
-              Крупнейшие траты
+          {catsThisMonth.length === 0 ? (
+            <div className="text-sm text-muted text-center py-6">
+              За {monthLabel(currentYM)} ещё нет расходов.
             </div>
-            <Link to="/top" className="text-xs text-accent hover:underline flex items-center gap-1">
-              топ <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
-          <div className="space-y-2">
-            {topTx.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => openTx(t.id)}
-                className="w-full text-left p-2 -mx-2 rounded hover:bg-panel2/60 group"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate group-hover:text-accent">
-                      {t.payee || t.categoryFull}
+          ) : (
+            <div className="space-y-2">
+              {catsThisMonth.map((c) => {
+                const pct =
+                  catsThisMonth[0].expense > 0
+                    ? c.expense / catsThisMonth[0].expense
+                    : 0;
+                return (
+                  <button
+                    key={c.category}
+                    onClick={() => openCategory(c.category)}
+                    className="w-full text-left text-sm group"
+                  >
+                    <div className="flex items-center justify-between mb-1 gap-2">
+                      <span className="truncate group-hover:text-accent flex items-center gap-2 min-w-0">
+                        <CategoryDot category={c.category} size="w-5 h-5" />
+                        <span className="truncate">{c.category}</span>
+                      </span>
+                      <span className="tabular-nums text-xs shrink-0">
+                        {formatMoney(c.expense, base, { decimals: 2 })}
+                      </span>
                     </div>
-                    <div className="text-xs text-muted truncate">
-                      {formatDate(t.date, "short")} · {t.categoryFull}
+                    <div className="h-1.5 bg-panel2 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-expense rounded-full transition-all"
+                        style={{ width: `${pct * 100}%` }}
+                      />
                     </div>
-                  </div>
-                  <div className="text-sm font-semibold tabular-nums text-expense whitespace-nowrap">
-                    −{formatMoney(t.amount, t.currency)}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
+                    <div className="text-[10px] text-muted mt-0.5">
+                      {c.count} оп.
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
