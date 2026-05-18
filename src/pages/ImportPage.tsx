@@ -22,6 +22,7 @@ import {
   EyeOff,
   Link as LinkIcon,
   Unlink,
+  Clock,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { useDataStore } from "../store/useDataStore";
@@ -33,6 +34,7 @@ import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { formatMoney, formatNum, formatDate } from "../lib/format";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import * as db from "../lib/db";
@@ -149,6 +151,26 @@ export function ImportPage() {
     if (!confirm("Отключить токен Дзен-мани? Данные останутся, но автосинк станет недоступен.")) return;
     await zenRemoveToken();
     setSyncSuccess(null);
+  }
+
+  // Scheduled backup
+  const backupInterval = useBackupStore((s) => s.interval);
+  const backupLastAt = useBackupStore((s) => s.lastBackupAt);
+  const backupLoaded = useBackupStore((s) => s.loaded);
+  const backupHydrate = useBackupStore((s) => s.hydrate);
+  const setBackupInterval = useBackupStore((s) => s.setInterval);
+  const runBackupNow = useBackupStore((s) => s.runNow);
+  useEffect(() => {
+    if (!backupLoaded) backupHydrate();
+  }, [backupLoaded, backupHydrate]);
+  const [scheduledMsg, setScheduledMsg] = useState<string | null>(null);
+  async function triggerScheduledNow() {
+    try {
+      const r = await runBackupNow();
+      setScheduledMsg(`Скачано ${r.fileName} (${Math.round(r.size / 1024)} КБ)`);
+    } catch (e) {
+      setScheduledMsg(e instanceof Error ? e.message : "Ошибка");
+    }
   }
 
   const [dragOver, setDragOver] = useState(false);
@@ -709,6 +731,62 @@ export function ImportPage() {
           {backupMsg && (
             <span className="text-xs text-muted self-center">{backupMsg}</span>
           )}
+        </div>
+      </div>
+
+      {/* Scheduled backup */}
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock className="w-5 h-5 text-accent" />
+          <span className="font-medium">Бэкап по расписанию</span>
+        </div>
+        <p className="text-xs text-muted mb-3">
+          Автоматически скачивает JSON-бэкап с указанной периодичностью. Проверка
+          запускается при открытии приложения и каждые ~10 минут. Файл уходит в
+          стандартную папку загрузок браузера.
+          <br />
+          <strong>Важно:</strong> работает только пока вкладка открыта. Браузер
+          может показать уведомление о скачивании — это нормально.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+          {(["off", "hour", "day", "week"] as BackupInterval[]).map((i) => {
+            const label = {
+              off: "Выключен",
+              hour: "Каждый час",
+              day: "Каждый день",
+              week: "Каждую неделю",
+            }[i];
+            const active = backupInterval === i;
+            return (
+              <button
+                key={i}
+                onClick={() => setBackupInterval(i)}
+                className={`p-2 rounded-lg border text-xs text-left transition-colors ${
+                  active
+                    ? "bg-accent/10 border-accent text-accent"
+                    : "bg-panel2 border-border hover:border-accent/50"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <button
+            onClick={triggerScheduledNow}
+            disabled={transactions.length === 0}
+            className="btn-ghost"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Скачать сейчас
+          </button>
+          <span className="text-muted">
+            {backupLastAt
+              ? `Последний бэкап: ${new Date(backupLastAt).toLocaleString("ru-RU")}`
+              : "Бэкапов ещё не было"}
+          </span>
+          {scheduledMsg && <span className="text-income">{scheduledMsg}</span>}
         </div>
       </div>
 

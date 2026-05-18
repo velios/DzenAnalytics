@@ -32,6 +32,7 @@ import { YearReviewPage } from "./pages/YearReviewPage";
 import { DigestPage } from "./pages/DigestPage";
 import { useDataStore } from "./store/useDataStore";
 import { useThemeStore } from "./store/useThemeStore";
+import { useBackupStore } from "./store/useBackupStore";
 
 function FilteredLayout() {
   return (
@@ -50,14 +51,26 @@ function App() {
   const hydrate = useDataStore((s) => s.hydrate);
   const loaded = useDataStore((s) => s.loaded);
   const initTheme = useThemeStore((s) => s.init);
+  const backupHydrate = useBackupStore((s) => s.hydrate);
+  const backupRunIfDue = useBackupStore((s) => s.runIfDue);
+  const backupLoaded = useBackupStore((s) => s.loaded);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   useGlobalShortcuts(() => setPaletteOpen(true));
 
   useEffect(() => {
     hydrate();
+    backupHydrate();
     return initTheme();
-  }, [hydrate, initTheme]);
+  }, [hydrate, backupHydrate, initTheme]);
+
+  // Once backup settings are loaded, check on mount + every 10 minutes.
+  useEffect(() => {
+    if (!backupLoaded || !loaded) return;
+    backupRunIfDue();
+    const id = setInterval(() => backupRunIfDue(), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [backupLoaded, loaded, backupRunIfDue]);
 
   if (!loaded) {
     return (
