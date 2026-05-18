@@ -81,7 +81,7 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         <img
           src={theme === "dark" ? logoHorizontalDark : logoHorizontal}
           alt="DzenAnalytics"
-          className="h-8 w-auto shrink-0"
+          className="h-12 w-auto shrink-0"
         />
 
         {/* Desktop nav */}
