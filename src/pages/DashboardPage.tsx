@@ -881,8 +881,8 @@ export function DashboardPage() {
                     className="w-full text-left text-sm group"
                   >
                     <div className="flex items-center justify-between mb-1 gap-2">
-                      <span className="truncate group-hover:text-accent flex items-center gap-1.5 min-w-0">
-                        <CategoryDot category={c.category} />
+                      <span className="truncate group-hover:text-accent flex items-center gap-2 min-w-0">
+                        <CategoryDot category={c.category} size="w-5 h-5" />
                         <span className="truncate">{c.category}</span>
                       </span>
                       <span className="tabular-nums text-xs shrink-0">

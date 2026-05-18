@@ -266,8 +266,8 @@ export function TransactionsDrawer() {
                       {formatDate(t.date, "short")}
                     </td>
                     <td className="table-td max-w-[180px]">
-                      <div className="truncate flex items-center gap-1.5" title={t.categoryFull}>
-                        <CategoryDot category={t.category} />
+                      <div className="truncate flex items-center gap-2" title={t.categoryFull}>
+                        <CategoryDot category={t.category} size="w-5 h-5" />
                         <span className="truncate">{t.category}</span>
                         {isEdited && (
                           <Pencil
