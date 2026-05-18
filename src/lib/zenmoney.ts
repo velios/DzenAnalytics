@@ -49,6 +49,7 @@ export interface ZenTag {
   budgetIncome: boolean;
   budgetOutcome: boolean;
   icon: string | null;
+  picture: string | null;
   color: number | null;
   changed: number;
 }

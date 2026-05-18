@@ -17,6 +17,15 @@ import type {
   ZenInstrument,
 } from "./zenmoney";
 
+export interface CategoryMeta {
+  /** CSS rgb() string or null when the tag has no colour set. */
+  color: string | null;
+  /** Raw Zenmoney icon id (e.g. "5001_coat"). No public URL pattern yet, kept for future. */
+  icon: string | null;
+  /** Optional picture URL — set rarely. */
+  picture: string | null;
+}
+
 export interface MappedDiff {
   transactions: Transaction[];
   rates: CurrencyRates;
@@ -29,6 +38,23 @@ export interface MappedDiff {
   startBalanceTotal: number;
   // Sum of *current* balances of active accounts in base — used for auto-calibration
   currentBalanceTotal: number;
+  /** Tag title → meta (colour / icon / picture) for use in UI. */
+  categoryMeta: Record<string, CategoryMeta>;
+}
+
+/**
+ * Zenmoney stores `tag.color` as an ARGB-packed unsigned long
+ * (a*256³ + r*256² + g*256 + b). Decode to a CSS rgb() string, or null when
+ * the colour is missing / fully transparent.
+ */
+function colorIntToCss(c: number | null | undefined): string | null {
+  if (c == null) return null;
+  const a = (c >>> 24) & 0xff;
+  if (a === 0) return null;
+  const r = (c >>> 16) & 0xff;
+  const g = (c >>> 8) & 0xff;
+  const b = c & 0xff;
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function buildCategory(
@@ -212,6 +238,30 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
     return s + toBase(a.balance || 0, cur);
   }, 0);
 
+  // Build category meta keyed by tag title for UI lookups (dots, treemap, …).
+  // Multiple sub-tags can share a parent title — we'd rather have at least
+  // one colour set than none, so the first non-null wins.
+  const categoryMeta: Record<string, CategoryMeta> = {};
+  for (const tag of diff.tag) {
+    if (tag.archive) continue;
+    const cur = categoryMeta[tag.title];
+    const color = colorIntToCss(tag.color);
+    if (!cur || (!cur.color && color)) {
+      categoryMeta[tag.title] = {
+        color,
+        icon: tag.icon || null,
+        picture: tag.picture || null,
+      };
+    }
+  }
+  // Our local-only labels — give them neutral tones so they aren't styleless.
+  if (!categoryMeta["Перевод"]) {
+    categoryMeta["Перевод"] = { color: "rgb(148, 163, 184)", icon: null, picture: null };
+  }
+  if (!categoryMeta["Долг"]) {
+    categoryMeta["Долг"] = { color: "rgb(120, 120, 120)", icon: null, picture: null };
+  }
+
   return {
     transactions: txs,
     rates,
@@ -221,5 +271,6 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
     baseCurrency,
     startBalanceTotal,
     currentBalanceTotal,
+    categoryMeta,
   };
 }

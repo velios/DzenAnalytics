@@ -50,6 +50,7 @@ import {
   type LiveAccount,
 } from "../store/useZenmoneyStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { CategoryDot } from "../components/CategoryDot";
 import {
   formatMoney,
   formatNum,
@@ -879,11 +880,12 @@ export function DashboardPage() {
                     onClick={() => openCategory(c.category)}
                     className="w-full text-left text-sm group"
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="truncate group-hover:text-accent">
-                        {c.category}
+                    <div className="flex items-center justify-between mb-1 gap-2">
+                      <span className="truncate group-hover:text-accent flex items-center gap-1.5 min-w-0">
+                        <CategoryDot category={c.category} />
+                        <span className="truncate">{c.category}</span>
                       </span>
-                      <span className="tabular-nums text-xs">
+                      <span className="tabular-nums text-xs shrink-0">
                         {formatMoney(c.expense, base, { decimals: 2 })}
                       </span>
                     </div>

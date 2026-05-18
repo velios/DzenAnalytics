@@ -15,6 +15,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { Combobox } from "./Combobox";
+import { CategoryDot } from "./CategoryDot";
 import { formatMoney, formatDate } from "../lib/format";
 import type { Transaction } from "../types";
 
@@ -265,11 +266,12 @@ export function TransactionsDrawer() {
                       {formatDate(t.date, "short")}
                     </td>
                     <td className="table-td max-w-[180px]">
-                      <div className="truncate flex items-center gap-1" title={t.categoryFull}>
-                        {t.category}
+                      <div className="truncate flex items-center gap-1.5" title={t.categoryFull}>
+                        <CategoryDot category={t.category} />
+                        <span className="truncate">{t.category}</span>
                         {isEdited && (
                           <Pencil
-                            className="w-3 h-3 text-accent2"
+                            className="w-3 h-3 text-accent2 shrink-0"
                             aria-label="Отредактировано"
                           />
                         )}

@@ -16,6 +16,7 @@ import { ChevronRight, ChevronDown, MousePointerClick, Lock, Coffee } from "luci
 import clsx from "clsx";
 import { useEffect } from "react";
 import { useDataStore } from "../store/useDataStore";
+import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
@@ -39,14 +40,25 @@ const COLORS = [
 ];
 
 // Pick black/white text colour by the cell's perceived brightness so labels
-// stay readable against any palette colour.
-function readableTextOn(hex: string): string {
-  const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (!m) return "#0B1120";
-  const r = parseInt(m[1], 16);
-  const g = parseInt(m[2], 16);
-  const b = parseInt(m[3], 16);
-  // Standard relative luminance (sRGB approximation).
+// stay readable against any palette colour. Accepts both `#RRGGBB` (palette)
+// and `rgb(R, G, B)` (Zenmoney-derived) forms.
+function readableTextOn(color: string): string {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  const rgb = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+  const hex = color.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (rgb) {
+    r = Number(rgb[1]);
+    g = Number(rgb[2]);
+    b = Number(rgb[3]);
+  } else if (hex) {
+    r = parseInt(hex[1], 16);
+    g = parseInt(hex[2], 16);
+    b = parseInt(hex[3], 16);
+  } else {
+    return "#0B1120";
+  }
   const yiq = (r * 299 + g * 587 + b * 114) / 1000;
   return yiq > 160 ? "#0B1120" : "#FFFFFF";
 }
@@ -67,6 +79,7 @@ interface TreemapCellProps {
   value?: number;
   base: string;
   colors: string[];
+  categoryColors?: Record<string, string | null>;
 }
 
 function TreemapCell(props: TreemapCellProps) {
@@ -80,9 +93,12 @@ function TreemapCell(props: TreemapCellProps) {
     value = 0,
     base,
     colors,
+    categoryColors,
   } = props;
   if (width < 1 || height < 1) return <g />;
-  const fill = colors[index % colors.length];
+  // Prefer the category's own colour from Zenmoney; fall back to the palette.
+  const fill =
+    (categoryColors && categoryColors[name]) || colors[index % colors.length];
   const textColor = readableTextOn(fill);
   const subColor = textColor === "#FFFFFF" ? "rgba(255,255,255,0.78)" : "rgba(11,17,32,0.72)";
 
@@ -194,6 +210,19 @@ function buildHierarchy(txs: Transaction[], kind: "expense" | "income"): Categor
 export function CategoriesPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const categoryMeta = useCategoryMetaStore((s) => s.meta);
+  const metaLoaded = useCategoryMetaStore((s) => s.loaded);
+  const hydrateMeta = useCategoryMetaStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!metaLoaded) hydrateMeta();
+  }, [metaLoaded, hydrateMeta]);
+  const categoryColors = useMemo(() => {
+    const m: Record<string, string | null> = {};
+    for (const [name, info] of Object.entries(categoryMeta)) {
+      m[name] = info.color;
+    }
+    return m;
+  }, [categoryMeta]);
   const filters = useFiltersStore();
 
   const [view, setView] = useState<View>("donut");
@@ -370,6 +399,7 @@ export function CategoriesPage() {
                       {...props}
                       base={base}
                       colors={COLORS}
+                      categoryColors={categoryColors}
                     />
                   )}
                 />
@@ -393,7 +423,7 @@ export function CategoriesPage() {
           </div>
           <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
             {tree.map((node, i) => {
-              const color = COLORS[i % COLORS.length];
+              const color = categoryColors[node.name] || COLORS[i % COLORS.length];
               const isOpen = expanded.has(node.name);
               const hasSubs = node.subs.length > 0;
               return (

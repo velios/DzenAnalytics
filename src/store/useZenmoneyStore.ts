@@ -17,6 +17,7 @@ import {
 } from "../lib/zenmoneyCache";
 import { useDataStore } from "./useDataStore";
 import { useCalibrationStore } from "./useCalibrationStore";
+import { useCategoryMetaStore } from "./useCategoryMetaStore";
 import type { ImportMeta } from "../types";
 
 const TOKEN_KEY = "zenmoneyToken";
@@ -149,6 +150,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     await db.saveJSON(TIMESTAMP_KEY, 0);
     await db.saveJSON(LAST_SYNC_KEY, null);
     await clearZenCache();
+    await useCategoryMetaStore.getState().clear();
     set({
       token: null,
       serverTimestamp: 0,
@@ -187,6 +189,9 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         skipped: nextCache.transactions.length - mapped.transactions.length,
         source: "api",
       };
+      // Per-category meta (colour / icon / picture) for UI dots, treemap, etc.
+      await useCategoryMetaStore.getState().setAll(mapped.categoryMeta);
+
       // Persist the rates that came with the diff so the next session boots
       // with up-to-date Zenmoney rates.
       await db.saveRates(mapped.rates);
