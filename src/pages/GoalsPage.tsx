@@ -70,8 +70,8 @@ export function GoalsPage() {
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Target className="w-6 h-6 text-accent" />
-            Цели и финансовая свобода
+            <Target className="w-6 h-6 text-accent shrink-0" />
+            Цели
           </h1>
           <p className="text-muted text-sm mt-1">
             Копите на конкретные цели и оцените, сколько лет до финансовой свободы при текущем темпе.
