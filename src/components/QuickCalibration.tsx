@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Settings2, CheckCircle2, X, Sparkles, Pencil, Trash2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import {
   detectBalanceAnchors,
   cumulativeNetAt,
@@ -17,10 +18,16 @@ export function QuickCalibration() {
   const clearCalibration = useCalibrationStore((s) => s.clear);
   const calibLoaded = useCalibrationStore((s) => s.loaded);
   const hydrate = useCalibrationStore((s) => s.hydrate);
+  // When the Zenmoney API token is connected, calibration is written
+  // automatically on every sync — manual UI is just noise.
+  const zenToken = useZenmoneyStore((s) => s.token);
+  const zenLoaded = useZenmoneyStore((s) => s.loaded);
+  const zenHydrate = useZenmoneyStore((s) => s.hydrate);
 
   useEffect(() => {
     if (!calibLoaded) hydrate();
-  }, [calibLoaded, hydrate]);
+    if (!zenLoaded) zenHydrate();
+  }, [calibLoaded, hydrate, zenLoaded, zenHydrate]);
 
   const [dismissed, setDismissed] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -34,6 +41,8 @@ export function QuickCalibration() {
   const anchors = useMemo(() => detectBalanceAnchors(transactions), [transactions]);
 
   if (transactions.length === 0) return null;
+  // API auto-calibrates on every sync; never show the manual banner.
+  if (zenToken) return null;
   if (calibration && !editing && dismissed) return null;
   if (!calibration && dismissed) return null;
 
