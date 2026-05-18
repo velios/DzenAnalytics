@@ -31,10 +31,10 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { useDataStore } from "../store/useDataStore";
-import { formatNum } from "../lib/format";
+import { useThemeStore } from "../store/useThemeStore";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import logoMark from "../assets/logo-mark.svg";
+import logoHorizontal from "../assets/logo-horizontal.svg";
+import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
 
 const PRIMARY = [
   { to: "/", label: "Главная", icon: LayoutDashboard },
@@ -68,34 +68,21 @@ const SECONDARY = [
 ];
 
 export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
-  const txCount = useDataStore((s) => s.transactions.length);
-  const meta = useDataStore((s) => s.importMeta);
   const [moreOpen, setMoreOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const loc = useLocation();
+  const theme = useThemeStore((s) => s.resolved);
 
   const inSecondary = SECONDARY.some((s) => loc.pathname === s.to);
 
   return (
     <header className="border-b border-border bg-panel/80 backdrop-blur sticky top-0 z-30">
       <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-3 flex items-center gap-3 md:gap-6">
-        <div className="flex items-center gap-2 shrink-0">
-          <img
-            src={logoMark}
-            alt="DzenAnalytics"
-            width={32}
-            height={32}
-            className="w-8 h-8 rounded-lg"
-          />
-          <div className="hidden sm:block">
-            <div className="text-sm font-semibold leading-none">DzenAnalytics</div>
-            <div className="text-[10px] text-muted leading-none mt-0.5">
-              {txCount > 0
-                ? `${formatNum(txCount)} операций${meta ? ` · ${new Date(meta.importedAt).toLocaleDateString("ru-RU")}` : ""}`
-                : "Аналитика финансов"}
-            </div>
-          </div>
-        </div>
+        <img
+          src={theme === "dark" ? logoHorizontalDark : logoHorizontal}
+          alt="DzenAnalytics"
+          className="h-8 w-auto shrink-0"
+        />
 
         {/* Desktop nav */}
         <nav className="hidden lg:flex items-center gap-1 ml-2 flex-1">
