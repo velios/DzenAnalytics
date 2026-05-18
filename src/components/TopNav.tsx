@@ -25,6 +25,7 @@ import {
   HelpCircle,
   Cloud,
   HeartPulse,
+  FlaskConical,
   Menu,
   X,
 } from "lucide-react";
@@ -43,6 +44,7 @@ const PRIMARY = [
 
 const SECONDARY = [
   { to: "/health", label: "Здоровье", icon: HeartPulse },
+  { to: "/whatif", label: "What-if", icon: FlaskConical },
   { to: "/budgets", label: "Бюджеты", icon: Target },
   { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/calendar", label: "Календарь", icon: CalendarDays },

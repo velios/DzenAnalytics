@@ -27,6 +27,7 @@ import { HelpPage } from "./pages/HelpPage";
 import { RulesPage } from "./pages/RulesPage";
 import { WordcloudPage } from "./pages/WordcloudPage";
 import { HealthPage } from "./pages/HealthPage";
+import { WhatIfPage } from "./pages/WhatIfPage";
 import { useDataStore } from "./store/useDataStore";
 import { useThemeStore } from "./store/useThemeStore";
 
@@ -84,6 +85,7 @@ function App() {
             <Route path="/help" element={<HelpPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/health" element={<HealthPage />} />
+            <Route path="/whatif" element={<WhatIfPage />} />
           </Route>
           <Route element={<FilteredLayout />}>
             <Route path="/cashflow" element={<CashflowPage />} />
