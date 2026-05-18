@@ -849,13 +849,16 @@ export function ImportPage() {
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
           <Coins className="w-5 h-5 text-accent2" />
-          <span className="font-medium">Курсы валют (к {rates.base})</span>
+          <span className="font-medium">
+            {zenToken ? "Валюта" : `Курсы валют (к ${rates.base})`}
+          </span>
         </div>
         <p className="text-xs text-muted mb-4">
-          Используются для сведения операций в разных валютах в единую базу. Меняйте здесь, если
-          нужны точные курсы. Все суммы пересчитываются автоматически.
+          {zenToken
+            ? "Курсы тянутся из Дзен-мани при каждой синхронизации — настраивать вручную не нужно. Здесь только выбор базовой валюты, в которой показываются KPI и графики."
+            : "Используются для сведения операций в разных валютах в единую базу. Меняйте здесь, если нужны точные курсы. Все суммы пересчитываются автоматически."}
         </p>
-        <div className="mb-4">
+        <div className={zenToken ? "" : "mb-4"}>
           <label className="label block mb-1">Базовая валюта</label>
           <div className="flex items-center gap-2">
             <select
@@ -879,24 +882,26 @@ export function ImportPage() {
             </span>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {Object.entries(rates.rates).map(([cur, val]) => (
-            <div key={cur}>
-              <label className="label block mb-1">1 {cur} =</label>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  step="0.01"
-                  value={val}
-                  onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
-                  disabled={cur === rates.base}
-                  className="input text-sm"
-                />
-                <span className="text-xs text-muted">{rates.base}</span>
+        {!zenToken && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Object.entries(rates.rates).map(([cur, val]) => (
+              <div key={cur}>
+                <label className="label block mb-1">1 {cur} =</label>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={val}
+                    onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
+                    disabled={cur === rates.base}
+                    className="input text-sm"
+                  />
+                  <span className="text-xs text-muted">{rates.base}</span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {transactions.length > 0 && (

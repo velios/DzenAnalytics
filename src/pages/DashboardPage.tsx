@@ -618,7 +618,9 @@ export function DashboardPage() {
                 <YAxis
                   stroke={chartAxisStroke}
                   fontSize={11}
-                  width={64}
+                  width={72}
+                  // formatMoney with compact picks "тыс./млн/млрд" by magnitude,
+                  // so labels auto-scale to the user's actual balance range.
                   tickFormatter={(v: number) =>
                     formatMoney(v, base, { compact: true })
                   }
