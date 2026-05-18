@@ -27,6 +27,7 @@ import {
   HeartPulse,
   FlaskConical,
   Sparkles,
+  Newspaper,
   Menu,
   X,
 } from "lucide-react";
@@ -47,6 +48,7 @@ const SECONDARY = [
   { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/whatif", label: "What-if", icon: FlaskConical },
   { to: "/year-review", label: "Год в цифрах", icon: Sparkles },
+  { to: "/digest", label: "Дайджест", icon: Newspaper },
   { to: "/budgets", label: "Бюджеты", icon: Target },
   { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/calendar", label: "Календарь", icon: CalendarDays },
