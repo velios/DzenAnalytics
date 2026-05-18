@@ -265,7 +265,7 @@ const SECTIONS: Section[] = [
     id: "page-whatif",
     group: "more",
     icon: FlaskConical,
-    title: "What-if",
+    title: "Что-если",
     body: (
       <>
         <p>

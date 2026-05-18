@@ -46,7 +46,7 @@ const PRIMARY = [
 
 const SECONDARY = [
   { to: "/health", label: "Здоровье", icon: HeartPulse },
-  { to: "/whatif", label: "What-if", icon: FlaskConical },
+  { to: "/whatif", label: "Что-если", icon: FlaskConical },
   { to: "/year-review", label: "Год в цифрах", icon: Sparkles },
   { to: "/digest", label: "Дайджест", icon: Newspaper },
   { to: "/budgets", label: "Бюджеты", icon: Target },

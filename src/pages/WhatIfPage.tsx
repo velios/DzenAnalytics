@@ -95,7 +95,7 @@ export function WhatIfPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <FlaskConical className="w-6 h-6 text-accent" />
-            What-if-сценарии
+            Что-если — сценарии
           </h1>
           <p className="text-muted text-sm mt-1">
             Покрутите слайдеры — увидите, как изменится норма сбережений, срок до
