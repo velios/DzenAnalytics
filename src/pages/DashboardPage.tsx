@@ -615,6 +615,14 @@ export function DashboardPage() {
                   tickFormatter={(d) => formatDate(d, "short")}
                   minTickGap={50}
                 />
+                <YAxis
+                  stroke={chartAxisStroke}
+                  fontSize={11}
+                  width={64}
+                  tickFormatter={(v: number) =>
+                    formatMoney(v, base, { compact: true })
+                  }
+                />
                 <Tooltip
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
