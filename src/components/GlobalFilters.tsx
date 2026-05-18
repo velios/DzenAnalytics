@@ -187,12 +187,15 @@ export function GlobalFilters() {
   const canNext =
     !!dataRange.maxYM && currentMonthYM < dataRange.maxYM;
 
+  // Default preset is now "current month"; treat anything else as user-set.
+  const now = new Date();
+  const defaultMonthYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const hasFilters =
     f.accounts.size > 0 ||
     f.categories.size > 0 ||
     f.currencies.size > 0 ||
     f.search.length > 0 ||
-    f.preset !== "12m";
+    !(f.preset === "month" && f.monthYM === defaultMonthYM);
 
   if (transactions.length === 0) return null;
 
