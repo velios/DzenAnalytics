@@ -134,7 +134,21 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       account = inAcc?.title || "";
     }
 
-    const cat = buildCategory(zt.tag, tagsById);
+    let cat = buildCategory(zt.tag, tagsById);
+    // Force consistent labels for two special cases:
+    // 1) Transfers between accounts — Zenmoney typically leaves them untagged
+    //    so they end up as "Без категории"; we surface a clear "Перевод" instead.
+    // 2) Operations on a loan/credit account — those are debt activity (taking
+    //    on / paying off the loan). Override to "Долг" regardless of tag.
+    if (isTransfer) {
+      cat = { category: "Перевод", subcategory: null, full: "Перевод" };
+    } else {
+      const outIsDebt = outAcc?.type === "loan" || outAcc?.type === "credit" || outAcc?.type === "debt";
+      const inIsDebt = inAcc?.type === "loan" || inAcc?.type === "credit" || inAcc?.type === "debt";
+      if ((kind === "expense" && outIsDebt) || (kind === "income" && inIsDebt)) {
+        cat = { category: "Долг", subcategory: null, full: "Долг" };
+      }
+    }
 
     txs.push({
       id: zt.id,

@@ -32,7 +32,17 @@ export function toBase(amount: number, currency: string, rates: CurrencyRates): 
 export function buildTransaction(row: RawRow, idx: number, rates: CurrencyRates): Transaction {
   const outcome = parseAmount(row.outcome);
   const income = parseAmount(row.income);
-  const cat = splitCategory(row.categoryName);
+  let cat = splitCategory(row.categoryName);
+  // Mirror the Zenmoney mapper: transfers always get the "Перевод" label so
+  // the category column reads sensibly regardless of how the source tags them.
+  // (CSV has no account-type info, so we can't auto-label "Долг" here.)
+  if (
+    outcome > 0 &&
+    income > 0 &&
+    row.outcomeAccountName !== row.incomeAccountName
+  ) {
+    cat = { category: "Перевод", subcategory: null, full: "Перевод" };
+  }
 
   let kind: Transaction["kind"];
   let amount: number;
