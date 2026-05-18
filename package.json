@@ -1,11 +1,13 @@
 {
   "name": "dzenanalytics",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:standalone": "tsc -b && STANDALONE=1 vite build --outDir dist-standalone",
+    "release:zip": "node scripts/build-release.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -38,6 +40,7 @@
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vite-plugin-singlefile": "^2.3.3"
   }
 }
