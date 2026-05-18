@@ -41,7 +41,6 @@ const PRIMARY = [
   { to: "/cashflow", label: "Cash-flow", icon: LineChart },
   { to: "/categories", label: "Категории", icon: PieChart },
   { to: "/trends", label: "Тренды", icon: Activity },
-  { to: "/import", label: "Настройки", icon: Settings },
 ];
 
 const SECONDARY = [
@@ -167,6 +166,24 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </button>
 
         <ThemeSwitcher />
+
+        {/* Settings — animated gear */}
+        <NavLink
+          to="/import"
+          title="Настройки"
+          className={({ isActive }) =>
+            clsx(
+              "group relative p-1.5 rounded-lg border transition-all",
+              isActive
+                ? "border-transparent bg-gradient-to-br from-accent to-accent2 text-white shadow-sm"
+                : "border-border bg-panel2 text-muted hover:text-accent hover:border-accent/50"
+            )
+          }
+        >
+          <Settings
+            className="w-4 h-4 transition-transform duration-500 ease-out group-hover:rotate-90"
+          />
+        </NavLink>
 
         {/* Mobile burger */}
         <button
