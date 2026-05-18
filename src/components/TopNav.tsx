@@ -43,7 +43,6 @@ const PRIMARY = [
   { to: "/categories", label: "Категории", icon: PieChart },
   { to: "/trends", label: "Тренды", icon: Activity },
   { to: "/goals", label: "Цели", icon: Target },
-  { to: "/help", label: "Справка", icon: HelpCircle },
 ];
 
 const SECONDARY = [
@@ -183,6 +182,22 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
           <Settings
             className="w-4 h-4 transition-transform duration-500 ease-out group-hover:rotate-90"
           />
+        </NavLink>
+
+        {/* Help — animated question mark */}
+        <NavLink
+          to="/help"
+          title="Справка"
+          className={({ isActive }) =>
+            clsx(
+              "group relative p-1.5 rounded-lg border transition-all",
+              isActive
+                ? "border-transparent bg-gradient-to-br from-accent2 to-accent text-white shadow-sm"
+                : "border-border bg-panel2 text-muted hover:text-accent2 hover:border-accent2/50"
+            )
+          }
+        >
+          <HelpCircle className="w-4 h-4 transition-transform duration-300 ease-out group-hover:scale-110" />
         </NavLink>
 
         {/* Mobile burger */}
