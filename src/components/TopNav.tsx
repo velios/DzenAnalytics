@@ -5,7 +5,6 @@ import {
   Wallet,
   TrendingUp,
   GitCompare,
-  Upload,
   LineChart,
   CalendarDays,
   Hash,
@@ -27,6 +26,7 @@ import {
   FlaskConical,
   Sparkles,
   Newspaper,
+  Settings,
   Menu,
   X,
 } from "lucide-react";
@@ -41,10 +41,11 @@ const PRIMARY = [
   { to: "/cashflow", label: "Cash-flow", icon: LineChart },
   { to: "/categories", label: "Категории", icon: PieChart },
   { to: "/trends", label: "Тренды", icon: Activity },
-  { to: "/goals", label: "Цели", icon: Target },
+  { to: "/import", label: "Настройки", icon: Settings },
 ];
 
 const SECONDARY = [
+  { to: "/goals", label: "Цели", icon: Target },
   { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/whatif", label: "Что-если", icon: FlaskConical },
   { to: "/year-review", label: "Год в цифрах", icon: Sparkles },
@@ -64,7 +65,6 @@ const SECONDARY = [
   { to: "/top", label: "Топ", icon: TrendingUp },
   { to: "/rules", label: "Правила", icon: Wand2 },
   { to: "/help", label: "Справка", icon: HelpCircle },
-  { to: "/import", label: "Импорт", icon: Upload },
 ];
 
 export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {

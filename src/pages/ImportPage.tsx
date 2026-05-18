@@ -23,6 +23,7 @@ import {
   Link as LinkIcon,
   Unlink,
   Clock,
+  Settings,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { useDataStore } from "../store/useDataStore";
@@ -318,12 +319,17 @@ export function ImportPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold mb-1">Загрузка данных</h1>
-        <p className="text-muted text-sm">
-          Выберите один из двух способов: онлайн-синхронизация с Дзен-мани по API или
-          импорт CSV-выгрузки. Можно переключаться в любой момент.
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <Settings className="w-6 h-6 text-accent shrink-0" />
+          Настройки
+        </h1>
+        <p className="text-muted text-sm mt-1">
+          Источник данных, валюты и курсы, резервные копии — всё, что относится
+          к настройке приложения.
         </p>
       </div>
+
+      <SectionHeading>Источник данных</SectionHeading>
 
       {/* Zenmoney API integration */}
       <div className="card card-pad border-accent/30 bg-accent/[0.03]">
@@ -467,15 +473,10 @@ export function ImportPage() {
       </div>
 
       {/* CSV import — alternative source */}
-      <div>
-        <div className="text-xs uppercase tracking-wider text-muted mb-2 px-1">
-          Или загрузить CSV-файл
-        </div>
-        <p className="text-muted text-sm mb-3">
-          Файл выгрузки транзакций из приложения Дзен-мани (формат:{" "}
-          <code className="pill">date;categoryName;…</code>).
-        </p>
-      </div>
+      <p className="text-muted text-sm -mt-2">
+        Или загрузить CSV-выгрузку из Дзен-мани (формат:{" "}
+        <code className="pill">date;categoryName;…</code>):
+      </p>
 
       {transactions.length > 0 && (
         <div className="card card-pad">
@@ -639,6 +640,123 @@ export function ImportPage() {
         </div>
       )}
 
+      <SectionHeading>Валюты и инфляция</SectionHeading>
+
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <Coins className="w-5 h-5 text-accent2" />
+          <span className="font-medium">
+            {zenToken ? "Валюта" : `Курсы валют (к ${rates.base})`}
+          </span>
+        </div>
+        <p className="text-xs text-muted mb-4">
+          {zenToken
+            ? "Курсы тянутся из Дзен-мани при каждой синхронизации — настраивать вручную не нужно. Здесь только выбор базовой валюты, в которой показываются KPI и графики."
+            : "Используются для сведения операций в разных валютах в единую базу. Меняйте здесь, если нужны точные курсы. Все суммы пересчитываются автоматически."}
+        </p>
+        <div className={zenToken ? "" : "mb-4"}>
+          <label className="label block mb-1">Базовая валюта</label>
+          <div className="flex items-center gap-2">
+            <select
+              value={rates.base}
+              onChange={(e) => {
+                const next = e.target.value;
+                setBase(next).catch((err: Error) => alert(err.message));
+              }}
+              className="input text-sm"
+            >
+              {Object.keys(rates.rates)
+                .sort()
+                .map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+            </select>
+            <span className="text-xs text-muted">
+              В этой валюте показываются все KPI и графики
+            </span>
+          </div>
+        </div>
+        {!zenToken && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Object.entries(rates.rates).map(([cur, val]) => (
+              <div key={cur}>
+                <label className="label block mb-1">1 {cur} =</label>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={val}
+                    onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
+                    disabled={cur === rates.base}
+                    className="input text-sm"
+                  />
+                  <span className="text-xs text-muted">{rates.base}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <Percent className="w-5 h-5 text-accent2" />
+          <span className="font-medium">Поправка на инфляцию</span>
+        </div>
+        <p className="text-xs text-muted mb-3">
+          Когда включено, все суммы пересчитываются в реальные деньги базового года: расход в 2022
+          умножается на накопленную инфляцию до базового. Полезно для честного сравнения трат за
+          разные годы.
+        </p>
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={inflation.enabled}
+              onChange={(e) => setInflEnabled(e.target.checked)}
+              className="accent-accent w-4 h-4"
+            />
+            Включить
+          </label>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted">Базовый год:</span>
+            <input
+              type="number"
+              value={inflation.baseYear}
+              onChange={(e) => setInflBaseYear(Number(e.target.value) || 2026)}
+              className="input text-sm w-24"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {Object.entries(inflation.rates)
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .map(([year, rate]) => (
+              <div key={year}>
+                <label className="label block mb-1">{year}</label>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={rate}
+                    onChange={(e) =>
+                      setInflRate(year, Number(e.target.value) || 0)
+                    }
+                    className="input text-sm"
+                  />
+                  <span className="text-xs text-muted">%</span>
+                </div>
+              </div>
+            ))}
+        </div>
+        <div className="text-[11px] text-muted mt-3">
+          Поправка применяется к графикам Cash-flow и Тренды (когда включено в этих разделах).
+        </div>
+      </div>
+
+      {transactions.length > 0 && <SectionHeading>Обработка данных</SectionHeading>}
       {transactions.length > 0 && (
         <div className="card card-pad">
           <div className="flex items-center gap-2 mb-3">
@@ -690,6 +808,7 @@ export function ImportPage() {
         </div>
       )}
 
+      <SectionHeading>Резервные копии</SectionHeading>
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
           <Database className="w-5 h-5 text-accent" />
@@ -790,120 +909,6 @@ export function ImportPage() {
         </div>
       </div>
 
-      <div className="card card-pad">
-        <div className="flex items-center gap-2 mb-3">
-          <Percent className="w-5 h-5 text-accent2" />
-          <span className="font-medium">Поправка на инфляцию</span>
-        </div>
-        <p className="text-xs text-muted mb-3">
-          Когда включено, все суммы пересчитываются в реальные деньги базового года: расход в 2022
-          умножается на накопленную инфляцию до базового. Полезно для честного сравнения трат за
-          разные годы.
-        </p>
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={inflation.enabled}
-              onChange={(e) => setInflEnabled(e.target.checked)}
-              className="accent-accent w-4 h-4"
-            />
-            Включить
-          </label>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted">Базовый год:</span>
-            <input
-              type="number"
-              value={inflation.baseYear}
-              onChange={(e) => setInflBaseYear(Number(e.target.value) || 2026)}
-              className="input text-sm w-24"
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {Object.entries(inflation.rates)
-            .sort(([a], [b]) => Number(a) - Number(b))
-            .map(([year, rate]) => (
-              <div key={year}>
-                <label className="label block mb-1">{year}</label>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={rate}
-                    onChange={(e) =>
-                      setInflRate(year, Number(e.target.value) || 0)
-                    }
-                    className="input text-sm"
-                  />
-                  <span className="text-xs text-muted">%</span>
-                </div>
-              </div>
-            ))}
-        </div>
-        <div className="text-[11px] text-muted mt-3">
-          Поправка применяется к графикам Cash-flow и Тренды (когда включено в этих разделах).
-        </div>
-      </div>
-
-      <div className="card card-pad">
-        <div className="flex items-center gap-2 mb-3">
-          <Coins className="w-5 h-5 text-accent2" />
-          <span className="font-medium">
-            {zenToken ? "Валюта" : `Курсы валют (к ${rates.base})`}
-          </span>
-        </div>
-        <p className="text-xs text-muted mb-4">
-          {zenToken
-            ? "Курсы тянутся из Дзен-мани при каждой синхронизации — настраивать вручную не нужно. Здесь только выбор базовой валюты, в которой показываются KPI и графики."
-            : "Используются для сведения операций в разных валютах в единую базу. Меняйте здесь, если нужны точные курсы. Все суммы пересчитываются автоматически."}
-        </p>
-        <div className={zenToken ? "" : "mb-4"}>
-          <label className="label block mb-1">Базовая валюта</label>
-          <div className="flex items-center gap-2">
-            <select
-              value={rates.base}
-              onChange={(e) => {
-                const next = e.target.value;
-                setBase(next).catch((err: Error) => alert(err.message));
-              }}
-              className="input text-sm"
-            >
-              {Object.keys(rates.rates)
-                .sort()
-                .map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-            </select>
-            <span className="text-xs text-muted">
-              В этой валюте показываются все KPI и графики
-            </span>
-          </div>
-        </div>
-        {!zenToken && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {Object.entries(rates.rates).map(([cur, val]) => (
-              <div key={cur}>
-                <label className="label block mb-1">1 {cur} =</label>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={val}
-                    onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
-                    disabled={cur === rates.base}
-                    className="input text-sm"
-                  />
-                  <span className="text-xs text-muted">{rates.base}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {transactions.length > 0 && (
         <div className="card card-pad">
           <div className="font-medium mb-3">Превью (последние 10 операций)</div>
@@ -949,5 +954,13 @@ export function ImportPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-sm font-semibold uppercase tracking-wider text-muted px-1 pt-2">
+      {children}
+    </h2>
   );
 }
