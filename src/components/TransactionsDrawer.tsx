@@ -49,9 +49,13 @@ export function TransactionsDrawer() {
     };
   }, [open, close]);
 
-  useEffect(() => {
+  // Reset search every time the drawer re-opens — implemented via the
+  // "adjust state on prior props" pattern (no setState-in-effect).
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) setSearch("");
-  }, [open]);
+  }
 
   // Drill store keeps a snapshot of transactions taken at the moment the drawer
   // was opened. After an inline edit the canonical `useDataStore.transactions`

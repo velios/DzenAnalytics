@@ -240,23 +240,36 @@ export function CommandPalette({ open, onClose }: Props) {
     return scored.map((x) => x.item);
   }, [items, query]);
 
-  useEffect(() => {
+  // Reset query+activeIdx every time the palette re-opens, and reset activeIdx
+  // when the query changes. Both done during render via the "adjust state on
+  // prior props" pattern so we don't trigger setState-in-effect lint.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setQuery("");
       setActiveIdx(0);
-      setTimeout(() => inputRef.current?.focus(), 30);
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
     }
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
+  }
 
-  useEffect(() => {
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
     setActiveIdx(0);
-  }, [query]);
+  }
+
+  // Real DOM side-effects (focus, body scroll-lock) belong in an effect.
+  useEffect(() => {
+    if (open) {
+      const id = setTimeout(() => inputRef.current?.focus(), 30);
+      document.body.style.overflow = "hidden";
+      return () => {
+        clearTimeout(id);
+        document.body.style.overflow = "";
+      };
+    }
+    document.body.style.overflow = "";
+  }, [open]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -367,63 +380,5 @@ export function CommandPalette({ open, onClose }: Props) {
   );
 }
 
-export function useGlobalShortcuts(onOpenPalette: () => void) {
-  const nav = useNavigate();
-
-  useEffect(() => {
-    let lastG = 0;
-    function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement;
-      const isInput =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.tagName === "SELECT" ||
-        target.isContentEditable;
-
-      const isCtrlK = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k";
-      if (isCtrlK) {
-        e.preventDefault();
-        onOpenPalette();
-        return;
-      }
-
-      if (isInput) return;
-
-      if (e.key === "/") {
-        e.preventDefault();
-        onOpenPalette();
-        return;
-      }
-
-      const now = Date.now();
-      if (e.key === "g") {
-        lastG = now;
-        return;
-      }
-      if (lastG && now - lastG < 1500) {
-        const k = e.key.toLowerCase();
-        const map: Record<string, string> = {
-          d: "/",
-          c: "/cashflow",
-          k: "/categories",
-          a: "/accounts",
-          t: "/trends",
-          b: "/budgets",
-          g: "/goals",
-          l: "/calendar",
-          r: "/recurring",
-          s: "/search",
-          h: "/help",
-          i: "/import",
-        };
-        if (map[k]) {
-          e.preventDefault();
-          nav(map[k]);
-          lastG = 0;
-        }
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [nav, onOpenPalette]);
-}
+// `useGlobalShortcuts` lives in `../hooks/useGlobalShortcuts.ts` so this file
+// only exports React components — required for fast-refresh.
