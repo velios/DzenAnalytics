@@ -7,6 +7,7 @@ import { SortableTable, type Column } from "../components/SortableTable";
 import type { Transaction } from "../types";
 import { formatMoney, formatDate, formatPct } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { TrendingUp } from "lucide-react";
 
@@ -56,7 +57,7 @@ export function TopPage() {
       <PageHeader
         icon={TrendingUp}
         title="Топ"
-        hint="Категории, получатели и крупнейшие операции"
+        hint="Категории, получатели и крупнейшие операции."
         right={
           <div className="flex bg-panel2 rounded-lg p-1 border border-border">
             <button
@@ -74,6 +75,7 @@ export function TopPage() {
           </div>
         }
       />
+      <GlobalFilters />
 
       <div className="flex gap-2 border-b border-border">
         {(

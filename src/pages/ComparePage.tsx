@@ -204,7 +204,7 @@ export function ComparePage() {
       <PageHeader
         icon={GitCompare}
         title="Сравнение периодов"
-        hint="Сравнивает два периода: ключевые метрики и расходы по категориям"
+        hint="Два периода рядом: ключевые метрики и расходы по категориям."
       />
 
       <div className="card card-pad">

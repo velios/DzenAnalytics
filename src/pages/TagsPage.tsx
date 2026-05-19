@@ -6,6 +6,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { groupByHashtag, extractHashtags, type TagBucket } from "../lib/aggregations";
 import { formatMoney, formatPct } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { SortableTable, type Column } from "../components/SortableTable";
 
@@ -39,8 +40,9 @@ export function TagsPage() {
         <PageHeader
           icon={Hash}
           title="Хэштеги"
-          hint="В комментариях нет хэштегов. Добавляйте `#метку` в комментарий, чтобы группировать операции по своим темам (поездки, проекты, люди)."
+          hint="Метки `#проект` в комментариях позволяют группировать операции по темам — поездки, члены семьи, машины и так далее. В текущей выборке хэштегов нет."
         />
+        <GlobalFilters />
       </div>
     );
   }
@@ -52,7 +54,7 @@ export function TagsPage() {
         title="Хэштеги"
         hint={
           <>
-            Извлечены из комментариев: {tags.length} тегов в {taggedCount} операциях
+            {tags.length} тегов в {taggedCount} операциях
             {totalExpense > 0 && ` · всего ${formatMoney(totalExpense, base, { compact: true })}`}.
             Клик по тегу — операции.
           </>
@@ -64,6 +66,7 @@ export function TagsPage() {
           </span>
         }
       />
+      <GlobalFilters />
 
       <div className="card card-pad">
         <div className="font-semibold mb-4">Облако тегов</div>

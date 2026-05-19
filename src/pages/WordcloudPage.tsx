@@ -6,6 +6,8 @@ import { useDrillStore } from "../store/useDrillStore";
 import { buildWordcloud, type WordcloudWord } from "../lib/aggregations";
 import { formatMoney, formatNum } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
+import { PageHeader } from "../components/PageHeader";
 
 const PALETTE = [
   "#22D3EE",
@@ -57,46 +59,45 @@ export function WordcloudPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Cloud className="w-6 h-6 text-accent" />
-            Облако слов
-            <MousePointerClick className="w-4 h-4 text-muted" />
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            Самые частые слова в комментариях. Размер — частота, цвет — для чтения.
-            Клик по слову — все операции, где оно встречается.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <span>min длина</span>
-            <input
-              type="range"
-              min="2"
-              max="6"
-              value={minLen}
-              onChange={(e) => setMinLen(Number(e.target.value))}
-              className="accent-accent"
-            />
-            <span className="tabular-nums w-4">{minLen}</span>
+      <PageHeader
+        icon={Cloud}
+        title="Облако слов"
+        hint="Самые частые слова в комментариях. Размер — частота. Клик по слову — все операции, где оно встречается."
+        right={
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-xs text-muted">
+              <span>min длина</span>
+              <input
+                type="range"
+                min="2"
+                max="6"
+                value={minLen}
+                onChange={(e) => setMinLen(Number(e.target.value))}
+                className="accent-accent"
+              />
+              <span className="tabular-nums w-4">{minLen}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted">
+              <span>топ</span>
+              <input
+                type="range"
+                min="40"
+                max="300"
+                step="20"
+                value={topN}
+                onChange={(e) => setTopN(Number(e.target.value))}
+                className="accent-accent"
+              />
+              <span className="tabular-nums w-10">{topN}</span>
+            </div>
+            <span className="inline-flex items-center gap-1 text-xs text-muted">
+              <MousePointerClick className="w-3.5 h-3.5" />
+              Кликабельные
+            </span>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <span>топ</span>
-            <input
-              type="range"
-              min="40"
-              max="300"
-              step="20"
-              value={topN}
-              onChange={(e) => setTopN(Number(e.target.value))}
-              className="accent-accent"
-            />
-            <span className="tabular-nums w-10">{topN}</span>
-          </div>
-        </div>
-      </div>
+        }
+      />
+      <GlobalFilters />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="card card-pad">

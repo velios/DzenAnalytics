@@ -12,7 +12,7 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { ChevronRight, ChevronDown, MousePointerClick, Lock, Coffee } from "lucide-react";
+import { ChevronRight, ChevronDown, Lock, Coffee } from "lucide-react";
 import clsx from "clsx";
 import { useEffect } from "react";
 import { useDataStore } from "../store/useDataStore";
@@ -31,6 +31,9 @@ import {
   chartAxisStroke,
 } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
+import { PageHeader } from "../components/PageHeader";
+import { PieChart as PieChartIcon } from "lucide-react";
 import type { Transaction } from "../types";
 
 const COLORS = [
@@ -294,48 +297,44 @@ export function CategoriesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            Разбивка по категориям
-            <MousePointerClick className="w-4 h-4 text-muted" />
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            {tree.length} категорий · всего {formatMoney(totalAll, base, { compact: true })} · клик
-            по любому элементу — список операций
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setKind("expense")}
-              className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
-            >
-              Расходы
-            </button>
-            <button
-              onClick={() => setKind("income")}
-              className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
-            >
-              Доходы
-            </button>
+      <PageHeader
+        icon={PieChartIcon}
+        title="Разбивка по категориям"
+        hint={`${tree.length} категорий · всего ${formatMoney(totalAll, base, { compact: true })}. Клик по элементу — список операций.`}
+        right={
+          <div className="flex flex-wrap gap-2">
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setKind("expense")}
+                className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
+              >
+                Расходы
+              </button>
+              <button
+                onClick={() => setKind("income")}
+                className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
+              >
+                Доходы
+              </button>
+            </div>
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setView("donut")}
+                className={`px-3 py-1 text-xs rounded-md ${view === "donut" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                Donut
+              </button>
+              <button
+                onClick={() => setView("treemap")}
+                className={`px-3 py-1 text-xs rounded-md ${view === "treemap" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                Treemap
+              </button>
+            </div>
           </div>
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setView("donut")}
-              className={`px-3 py-1 text-xs rounded-md ${view === "donut" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              Donut
-            </button>
-            <button
-              onClick={() => setView("treemap")}
-              className={`px-3 py-1 text-xs rounded-md ${view === "treemap" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              Treemap
-            </button>
-          </div>
-        </div>
-      </div>
+        }
+      />
+      <GlobalFilters />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card card-pad lg:col-span-2">

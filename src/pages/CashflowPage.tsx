@@ -54,6 +54,7 @@ import {
 } from "../lib/format";
 import { Stat } from "../components/Stat";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { SortableTable } from "../components/SortableTable";
 import type { MonthBucket } from "../lib/aggregations";
@@ -140,27 +141,28 @@ export function CashflowPage() {
       <PageHeader
         icon={LineChartIcon}
         title="Cash-flow"
-        hint={`Доходы, расходы и чистый поток по месяцам. Все суммы в ${base}.`}
+        hint="Доходы, расходы и чистый поток по месяцам."
       />
+      <GlobalFilters />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat
           label="Доходы"
-          value={formatMoney(kpi.income, base, { compact: true })}
+          value={formatMoney(kpi.income, base, { decimals: 0 })}
           tone="income"
           icon={<TrendingUp className="w-4 h-4" />}
           hint={`${formatNum(avgMonthlyIncome, { compact: true })} ${base} / мес`}
         />
         <Stat
           label="Расходы"
-          value={formatMoney(kpi.expense, base, { compact: true })}
+          value={formatMoney(kpi.expense, base, { decimals: 0 })}
           tone="expense"
           icon={<TrendingDown className="w-4 h-4" />}
           hint={`${formatNum(avgMonthlyExpense, { compact: true })} ${base} / мес`}
         />
         <Stat
           label="Чистый поток"
-          value={formatMoney(kpi.net, base, { compact: true, signed: true })}
+          value={formatMoney(kpi.net, base, { decimals: 0, signed: true })}
           tone={kpi.net >= 0 ? "income" : "expense"}
           icon={<Wallet className="w-4 h-4" />}
           hint={`Норма сбережений: ${(savingsRate * 100).toFixed(1)}%`}

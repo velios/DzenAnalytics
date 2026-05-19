@@ -45,6 +45,7 @@ import {
   chartAxisStroke,
 } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Sparkline } from "../components/Sparkline";
 
@@ -207,6 +208,7 @@ export function AccountsPage() {
           </div>
         }
       />
+      <GlobalFilters />
 
       {calibOpen && !zenToken && (
         <div className="card card-pad bg-accent2/5 border-accent2/40">

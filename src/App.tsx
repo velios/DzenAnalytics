@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { TopNav } from "./components/TopNav";
-import { GlobalFilters } from "./components/GlobalFilters";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
@@ -36,15 +35,12 @@ import { useDataStore } from "./store/useDataStore";
 import { useThemeStore } from "./store/useThemeStore";
 import { useBackupStore } from "./store/useBackupStore";
 
-function FilteredLayout() {
-  return (
-    <>
-      <GlobalFilters />
-      <Outlet />
-    </>
-  );
-}
-
+/**
+ * All routes use the same outer layout now. Pages that need global filters
+ * render `<GlobalFilters />` themselves AFTER `<PageHeader>` — this keeps the
+ * page title visually above the filter bar (which the user expects) and makes
+ * each route's structure explicit.
+ */
 function PlainLayout() {
   return <Outlet />;
 }
@@ -106,7 +102,9 @@ function App() {
             <Route path="/year-review" element={<YearReviewPage />} />
             <Route path="/digest" element={<DigestPage />} />
           </Route>
-          <Route element={<FilteredLayout />}>
+            {/* Filtered pages: GlobalFilters is rendered INSIDE each page right
+                after PageHeader (see TransactionsPage, CashflowPage, etc.) so
+                the title sits above the filter bar. */}
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/cashflow" element={<CashflowPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
@@ -117,7 +115,6 @@ function App() {
             <Route path="/trends" element={<TrendsPage />} />
             <Route path="/sankey" element={<SankeyPage />} />
             <Route path="/wordcloud" element={<WordcloudPage />} />
-          </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

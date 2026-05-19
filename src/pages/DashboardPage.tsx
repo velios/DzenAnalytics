@@ -344,11 +344,17 @@ export function DashboardPage() {
     };
   }, [transactions]);
   const baseRates = useDataStore((s) => s.rates);
+  // Account-list filter toggles. We persist nothing — these are session-only
+  // ergonomic switches matching the toggles the user sees in Zenmoney itself.
+  const [hideZero, setHideZero] = useState(true);
+  const [hideArchived, setHideArchived] = useState(true);
   const accountRows = useMemo(() => {
     if (liveAccounts && liveAccounts.length > 0) {
       // Convert to base currency and sort by |balance| desc.
       return liveAccounts
-        .filter((a) => a.inBalance && !a.archive)
+        .filter((a) => a.inBalance)
+        .filter((a) => (hideArchived ? !a.archive : true))
+        .filter((a) => (hideZero ? Math.abs(a.balance) > 0.005 : true))
         .map((a) => ({
           title: a.title,
           balanceBase:
@@ -358,18 +364,22 @@ export function DashboardPage() {
           nativeBalance: a.balance,
           nativeCurrency: a.currency,
           type: a.type,
+          archive: a.archive,
         }))
         .sort((a, b) => Math.abs(b.balanceBase) - Math.abs(a.balanceBase));
     }
-    return balancesByAccount(transactions).map((a) => ({
-      title: a.account,
-      balanceBase: a.balance,
-      nativeBalance: a.balance,
-      nativeCurrency: base,
-      type: "",
-    }));
-  }, [liveAccounts, transactions, base, baseRates]);
-  const [showAllAccounts, setShowAllAccounts] = useState(false);
+    return balancesByAccount(transactions)
+      .filter((a) => (hideZero ? Math.abs(a.balance) > 0.005 : true))
+      .map((a) => ({
+        title: a.account,
+        balanceBase: a.balance,
+        nativeBalance: a.balance,
+        nativeCurrency: base,
+        type: "",
+        archive: false,
+      }));
+  }, [liveAccounts, transactions, base, baseRates, hideZero, hideArchived]);
+  const hasArchived = !!liveAccounts?.some((a) => a.archive && a.inBalance);
 
   // Top-10 categories of the CURRENT month (replaces all-time top-7).
   const currentYM = useMemo(() => {
@@ -469,7 +479,7 @@ export function DashboardPage() {
       <PageHeader
         icon={LayoutDashboard}
         title="Главная"
-        hint="Обзор финансов: ключевые метрики, тренды, прогноз и быстрые переходы"
+        hint="Ключевые метрики, тренды и быстрые переходы."
         right={
           <button
             data-export-skip="1"
@@ -500,7 +510,7 @@ export function DashboardPage() {
             <Wallet className="w-4 h-4 text-muted" />
           </div>
           <div className={`stat-num ${lastNetWorth >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(lastNetWorth, base, { compact: true, signed: true })}
+            {formatMoney(lastNetWorth, base, { decimals: 0, signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">
             {calibration ? `Откалибровано на ${calibration.date}` : "от 0 в начале истории"}
@@ -516,7 +526,7 @@ export function DashboardPage() {
             <TrendingUp className="w-4 h-4 text-income" />
           </div>
           <div className="stat-num text-income">
-            {last ? formatMoney(last.income, base, { compact: true }) : "—"}
+            {last ? formatMoney(last.income, base, { decimals: 0 }) : "—"}
           </div>
           {incDelta !== null && (
             <div className={`text-xs mt-1 ${incDelta >= 0 ? "text-income" : "text-muted"}`}>
@@ -534,7 +544,7 @@ export function DashboardPage() {
             <TrendingDown className="w-4 h-4 text-expense" />
           </div>
           <div className="stat-num text-expense">
-            {last ? formatMoney(last.expense, base, { compact: true }) : "—"}
+            {last ? formatMoney(last.expense, base, { decimals: 0 }) : "—"}
           </div>
           {expDelta !== null && (
             <div className={`text-xs mt-1 ${expDelta <= 0 ? "text-income" : "text-warn"}`}>
@@ -624,17 +634,23 @@ export function DashboardPage() {
                 <YAxis
                   stroke={chartAxisStroke}
                   fontSize={11}
-                  width={72}
-                  // formatMoney with compact picks "тыс./млн/млрд" by magnitude,
-                  // so labels auto-scale to the user's actual balance range.
-                  tickFormatter={(v: number) =>
-                    formatMoney(v, base, { compact: true })
-                  }
+                  // Same compact-number style as Cash-flow Y-axis on the left —
+                  // no currency suffix → narrower labels → less horizontal
+                  // padding → both charts read as a coordinated pair.
+                  tickFormatter={(v) => formatNum(v, { compact: true })}
+                  // Auto-scale to the actual balance range instead of starting
+                  // from 0. With net worth in millions the [0..max] domain
+                  // leaves a huge empty band at the bottom; using ["auto", "auto"]
+                  // makes the chart fill its container the same way Cash-flow does.
+                  domain={["auto", "auto"]}
                 />
                 <Tooltip
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
-                  formatter={(v: unknown) => [formatMoney(toNum(v), base, { compact: true, signed: true }), "Баланс"]}
+                  formatter={(v: unknown) => [
+                    formatMoney(toNum(v), base, { decimals: 0, signed: true }),
+                    "Баланс",
+                  ]}
                 />
                 <Area type="monotone" dataKey="net" stroke="#22D3EE" strokeWidth={2} fill="url(#dashNw)" />
                 {annotations.map((a) => (
@@ -671,21 +687,21 @@ export function DashboardPage() {
                     <div
                       className="bg-warn"
                       style={{ width: `${(flagsBreakdown.fixed / totalSpend) * 100}%` }}
-                      title={`Фиксированные: ${formatMoney(flagsBreakdown.fixed, base, { compact: true })}`}
+                      title={`Фиксированные: ${formatMoney(flagsBreakdown.fixed, base, { decimals: 0 })}`}
                     />
                   )}
                   {flagsBreakdown.discretionary > 0 && (
                     <div
                       className="bg-accent2"
                       style={{ width: `${(flagsBreakdown.discretionary / totalSpend) * 100}%` }}
-                      title={`Дискретные: ${formatMoney(flagsBreakdown.discretionary, base, { compact: true })}`}
+                      title={`Дискретные: ${formatMoney(flagsBreakdown.discretionary, base, { decimals: 0 })}`}
                     />
                   )}
                   {flagsBreakdown.unflagged > 0 && (
                     <div
                       className="bg-border"
                       style={{ width: `${(flagsBreakdown.unflagged / totalSpend) * 100}%` }}
-                      title={`Без флага: ${formatMoney(flagsBreakdown.unflagged, base, { compact: true })}`}
+                      title={`Без флага: ${formatMoney(flagsBreakdown.unflagged, base, { decimals: 0 })}`}
                     />
                   )}
                 </div>
@@ -695,7 +711,7 @@ export function DashboardPage() {
                       <span className="w-2 h-2 rounded bg-warn" /> Фиксированные
                     </div>
                     <div className="font-semibold tabular-nums">
-                      {formatMoney(flagsBreakdown.fixed, base, { compact: true })}
+                      {formatMoney(flagsBreakdown.fixed, base, { decimals: 0 })}
                     </div>
                   </div>
                   <div>
@@ -703,7 +719,7 @@ export function DashboardPage() {
                       <span className="w-2 h-2 rounded bg-accent2" /> Дискретные
                     </div>
                     <div className="font-semibold tabular-nums">
-                      {formatMoney(flagsBreakdown.discretionary, base, { compact: true })}
+                      {formatMoney(flagsBreakdown.discretionary, base, { decimals: 0 })}
                     </div>
                   </div>
                   <div>
@@ -711,7 +727,7 @@ export function DashboardPage() {
                       <span className="w-2 h-2 rounded bg-border" /> Без флага
                     </div>
                     <div className="font-semibold tabular-nums text-muted">
-                      {formatMoney(flagsBreakdown.unflagged, base, { compact: true })}
+                      {formatMoney(flagsBreakdown.unflagged, base, { decimals: 0 })}
                     </div>
                   </div>
                   <div>
@@ -721,7 +737,7 @@ export function DashboardPage() {
                         freedom > 0 ? "text-income" : "text-expense"
                       }`}
                     >
-                      {formatMoney(freedom, base, { compact: true, signed: true })}
+                      {formatMoney(freedom, base, { decimals: 0, signed: true })}
                     </div>
                   </div>
                 </div>
@@ -746,33 +762,60 @@ export function DashboardPage() {
               все <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <button
+              onClick={() => setHideZero((v) => !v)}
+              className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${
+                hideZero
+                  ? "bg-accent/10 border-accent/40 text-accent"
+                  : "bg-panel2 border-border text-muted hover:text-text"
+              }`}
+              title={hideZero ? "Сейчас скрыты — клик чтобы показать" : "Сейчас показаны — клик чтобы скрыть"}
+            >
+              {hideZero ? "Без нулевых" : "Все, включая нулевые"}
+            </button>
+            {hasArchived && (
+              <button
+                onClick={() => setHideArchived((v) => !v)}
+                className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${
+                  hideArchived
+                    ? "bg-accent/10 border-accent/40 text-accent"
+                    : "bg-panel2 border-border text-muted hover:text-text"
+                }`}
+                title={hideArchived ? "Архивные сейчас скрыты — клик чтобы показать" : "Архивные сейчас показаны — клик чтобы скрыть"}
+              >
+                {hideArchived ? "Без архивных" : "С архивными"}
+              </button>
+            )}
+            <span className="text-[11px] text-muted ml-auto tabular-nums">
+              {accountRows.length} счетов
+            </span>
+          </div>
           {accountRows.length === 0 ? (
             <div className="text-sm text-muted text-center py-6">Нет счетов</div>
           ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-xs text-muted text-left">
-                      <th className="font-normal py-1 w-8"></th>
-                      <th className="font-normal py-1">Счёт</th>
-                      <th className="font-normal py-1">Тип</th>
-                      <th className="font-normal py-1 text-right">Баланс</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(showAllAccounts
-                      ? accountRows
-                      : accountRows.slice(0, 10)
-                    ).map((a) => {
-                      const isNegative = a.balanceBase < 0;
-                      const hasFx = a.nativeCurrency !== base;
-                      return (
-                        <tr
-                          key={a.title}
-                          onClick={() => openAccount(a.title)}
-                          className="border-t border-border hover:bg-panel2/50 cursor-pointer group"
-                        >
+            <div className="overflow-y-auto max-h-[360px] -mx-1 px-1">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-panel z-10">
+                  <tr className="text-xs text-muted text-left">
+                    <th className="font-normal py-1 w-8"></th>
+                    <th className="font-normal py-1">Счёт</th>
+                    <th className="font-normal py-1">Тип</th>
+                    <th className="font-normal py-1 text-right">Баланс</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountRows.map((a) => {
+                    const isNegative = a.balanceBase < 0;
+                    const hasFx = a.nativeCurrency !== base;
+                    return (
+                      <tr
+                        key={a.title}
+                        onClick={() => openAccount(a.title)}
+                        className={`border-t border-border hover:bg-panel2/50 cursor-pointer group ${
+                          a.archive ? "opacity-60" : ""
+                        }`}
+                      >
                           <td className="py-2 pr-2">
                             <AccountAvatar
                               title={a.title}
@@ -834,20 +877,9 @@ export function DashboardPage() {
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-              {accountRows.length > 10 && (
-                <button
-                  onClick={() => setShowAllAccounts((v) => !v)}
-                  className="btn-ghost text-xs mt-3 mx-auto block text-muted"
-                >
-                  {showAllAccounts
-                    ? "Свернуть"
-                    : `Показать ещё ${accountRows.length - 10}`}
-                </button>
-              )}
-            </>
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 

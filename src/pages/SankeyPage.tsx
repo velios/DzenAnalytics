@@ -6,6 +6,8 @@ import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { buildSankey } from "../lib/aggregations";
 import { formatMoney, toNum, chartTooltipProps } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
+import { PageHeader } from "../components/PageHeader";
 
 const COLORS = {
   income: "#10B981",
@@ -26,14 +28,14 @@ export function SankeyPage() {
   if (data.links.length === 0) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <GitFork className="w-6 h-6 text-accent" />
-            Потоки денег
-          </h1>
-        </div>
+        <PageHeader
+          icon={GitFork}
+          title="Потоки денег"
+          hint="Слева — источники доходов, справа — категории расходов. Толщина потока пропорциональна сумме."
+        />
+        <GlobalFilters />
         <div className="card card-pad text-center py-12 text-muted">
-          Нет данных для построения потоков в текущем фильтре
+          Нет данных для построения потоков в текущем фильтре.
         </div>
       </div>
     );
@@ -41,16 +43,12 @@ export function SankeyPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <GitFork className="w-6 h-6 text-accent" />
-          Потоки денег
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Sankey-диаграмма: слева — источники доходов, справа — категории расходов. Толщина потока
-          — сумма. Учитываются глобальные фильтры.
-        </p>
-      </div>
+      <PageHeader
+        icon={GitFork}
+        title="Потоки денег"
+        hint="Слева — источники доходов, справа — категории расходов. Толщина потока пропорциональна сумме."
+      />
+      <GlobalFilters />
 
       <div className="card card-pad">
         <div className="h-[600px]">

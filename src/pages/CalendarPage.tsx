@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, MousePointerClick } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, MousePointerClick } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { dailyExpenseMap, type DayCell } from "../lib/aggregations";
 import { formatMoney, formatDate, formatNum, ymdKey } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
+import { PageHeader } from "../components/PageHeader";
 
 const WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
 const MONTHS = [
@@ -112,51 +114,51 @@ export function CalendarPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            Календарь
-            <MousePointerClick className="w-4 h-4 text-muted" />
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            Тепловая карта по дням. Цвет — интенсивность {kind === "expense" ? "расходов" : "доходов"}.
-            Клик по дню — операции.
-          </p>
-        </div>
-        <div className="flex gap-2 items-center">
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setKind("expense")}
-              className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
-            >
-              Расходы
-            </button>
-            <button
-              onClick={() => setKind("income")}
-              className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
-            >
-              Доходы
-            </button>
+      <PageHeader
+        icon={CalendarDays}
+        title="Календарь"
+        hint={`Тепловая карта по дням. Цвет — интенсивность ${kind === "expense" ? "расходов" : "доходов"}. Клик по дню — операции.`}
+        right={
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setKind("expense")}
+                className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
+              >
+                Расходы
+              </button>
+              <button
+                onClick={() => setKind("income")}
+                className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
+              >
+                Доходы
+              </button>
+            </div>
+            <div className="flex items-center gap-1 bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setYear((y) => Math.max(yearMin, y - 1))}
+                disabled={year <= yearMin}
+                className="p-1 hover:text-accent disabled:opacity-30"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-3 text-sm font-medium tabular-nums">{year}</span>
+              <button
+                onClick={() => setYear((y) => Math.min(yearMax, y + 1))}
+                disabled={year >= yearMax}
+                className="p-1 hover:text-accent disabled:opacity-30"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+            <span className="inline-flex items-center gap-1 text-xs text-muted">
+              <MousePointerClick className="w-3.5 h-3.5" />
+              Кликабельный
+            </span>
           </div>
-          <div className="flex items-center gap-1 bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setYear((y) => Math.max(yearMin, y - 1))}
-              disabled={year <= yearMin}
-              className="p-1 hover:text-accent disabled:opacity-30"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="px-3 text-sm font-medium tabular-nums">{year}</span>
-            <button
-              onClick={() => setYear((y) => Math.min(yearMax, y + 1))}
-              disabled={year >= yearMax}
-              className="p-1 hover:text-accent disabled:opacity-30"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
+        }
+      />
+      <GlobalFilters />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card card-pad">

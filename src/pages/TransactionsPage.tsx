@@ -16,6 +16,7 @@ import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { CategoryDot } from "../components/CategoryDot";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
 import { formatMoney, formatNum } from "../lib/format";
@@ -187,25 +188,26 @@ export function TransactionsPage() {
       <PageHeader
         icon={ListChecks}
         title="Операции"
-        hint={`Сквозная лента всех операций под текущими фильтрами. Двойной клик по строке — редактирование. Все суммы в ${base}.`}
+        hint="Сквозная лента всех операций. Двойной клик по строке — редактирование."
       />
+      <GlobalFilters />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat
           label="Доходы"
-          value={formatMoney(totals.inc, base, { compact: true })}
+          value={formatMoney(totals.inc, base, { decimals: 0 })}
           tone="income"
           icon={<TrendingUp className="w-4 h-4" />}
         />
         <Stat
           label="Расходы"
-          value={formatMoney(totals.exp, base, { compact: true })}
+          value={formatMoney(totals.exp, base, { decimals: 0 })}
           tone="expense"
           icon={<TrendingDown className="w-4 h-4" />}
         />
         <Stat
           label="Чистый"
-          value={formatMoney(totals.net, base, { compact: true, signed: true })}
+          value={formatMoney(totals.net, base, { decimals: 0, signed: true })}
           tone={totals.net >= 0 ? "income" : "expense"}
           icon={<Wallet className="w-4 h-4" />}
         />

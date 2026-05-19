@@ -36,6 +36,8 @@ import {
   chartAxisStroke,
 } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { GlobalFilters } from "../components/GlobalFilters";
+import { PageHeader } from "../components/PageHeader";
 
 export function TrendsPage() {
   const transactions = useDataStore((s) => s.transactions);
@@ -130,47 +132,44 @@ export function TrendsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Activity className="w-6 h-6 text-accent" />
-            Тренды
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            Динамика категорий по месяцам и поведенческие паттерны по дням недели
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setKind("expense")}
-              className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
-            >
-              Расходы
-            </button>
-            <button
-              onClick={() => setKind("income")}
-              className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
-            >
-              Доходы
-            </button>
+      <PageHeader
+        icon={Activity}
+        title="Тренды"
+        hint="Динамика категорий по месяцам и поведенческие паттерны по дням недели."
+        right={
+          <div className="flex flex-wrap gap-2">
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setKind("expense")}
+                className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
+              >
+                Расходы
+              </button>
+              <button
+                onClick={() => setKind("income")}
+                className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
+              >
+                Доходы
+              </button>
+            </div>
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setLevel("top")}
+                className={`px-3 py-1 text-xs rounded-md ${level === "top" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                Верхний
+              </button>
+              <button
+                onClick={() => setLevel("full")}
+                className={`px-3 py-1 text-xs rounded-md ${level === "full" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                С подкат.
+              </button>
+            </div>
           </div>
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setLevel("top")}
-              className={`px-3 py-1 text-xs rounded-md ${level === "top" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              Верхний
-            </button>
-            <button
-              onClick={() => setLevel("full")}
-              className={`px-3 py-1 text-xs rounded-md ${level === "full" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              С подкат.
-            </button>
-          </div>
-        </div>
-      </div>
+        }
+      />
+      <GlobalFilters />
 
       <div className="card card-pad">
         <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
