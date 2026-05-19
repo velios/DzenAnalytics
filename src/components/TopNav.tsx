@@ -168,15 +168,16 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
 
         <ThemeSwitcher />
 
-        {/* Settings — animated gear */}
+        {/* Settings — gear icon. Active style matches PRIMARY nav (bg-accent/10
+            text-accent) so the whole header speaks one design language. */}
         <NavLink
           to="/import"
           title="Настройки"
           className={({ isActive }) =>
             clsx(
-              "group relative p-1.5 rounded-lg border transition-all",
+              "group relative p-1.5 rounded-lg border transition-colors",
               isActive
-                ? "border-transparent bg-gradient-to-br from-accent to-accent2 text-white shadow-sm"
+                ? "bg-accent/10 border-accent/30 text-accent"
                 : "border-border bg-panel2 text-muted hover:text-accent hover:border-accent/50"
             )
           }
@@ -186,16 +187,16 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
           />
         </NavLink>
 
-        {/* Help — animated question mark */}
+        {/* Help — question icon. Same active treatment as Settings. */}
         <NavLink
           to="/help"
           title="Справка"
           className={({ isActive }) =>
             clsx(
-              "group relative p-1.5 rounded-lg border transition-all",
+              "group relative p-1.5 rounded-lg border transition-colors",
               isActive
-                ? "border-transparent bg-gradient-to-br from-accent2 to-accent text-white shadow-sm"
-                : "border-border bg-panel2 text-muted hover:text-accent2 hover:border-accent2/50"
+                ? "bg-accent/10 border-accent/30 text-accent"
+                : "border-border bg-panel2 text-muted hover:text-accent hover:border-accent/50"
             )
           }
         >

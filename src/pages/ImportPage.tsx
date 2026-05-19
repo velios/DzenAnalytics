@@ -37,6 +37,8 @@ import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { Combobox } from "../components/Combobox";
+import { PageHeader } from "../components/PageHeader";
+import { SectionHeading } from "../components/SectionHeading";
 import { formatNum, formatDate } from "../lib/format";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import * as db from "../lib/db";
@@ -319,16 +321,11 @@ export function ImportPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Settings className="w-6 h-6 text-accent shrink-0" />
-          Настройки
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Источник данных, валюты и курсы, резервные копии — всё, что относится
-          к настройке приложения.
-        </p>
-      </div>
+      <PageHeader
+        icon={Settings}
+        title="Настройки"
+        hint="Источник данных, валюты и курсы, резервные копии — всё, что относится к настройке приложения."
+      />
 
       <SectionHeading>Источник данных</SectionHeading>
 
@@ -926,10 +923,3 @@ export function ImportPage() {
   );
 }
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-sm font-semibold uppercase tracking-wider text-muted px-1 pt-2">
-      {children}
-    </h2>
-  );
-}

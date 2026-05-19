@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, ArrowUpRight, ArrowDownRight, Minus } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ArrowDownRight, Minus, GitCompare } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -25,6 +25,7 @@ import {
   chartAxisStroke,
 } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 import type { Transaction } from "../types";
 
 type Preset = "this_vs_prev_month" | "ytd_vs_prev_ytd" | "last_30_vs_prev_30" | "last_90_vs_prev_90" | "custom";
@@ -200,12 +201,11 @@ export function ComparePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Сравнение периодов</h1>
-        <p className="text-muted text-sm mt-1">
-          Сравнивает два периода: ключевые метрики и расходы по категориям
-        </p>
-      </div>
+      <PageHeader
+        icon={GitCompare}
+        title="Сравнение периодов"
+        hint="Сравнивает два периода: ключевые метрики и расходы по категориям"
+      />
 
       <div className="card card-pad">
         <div className="flex flex-wrap gap-2 mb-4">

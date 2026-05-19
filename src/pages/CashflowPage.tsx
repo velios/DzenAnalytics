@@ -24,6 +24,7 @@ import {
   ChevronRight,
   BarChart3,
   Layers,
+  LineChart as LineChartIcon,
   Sparkles,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
@@ -53,6 +54,7 @@ import {
 } from "../lib/format";
 import { Stat } from "../components/Stat";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 import { SortableTable } from "../components/SortableTable";
 import type { MonthBucket } from "../lib/aggregations";
 
@@ -135,12 +137,11 @@ export function CashflowPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Cash-flow</h1>
-        <p className="text-muted text-sm mt-1">
-          Доходы, расходы и чистый поток по месяцам. Все суммы в {base}.
-        </p>
-      </div>
+      <PageHeader
+        icon={LineChartIcon}
+        title="Cash-flow"
+        hint={`Доходы, расходы и чистый поток по месяцам. Все суммы в ${base}.`}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat

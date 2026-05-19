@@ -6,6 +6,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { groupByHashtag, extractHashtags, type TagBucket } from "../lib/aggregations";
 import { formatMoney, formatPct } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 import { SortableTable, type Column } from "../components/SortableTable";
 
 export function TagsPage() {
@@ -35,30 +36,34 @@ export function TagsPage() {
   if (tags.length === 0) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Хэштеги</h1>
-          <p className="text-muted text-sm mt-1">
-            В комментариях нет хэштегов. Добавляйте `#метку` в комментарий, чтобы группировать
-            операции по своим темам (поездки, проекты, люди).
-          </p>
-        </div>
+        <PageHeader
+          icon={Hash}
+          title="Хэштеги"
+          hint="В комментариях нет хэштегов. Добавляйте `#метку` в комментарий, чтобы группировать операции по своим темам (поездки, проекты, люди)."
+        />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          Хэштеги
-          <MousePointerClick className="w-4 h-4 text-muted" />
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Извлечены из комментариев: {tags.length} тегов в {taggedCount} операциях
-          {totalExpense > 0 && ` · всего ${formatMoney(totalExpense, base, { compact: true })}`}.
-          Клик по тегу — операции.
-        </p>
-      </div>
+      <PageHeader
+        icon={Hash}
+        title="Хэштеги"
+        hint={
+          <>
+            Извлечены из комментариев: {tags.length} тегов в {taggedCount} операциях
+            {totalExpense > 0 && ` · всего ${formatMoney(totalExpense, base, { compact: true })}`}.
+            Клик по тегу — операции.
+          </>
+        }
+        right={
+          <span className="inline-flex items-center gap-1 text-xs text-muted">
+            <MousePointerClick className="w-3.5 h-3.5" />
+            Кликабельные
+          </span>
+        }
+      />
 
       <div className="card card-pad">
         <div className="font-semibold mb-4">Облако тегов</div>

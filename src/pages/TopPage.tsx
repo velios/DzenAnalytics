@@ -7,6 +7,8 @@ import { SortableTable, type Column } from "../components/SortableTable";
 import type { Transaction } from "../types";
 import { formatMoney, formatDate, formatPct } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { TrendingUp } from "lucide-react";
 
 type Tab = "categories" | "payees" | "transactions";
 
@@ -51,14 +53,11 @@ export function TopPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Топ</h1>
-          <p className="text-muted text-sm mt-1">
-            Категории, получатели и крупнейшие операции
-          </p>
-        </div>
-        <div className="flex gap-2">
+      <PageHeader
+        icon={TrendingUp}
+        title="Топ"
+        hint="Категории, получатели и крупнейшие операции"
+        right={
           <div className="flex bg-panel2 rounded-lg p-1 border border-border">
             <button
               onClick={() => setKind("expense")}
@@ -73,8 +72,8 @@ export function TopPage() {
               Доходы
             </button>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <div className="flex gap-2 border-b border-border">
         {(

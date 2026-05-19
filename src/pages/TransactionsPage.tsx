@@ -8,6 +8,7 @@ import {
   Wallet,
   Hash,
   ListFilter,
+  ListChecks,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -15,6 +16,7 @@ import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { CategoryDot } from "../components/CategoryDot";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
 import { formatMoney, formatNum } from "../lib/format";
 import type { Transaction } from "../types";
@@ -182,13 +184,11 @@ export function TransactionsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Операции</h1>
-        <p className="text-muted text-sm mt-1">
-          Сквозная лента всех операций под текущими фильтрами.
-          Двойной клик по строке — редактирование. Все суммы в {base}.
-        </p>
-      </div>
+      <PageHeader
+        icon={ListChecks}
+        title="Операции"
+        hint={`Сквозная лента всех операций под текущими фильтрами. Двойной клик по строке — редактирование. Все суммы в ${base}.`}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat

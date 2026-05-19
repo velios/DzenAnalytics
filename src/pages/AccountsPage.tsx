@@ -45,6 +45,7 @@ import {
   chartAxisStroke,
 } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 import { Sparkline } from "../components/Sparkline";
 
 const STACK_COLORS = [
@@ -151,60 +152,61 @@ export function AccountsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Совокупный баланс</h1>
-          <p className="text-muted text-sm mt-1">
-            {zenToken
-              ? "Совокупный баланс подтянут из Дзен-мани, обновляется при каждой синхронизации."
-              : calibration
-                ? `Откалибровано: на ${calibration.date} баланс был ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
-                : "Стартовая точка — 0 (CSV не содержит начальных остатков). Используйте калибровку, чтобы привязать график к реальной сумме."}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setScope("all")}
-              className={`px-3 py-1 text-xs rounded-md ${scope === "all" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              Вся история
-            </button>
-            <button
-              onClick={() => setScope("filtered")}
-              className={`px-3 py-1 text-xs rounded-md ${scope === "filtered" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              По фильтрам
-            </button>
+      <PageHeader
+        icon={Wallet}
+        title="Совокупный баланс"
+        hint={
+          zenToken
+            ? "Совокупный баланс подтянут из Дзен-мани, обновляется при каждой синхронизации."
+            : calibration
+              ? `Откалибровано: на ${calibration.date} баланс был ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
+              : "Стартовая точка — 0 (CSV не содержит начальных остатков). Используйте калибровку, чтобы привязать график к реальной сумме."
+        }
+        right={
+          <div className="flex flex-wrap gap-2">
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setScope("all")}
+                className={`px-3 py-1 text-xs rounded-md ${scope === "all" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                Вся история
+              </button>
+              <button
+                onClick={() => setScope("filtered")}
+                className={`px-3 py-1 text-xs rounded-md ${scope === "filtered" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                По фильтрам
+              </button>
+            </div>
+            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <button
+                onClick={() => setView("stacked")}
+                className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${view === "stacked" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                <Layers className="w-3 h-3" />
+                По счетам
+              </button>
+              <button
+                onClick={() => setView("single")}
+                className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${view === "single" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              >
+                <LineChartIcon className="w-3 h-3" />
+                Совокупно
+              </button>
+            </div>
+            {!zenToken && (
+              <button
+                onClick={() => setCalibOpen((o) => !o)}
+                className={`btn-ghost text-xs ${calibration ? "border-accent2 text-accent2" : ""}`}
+                title="Привязать график к фактическому балансу"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                {calibration ? "Калибровка вкл." : "Калибровка"}
+              </button>
+            )}
           </div>
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-            <button
-              onClick={() => setView("stacked")}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${view === "stacked" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              <Layers className="w-3 h-3" />
-              По счетам
-            </button>
-            <button
-              onClick={() => setView("single")}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${view === "single" ? "bg-accent text-accent-fg" : "text-muted"}`}
-            >
-              <LineChartIcon className="w-3 h-3" />
-              Совокупно
-            </button>
-          </div>
-          {!zenToken && (
-            <button
-              onClick={() => setCalibOpen((o) => !o)}
-              className={`btn-ghost text-xs ${calibration ? "border-accent2 text-accent2" : ""}`}
-              title="Привязать график к фактическому балансу"
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-              {calibration ? "Калибровка вкл." : "Калибровка"}
-            </button>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       {calibOpen && !zenToken && (
         <div className="card card-pad bg-accent2/5 border-accent2/40">

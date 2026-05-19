@@ -26,6 +26,7 @@ import {
   GitCompare,
   PieChart,
   Camera,
+  LayoutDashboard,
   Loader2,
 } from "lucide-react";
 import { useEffect } from "react";
@@ -64,6 +65,7 @@ import {
   ymdKey,
 } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 import { InsightsPanel } from "../components/InsightsPanel";
 import { QuickCalibration } from "../components/QuickCalibration";
 import type { DayCell } from "../lib/aggregations";
@@ -464,23 +466,26 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6" ref={exportRef}>
-      <div className="flex items-end justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Главная</h1>
-          <p className="text-muted text-sm mt-1">
-            Обзор финансов: ключевые метрики, тренды, прогноз и быстрые переходы
-          </p>
-        </div>
-        <button
-          data-export-skip="1"
-          onClick={exportPng}
-          disabled={exporting}
-          className="btn-ghost text-xs"
-        >
-          {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-          {exporting ? "Сохраняю..." : "Снимок PNG"}
-        </button>
-      </div>
+      <PageHeader
+        icon={LayoutDashboard}
+        title="Главная"
+        hint="Обзор финансов: ключевые метрики, тренды, прогноз и быстрые переходы"
+        right={
+          <button
+            data-export-skip="1"
+            onClick={exportPng}
+            disabled={exporting}
+            className="btn-ghost text-xs"
+          >
+            {exporting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Camera className="w-3.5 h-3.5" />
+            )}
+            {exporting ? "Сохраняю..." : "Снимок PNG"}
+          </button>
+        }
+      />
 
       {!apiConnected && (
         <div data-export-skip="1">
