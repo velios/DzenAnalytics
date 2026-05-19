@@ -45,7 +45,14 @@ export function PageHeader({ title, icon: Icon, hint, right }: Props) {
           <span className="truncate">{title}</span>
         </h1>
         {hint && (
-          <p className="text-muted text-sm mt-1 max-w-prose">{hint}</p>
+          // Single-line hint by design: keeps every page header's vertical
+          // footprint identical (title row + exactly one hint row). On narrow
+          // viewports the text truncates with an ellipsis instead of wrapping
+          // to a second line, so the layout below never jumps around. Pages
+          // should keep hints short enough that truncation is rare in practice.
+          <p className="text-muted text-sm mt-1 truncate" title={typeof hint === "string" ? hint : undefined}>
+            {hint}
+          </p>
         )}
       </div>
       {right && <div className="shrink-0">{right}</div>}

@@ -324,7 +324,7 @@ export function ImportPage() {
       <PageHeader
         icon={Settings}
         title="Настройки"
-        hint="Источник данных, валюты и курсы, резервные копии — всё, что относится к настройке приложения."
+        hint="Источник данных, валюты, обработка и бэкапы."
       />
 
       <SectionHeading>Источник данных</SectionHeading>

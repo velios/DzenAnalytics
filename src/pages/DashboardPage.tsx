@@ -608,8 +608,16 @@ export function DashboardPage() {
         </div>
 
         <div className="card card-pad">
+          {/* Two-line title block matches Cash-flow card so both plot areas
+              line up vertically. Without the subtitle the AreaChart was ~16px
+              taller and looked like it belonged to a different layout. */}
           <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold">Совокупный баланс</div>
+            <div>
+              <div className="font-semibold">Совокупный баланс</div>
+              <div className="text-xs text-muted">
+                Итог по всём счетам
+              </div>
+            </div>
             <Link to="/accounts" className="text-xs text-accent hover:underline flex items-center gap-1">
               счета <ArrowRight className="w-3 h-3" />
             </Link>
@@ -628,7 +636,10 @@ export function DashboardPage() {
                   dataKey="date"
                   stroke={chartAxisStroke}
                   fontSize={11}
-                  tickFormatter={(d) => formatDate(d, "short")}
+                  // Match Cash-flow X-axis: "май 23 г." style. The previous
+                  // DD.MM format ("23.10") looked alien next to the left chart
+                  // and lost the year on multi-year data.
+                  tickFormatter={(d) => monthLabel((d as string).slice(0, 7))}
                   minTickGap={50}
                 />
                 <YAxis
@@ -748,8 +759,12 @@ export function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Account balances — table */}
-        <div className="card card-pad">
+        {/* Account balances — table.
+            BOTH cards in this row share the same `max-h` so they line up
+            visually no matter how many accounts the user has. Inside each
+            card the scrollable region is `flex-1 min-h-0 overflow-y-auto`
+            — fills empty space when content is small, scrolls when long. */}
+        <div className="card card-pad flex flex-col max-h-[560px]">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div className="font-semibold flex items-center gap-2">
               <Wallet className="w-4 h-4 text-accent" />
@@ -794,7 +809,7 @@ export function DashboardPage() {
           {accountRows.length === 0 ? (
             <div className="text-sm text-muted text-center py-6">Нет счетов</div>
           ) : (
-            <div className="overflow-y-auto max-h-[360px] -mx-1 px-1">
+            <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-panel z-10">
                   <tr className="text-xs text-muted text-left">
@@ -883,8 +898,11 @@ export function DashboardPage() {
           )}
         </div>
 
-        {/* Top-10 categories of the current month */}
-        <div className="card card-pad">
+        {/* Top-10 categories of the current month.
+            Mirrors the balances card layout: same `max-h-[560px]`, flex-col,
+            scrollable list region with `flex-1 min-h-0 overflow-y-auto` so
+            both cards in this row stay perfectly aligned in height. */}
+        <div className="card card-pad flex flex-col max-h-[560px]">
           <div className="flex items-center justify-between mb-3">
             <div className="font-semibold flex items-center gap-2">
               <PieChart className="w-4 h-4 text-accent" />
@@ -905,7 +923,7 @@ export function DashboardPage() {
               За {monthLabel(currentYM)} ещё нет расходов.
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2 -mr-1 pr-1">
               {catsThisMonth.map((c) => {
                 const pct =
                   catsThisMonth[0].expense > 0

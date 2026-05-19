@@ -158,10 +158,10 @@ export function AccountsPage() {
         title="Совокупный баланс"
         hint={
           zenToken
-            ? "Совокупный баланс подтянут из Дзен-мани, обновляется при каждой синхронизации."
+            ? "Баланс подтянут из Дзен-мани и обновляется при синхронизации."
             : calibration
-              ? `Откалибровано: на ${calibration.date} баланс был ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
-              : "Стартовая точка — 0 (CSV не содержит начальных остатков). Используйте калибровку, чтобы привязать график к реальной сумме."
+              ? `Откалибровано: на ${calibration.date} баланс ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
+              : "Стартовая точка — 0. Калибровка привяжет график к реальной сумме."
         }
         right={
           <div className="flex flex-wrap gap-2">

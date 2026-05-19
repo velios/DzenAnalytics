@@ -31,7 +31,7 @@ export function SankeyPage() {
         <PageHeader
           icon={GitFork}
           title="Потоки денег"
-          hint="Слева — источники доходов, справа — категории расходов. Толщина потока пропорциональна сумме."
+          hint="Слева — источники доходов, справа — категории расходов."
         />
         <GlobalFilters />
         <div className="card card-pad text-center py-12 text-muted">
@@ -46,7 +46,7 @@ export function SankeyPage() {
       <PageHeader
         icon={GitFork}
         title="Потоки денег"
-        hint="Слева — источники доходов, справа — категории расходов. Толщина потока пропорциональна сумме."
+        hint="Слева — источники доходов, справа — категории расходов."
       />
       <GlobalFilters />
 

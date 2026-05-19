@@ -188,7 +188,7 @@ export function TransactionsPage() {
       <PageHeader
         icon={ListChecks}
         title="Операции"
-        hint="Сквозная лента всех операций. Двойной клик по строке — редактирование."
+        hint="Сквозная лента операций. Двойной клик — редактирование строки."
       />
       <GlobalFilters />
 
