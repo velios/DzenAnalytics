@@ -655,21 +655,44 @@ const SECTIONS: Section[] = [
           <li>
             Откройте{" "}
             <a
-              href="https://api.zenmoney.ru/access_token/"
+              href="https://zerro.app/token"
               target="_blank"
               rel="noreferrer"
               className="underline text-accent"
             >
-              api.zenmoney.ru/access_token/
+              zerro.app/token
             </a>{" "}
-            (требует входа в аккаунт)
+            — открытый сервис (
+            <a
+              href="https://github.com/ardov/zerro"
+              target="_blank"
+              rel="noreferrer"
+              className="underline text-accent"
+            >
+              github.com/ardov/zerro
+            </a>
+            ), проводит OAuth-флоу за вас. Этот путь рекомендует сам{" "}
+            <a
+              href="https://github.com/zenmoney/ZenPlugins/wiki/ZenMoney-API"
+              target="_blank"
+              rel="noreferrer"
+              className="underline text-accent"
+            >
+              Zenmoney API wiki
+            </a>{" "}
+            для частных пользователей.
           </li>
+          <li>Войдите своим логином от Дзен-мани и подтвердите доступ</li>
           <li>Скопируйте длинную строку токена</li>
           <li>
             В DzenAnalytics: «Настройки» (⚙️) → «Источник данных» → переключите
             на «Онлайн (Zenmoney API)» → вставьте токен → «Подключить»
           </li>
         </ol>
+        <p className="mt-2 text-muted text-xs">
+          Токен выпускает сам Дзен-мани, Zerro его не хранит. Отозвать доступ
+          можно через Дзен-мани → Настройки → Подключённые приложения.
+        </p>
         <p className="mt-2">
           <strong>Что происходит дальше:</strong> приложение делает первый
           запрос <code>POST /v8/diff/</code> без <code>serverTimestamp</code>{" "}
