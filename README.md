@@ -289,8 +289,8 @@ npm run dev
 ### Получение токена
 
 Официальный путь — OAuth-флоу через ваш собственный consumer (см.
-[Zenmoney API wiki](https://github.com/zenmoney/ZenPlugins/wiki/ZenMoney-API)),
-но регистрировать приложение ради личного токена избыточно. Wiki сама
+[Zenmoney API Wiki](https://github.com/zenmoney/ZenPlugins/wiki/ZenMoney-API)),
+но регистрировать приложение ради личного токена избыточно. Разработчики Дзен-мани
 рекомендует обычным пользователям использовать готовый сервис:
 
 1. Откройте [**zerro.app/token**](https://zerro.app/token) (открытый
@@ -307,8 +307,7 @@ npm run dev
 >
 > Если хочется обойтись без посредников совсем — заведите свой consumer в
 > Zenmoney и пройдите OAuth самостоятельно. Это сложнее: нужно поднять
-> redirect-URI, обработать `code → token` обмен и т.д. Для одиночного
-> пользователя овчинка не стоит выделки.
+> redirect-URI, обработать `code → token` обмен и т.д.
 
 ### Подключение
 
