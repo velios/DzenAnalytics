@@ -28,9 +28,15 @@
  */
 
 import { pushDiff, type PushPayload } from "./zenmoney";
-import type { ZenDiffResponse, ZenTag, ZenTransaction } from "./zenmoney";
+import type {
+  ZenAccount,
+  ZenDiffResponse,
+  ZenTag,
+  ZenTransaction,
+} from "./zenmoney";
 import type { ZenCache } from "./zenmoneyCache";
 import type { TransactionEdit } from "../store/useEditsStore";
+import type { TxKind } from "../types";
 
 export interface PushItem {
   id: string;
@@ -48,6 +54,32 @@ export interface PushBuildResult {
 /** Synthetic categories minted in the forward mapper. They have no
  *  real Zenmoney tag, so pushing them is impossible. */
 const SYNTHETIC_CATEGORIES = new Set(["Долг", "Перевод"]);
+
+/**
+ * Replays the forward-mapper classification for a raw ZenTransaction so
+ * we can tell what `kind` / `account` / `outcomeAccount` / `incomeAccount`
+ * our local model originally derived from it. Used to decide whether an
+ * overlay field is a *real* change or just an inherited copy from the
+ * Edit-modal (which currently stashes every field into the patch).
+ */
+function classifyOriginal(
+  zt: ZenTransaction,
+  accountsById: Map<string, ZenAccount>
+): { kind: TxKind; account: string; outAcc: string; inAcc: string } {
+  const outcome = zt.outcome || 0;
+  const income = zt.income || 0;
+  const outAcc = accountsById.get(zt.outcomeAccount)?.title || "";
+  const inAcc = accountsById.get(zt.incomeAccount)?.title || "";
+  const isTransfer =
+    outcome > 0 && income > 0 && zt.outcomeAccount !== zt.incomeAccount;
+  if (isTransfer) {
+    return { kind: "transfer", account: outAcc, outAcc, inAcc };
+  }
+  if (outcome > 0) {
+    return { kind: "expense", account: outAcc, outAcc, inAcc };
+  }
+  return { kind: "income", account: inAcc, outAcc, inAcc };
+}
 
 /**
  * Walk every pending edit and classify it as push-ready or skipped.
@@ -69,6 +101,7 @@ export function buildPushItems(
   const instrumentsBySymbol = new Map(
     cache.instruments.map((i) => [i.shortTitle, i])
   );
+  const accountsById = new Map(cache.accounts.map((a) => [a.id, a]));
 
   const toPush: PushItem[] = [];
   const skipped: { id: string; reason: string }[] = [];
@@ -88,11 +121,14 @@ export function buildPushItems(
       continue;
     }
 
-    // Hard "no" for unsupported edit fields. Surface a precise reason so
-    // the user understands why their edit didn't go out — and so they
-    // can decide whether to roll the edit back or apply it manually in
-    // the mobile app.
-    if (edit.kind !== undefined) {
+    // Hard "no" for unsupported edit fields — but ONLY when the value
+    // actually differs from what the forward mapper would have derived
+    // from the original. The Edit-modal currently stashes every field
+    // into the patch even when the user didn't touch it (so a payee-
+    // only edit still carries `kind` / `account` / both legs unchanged).
+    // Comparing against the original lets us treat those as no-ops.
+    const orig = classifyOriginal(original, accountsById);
+    if (edit.kind !== undefined && edit.kind !== orig.kind) {
       skipped.push({
         id,
         reason:
@@ -100,17 +136,45 @@ export function buildPushItems(
       });
       continue;
     }
-    if (
-      edit.account !== undefined ||
-      edit.outcomeAccount !== undefined ||
-      edit.incomeAccount !== undefined
-    ) {
+    if (edit.account !== undefined && edit.account !== orig.account) {
       skipped.push({
         id,
         reason:
           "Phase 1 не поддерживает смену счёта операции. Отредактируйте в мобильном приложении.",
       });
       continue;
+    }
+    // Side-fields `outcomeAccount` / `incomeAccount` only matter for
+    // *transfers* — for income/expense rows the canonical account is
+    // `account`, and the side-fields are auxiliary. Pre-bugfix overlays
+    // sometimes stashed those side-fields with noise values (e.g. ""
+    // for the "unused" side of an expense), which would falsely look
+    // like an account change here. Skip the comparison unless the
+    // effective kind is "transfer".
+    const effectiveKind = (edit.kind as TxKind | undefined) ?? orig.kind;
+    if (effectiveKind === "transfer") {
+      if (
+        edit.outcomeAccount !== undefined &&
+        edit.outcomeAccount !== orig.outAcc
+      ) {
+        skipped.push({
+          id,
+          reason:
+            "Phase 1 не поддерживает смену счёта-источника. Отредактируйте в мобильном приложении.",
+        });
+        continue;
+      }
+      if (
+        edit.incomeAccount !== undefined &&
+        edit.incomeAccount !== orig.inAcc
+      ) {
+        skipped.push({
+          id,
+          reason:
+            "Phase 1 не поддерживает смену счёта-получателя. Отредактируйте в мобильном приложении.",
+        });
+        continue;
+      }
     }
 
     // Refuse synthetic-category edits — Zen has no tag with that name.
@@ -257,5 +321,28 @@ export async function sendPush(
   const payload: PushPayload = {
     transaction: items.map((i) => i.zen),
   };
+  // Debug aid: surface the full payload in DevTools so it's easy to
+  // verify which fields actually landed in the request body. Disabled
+  // automatically in production (Vite sets `import.meta.env.PROD`).
+  if (!import.meta.env.PROD) {
+    // eslint-disable-next-line no-console
+    console.groupCollapsed(
+      `[Zenmoney push] sending ${items.length} transaction(s)`
+    );
+    for (const item of items) {
+      // eslint-disable-next-line no-console
+      console.log(item.id, {
+        payee: item.zen.payee,
+        comment: item.zen.comment,
+        date: item.zen.date,
+        outcome: item.zen.outcome,
+        income: item.zen.income,
+        tag: item.zen.tag,
+        changed: item.zen.changed,
+      });
+    }
+    // eslint-disable-next-line no-console
+    console.groupEnd();
+  }
   return pushDiff(token, serverTimestamp, payload);
 }

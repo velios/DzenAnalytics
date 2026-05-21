@@ -146,37 +146,79 @@ export function EditTransactionModal({ tx, onClose }: Props) {
         Number.isFinite(amtNum) && amtNum >= 0 ? amtNum : tx.amount;
       const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : tx.date;
 
-      // Build the patch differently depending on the (possibly new) kind.
-      // For transfers we have to keep both legs consistent: `account`
-      // shadows the source (matches the original mapper convention),
-      // `outcomeAccount` + `incomeAccount` carry the actual pair.
-      const patch: Record<string, unknown> = {
-        date: safeDate,
-        category: category.trim() || tx.category,
-        subcategory: subcategory.trim() || null,
-        payee: payee.trim(),
-        comment: comment.trim(),
-        amount: safeAmount,
-        currency: currency.trim() || tx.currency,
-        kind,
-      };
+      // Build a MINIMAL patch — only fields whose new value actually
+      // differs from the original. This matters for the push pipeline:
+      // `buildPushItems` checks `edit.<field> !== undefined` to decide
+      // whether the user touched a field, so stashing every value here
+      // (even unchanged ones) would make payee-only edits look like
+      // type-or-account changes and get rejected by Phase 1 validation.
+      const patch: Record<string, unknown> = {};
+
+      // Helper: trim both sides before comparing so a whitespace-only
+      // delta (e.g. a trailing space the user accidentally added) still
+      // registers as "no change" — but a real edit always lands in the
+      // patch. Treating null/undefined as "" makes the comparison total.
+      const norm = (v: string | null | undefined) => (v ?? "").trim();
+      const changed = (next: string, before: string | null | undefined) =>
+        norm(next) !== norm(before);
+
+      if (safeDate !== tx.date) patch.date = safeDate;
+
+      const nextCategory = category.trim() || tx.category;
+      if (changed(nextCategory, tx.category)) patch.category = nextCategory;
+
+      const nextSubRaw = subcategory.trim();
+      const nextSub = nextSubRaw || null;
+      if (changed(nextSubRaw, tx.subcategory ?? "")) patch.subcategory = nextSub;
+
+      const nextPayee = payee.trim();
+      if (changed(nextPayee, tx.payee)) patch.payee = nextPayee;
+
+      const nextComment = comment.trim();
+      if (changed(nextComment, tx.comment)) patch.comment = nextComment;
+
+      if (safeAmount !== tx.amount) patch.amount = safeAmount;
+
+      const nextCurrency = currency.trim() || tx.currency;
+      if (changed(nextCurrency, tx.currency)) patch.currency = nextCurrency;
+
+      // Kind / account semantics depend on the (possibly new) kind. We
+      // only write these into the patch when they materially differ
+      // from the original — otherwise an edit of "kind=expense" on an
+      // already-expense row would look like a "type change" to push.
+      if (kind !== tx.kind) patch.kind = kind;
+
       if (kind === "transfer") {
         const src = outAcc.trim() || tx.outcomeAccount || tx.account;
         const dst = inAcc.trim() || tx.incomeAccount || "";
-        patch.outcomeAccount = src;
-        patch.incomeAccount = dst;
-        patch.account = src; // mapper convention: transfer rows live under source
+        if (src !== (tx.outcomeAccount || "")) patch.outcomeAccount = src;
+        if (dst !== (tx.incomeAccount || "")) patch.incomeAccount = dst;
+        if (src !== tx.account) patch.account = src;
       } else {
-        patch.account = account.trim() || tx.account;
-        // Keep outcome/income aligned with the selected kind so charts
-        // that look at those fields directly don't see stale data.
-        if (kind === "income") {
-          patch.incomeAccount = account.trim() || tx.account;
-          patch.outcomeAccount = "";
-        } else {
-          patch.outcomeAccount = account.trim() || tx.account;
-          patch.incomeAccount = "";
+        const nextAccount = account.trim() || tx.account;
+        if (nextAccount !== tx.account) patch.account = nextAccount;
+        // Keep the side-fields aligned with the chosen kind, but ONLY
+        // when something actually changed on them or on `kind`. This
+        // way a no-op edit doesn't stuff outcomeAccount/incomeAccount
+        // into the overlay just to keep them "consistent".
+        if (patch.kind !== undefined || patch.account !== undefined) {
+          if (kind === "income") {
+            const nextInc = nextAccount;
+            if (nextInc !== (tx.incomeAccount || "")) patch.incomeAccount = nextInc;
+            if ((tx.outcomeAccount || "") !== "") patch.outcomeAccount = "";
+          } else {
+            const nextOut = nextAccount;
+            if (nextOut !== (tx.outcomeAccount || "")) patch.outcomeAccount = nextOut;
+            if ((tx.incomeAccount || "") !== "") patch.incomeAccount = "";
+          }
         }
+      }
+
+      // Nothing changed — skip the write so we don't pollute the
+      // overlay with an empty entry that would still trigger reapply.
+      if (Object.keys(patch).length === 0) {
+        onClose();
+        return;
       }
 
       await setEdit(tx.id, patch);
