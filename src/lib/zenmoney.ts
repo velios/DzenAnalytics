@@ -132,6 +132,19 @@ interface DiffRequest {
   currentClientTimestamp: number;
   serverTimestamp: number;
   // forceFetch?: string[]; // optional, e.g. ["transaction"] to bypass diff caching
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Optional PUSH sections. Included in the body when the client wants the
+  // server to also mutate state in addition to fetching the delta.
+  // Zenmoney handles each section as an upsert by `id` with last-write-wins
+  // on `changed` timestamp; the response echoes back the saved entities.
+  // ──────────────────────────────────────────────────────────────────────
+  transaction?: ZenTransaction[];
+  account?: ZenAccount[];
+  tag?: ZenTag[];
+  merchant?: ZenMerchant[];
+  /** Soft-delete: `{ id, object, stamp, user }` per item. */
+  deletion?: ZenDeletion[];
 }
 
 /**
@@ -147,6 +160,60 @@ export async function fetchDiff(
   const body: DiffRequest = {
     currentClientTimestamp: Math.floor(Date.now() / 1000),
     serverTimestamp,
+  };
+  const res = await fetch(`${API_BASE}/v8/diff/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    let code: string | null = null;
+    try {
+      const j = (await res.json()) as { error?: { message?: string; code?: string } };
+      if (j.error?.message) msg = j.error.message;
+      if (j.error?.code) code = j.error.code;
+    } catch {
+      // ignore parse errors — keep the HTTP-status fallback
+    }
+    throw new ZenApiError(msg, res.status, code);
+  }
+  return (await res.json()) as ZenDiffResponse;
+}
+
+/**
+ * PUSH-aware variant of `/v8/diff/`. Same endpoint, same response shape —
+ * but the request body carries entities the server should upsert (and
+ * optionally a `deletion` list).
+ *
+ * Zenmoney's response includes the saved entities so the caller can merge
+ * them straight back into the local cache via the usual `applyDiff` path.
+ * The server's `changed` stamp on each returned entity is canonical and
+ * MUST replace whatever the client sent (Zenmoney sometimes bumps it on
+ * conflict resolution).
+ */
+export interface PushPayload {
+  transaction?: ZenTransaction[];
+  account?: ZenAccount[];
+  tag?: ZenTag[];
+  merchant?: ZenMerchant[];
+  deletion?: ZenDeletion[];
+}
+
+export async function pushDiff(
+  token: string,
+  serverTimestamp: number,
+  payload: PushPayload,
+  signal?: AbortSignal
+): Promise<ZenDiffResponse> {
+  const body: DiffRequest = {
+    currentClientTimestamp: Math.floor(Date.now() / 1000),
+    serverTimestamp,
+    ...payload,
   };
   const res = await fetch(`${API_BASE}/v8/diff/`, {
     method: "POST",

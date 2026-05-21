@@ -26,6 +26,7 @@ import {
   CalendarRange,
   History,
   CloudDownload,
+  CloudUpload,
   Settings,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
@@ -42,6 +43,7 @@ import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
 import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
+import { useEditsStore } from "../store/useEditsStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
 import { SectionHeading } from "../components/SectionHeading";
@@ -83,6 +85,22 @@ export function ImportPage() {
   const zenValidateAndSave = useZenmoneyStore((s) => s.validateAndSaveToken);
   const zenSync = useZenmoneyStore((s) => s.sync);
   const zenRemoveToken = useZenmoneyStore((s) => s.removeToken);
+  // Push (Phase 1) state — opt-in two-way sync
+  const pushEnabled = useZenmoneyStore((s) => s.pushEnabled);
+  const pushStatus = useZenmoneyStore((s) => s.pushStatus);
+  const pushError = useZenmoneyStore((s) => s.pushError);
+  const lastPushAt = useZenmoneyStore((s) => s.lastPushAt);
+  const lastPushResult = useZenmoneyStore((s) => s.lastPushResult);
+  const setPushEnabled = useZenmoneyStore((s) => s.setPushEnabled);
+  const pushPendingEdits = useZenmoneyStore((s) => s.pushPendingEdits);
+  // Pending edit count (the badge on the push button).
+  const editsMap = useEditsStore((s) => s.edits);
+  const editsLoaded = useEditsStore((s) => s.loaded);
+  const editsHydrate = useEditsStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!editsLoaded) editsHydrate();
+  }, [editsLoaded, editsHydrate]);
+  const pendingEditCount = Object.keys(editsMap).length;
 
   useEffect(() => {
     if (!zenLoaded) zenHydrate();
@@ -1215,11 +1233,165 @@ export function ImportPage() {
             )}
 
             <p className="text-[11px] text-muted mt-3">
-              <strong>Зачем:</strong> когда мы добавим push-операции в облако
-              (Фаза 1+ интеграции), любая ошибка может перезаписать ваши данные
-              в Дзен-мани. Снимок — это страховой полис: его можно использовать
-              для отката, и он содержит ровно то, что отдал API, без нашего
-              маппинга.
+              <strong>Зачем:</strong> перед каждой push-операцией в облако
+              приложение само делает свежий снимок (см. ниже). Это страховой
+              полис: при сбое — можно откатиться к слепку, и он содержит ровно
+              то, что отдал API, без нашего маппинга.
+            </p>
+          </div>
+
+          <SectionHeading>Push в облако (бета)</SectionHeading>
+          <div className="card card-pad border-warn/30 bg-warn/[0.03]">
+            <div className="flex items-center gap-2 mb-3">
+              <CloudUpload className="w-5 h-5 text-warn" />
+              <span className="font-medium">
+                Двусторонняя синхронизация с Zenmoney
+              </span>
+            </div>
+            <p className="text-xs text-muted mb-3">
+              По умолчанию приложение работает с API <strong>в режиме read-only</strong>:
+              все локальные правки операций (категории, payee, комментарии, суммы)
+              живут как overlay поверх данных и в облако НЕ уходят. Включите
+              переключатель ниже, чтобы получить возможность <strong>отправлять
+              правки обратно в Дзен-мани</strong>.
+            </p>
+            <p className="text-xs text-muted mb-3">
+              <strong>Что делает push:</strong> вытягивает свежий «облачный снимок»
+              (safety net) → отправляет ваши overlay-правки в API через тот же
+              <code className="pill mx-1">POST /v8/diff/</code> → при успехе чистит
+              отправленные правки из локального overlay (они теперь часть облачной
+              правды).
+            </p>
+            <p className="text-xs text-muted mb-3">
+              <strong>Phase 1 ограничения:</strong> поддерживаются правки полей
+              date / payee / comment / category / subcategory / amount / currency.
+              Смена типа операции (Расход / Доход / Перевод) и смена счёта пока
+              не push-ятся — такие правки останутся в локальном overlay со
+              скипом-причиной. Для них пока используйте мобильное приложение
+              Дзен-мани.
+            </p>
+
+            <label className="flex items-center gap-3 p-3 bg-panel2 rounded-lg border border-border cursor-pointer mb-3">
+              <input
+                type="checkbox"
+                checked={pushEnabled}
+                onChange={(e) => setPushEnabled(e.target.checked)}
+                className="accent-accent w-4 h-4"
+              />
+              <div className="flex-1">
+                <div className="font-medium text-sm">
+                  {pushEnabled
+                    ? "Push в облако включён"
+                    : "Push в облако выключен"}
+                </div>
+                <div className="text-xs text-muted">
+                  {pushEnabled
+                    ? "Кнопка «Отправить правки» ниже активна. Действуйте осознанно — операции необратимы."
+                    : "Локальные правки операций живут только в этом браузере, в облако не уходят."}
+                </div>
+              </div>
+            </label>
+
+            {pushEnabled && (
+              <>
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  <button
+                    onClick={async () => {
+                      if (pendingEditCount === 0) return;
+                      const confirmed = confirm(
+                        `Отправить ${pendingEditCount} локальных правок в Дзен-мани?\n\n` +
+                          `Перед отправкой будет автоматически сделан снимок облачного состояния (safety net). ` +
+                          `Правки, которые не поддерживаются Phase 1 (смена типа, счёта), будут пропущены — ` +
+                          `вы увидите их список после операции.\n\nПродолжить?`
+                      );
+                      if (!confirmed) return;
+                      try {
+                        await pushPendingEdits();
+                      } catch {
+                        /* error already in store */
+                      }
+                    }}
+                    disabled={
+                      pushStatus === "syncing" ||
+                      pendingEditCount === 0 ||
+                      !zenToken
+                    }
+                    className="btn-primary text-sm"
+                  >
+                    {pushStatus === "syncing" ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CloudUpload className="w-3.5 h-3.5" />
+                    )}
+                    {pushStatus === "syncing"
+                      ? "Отправляю..."
+                      : pendingEditCount === 0
+                        ? "Нет правок для отправки"
+                        : `Отправить ${pendingEditCount} правок в облако`}
+                  </button>
+                  {lastPushAt && (
+                    <span className="text-xs text-muted">
+                      Последний push: {new Date(lastPushAt).toLocaleString("ru-RU")}
+                    </span>
+                  )}
+                </div>
+
+                {pushError && (
+                  <div className="text-xs text-expense flex items-start gap-2 mb-3">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>{pushError}</span>
+                  </div>
+                )}
+
+                {pushStatus === "ok" && lastPushResult && (
+                  <div className="text-xs mb-3">
+                    <div className="flex items-start gap-2 text-income">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        Отправлено: <strong>{lastPushResult.pushed}</strong>
+                        {lastPushResult.skipped.length > 0 && (
+                          <>
+                            {" · "}пропущено: {lastPushResult.skipped.length}
+                          </>
+                        )}
+                        {lastPushResult.snapshotId && (
+                          <span className="text-muted">
+                            {" · "}safety snapshot: ✓
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    {lastPushResult.skipped.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="text-accent cursor-pointer hover:underline">
+                          Почему пропущены ({lastPushResult.skipped.length})
+                        </summary>
+                        <div className="mt-1 max-h-40 overflow-y-auto space-y-1 text-muted -mx-1 px-1">
+                          {lastPushResult.skipped.map((s) => (
+                            <div
+                              key={s.id}
+                              className="py-1 border-b border-border/40 last:border-b-0"
+                            >
+                              <div className="font-mono text-[10px] truncate">
+                                {s.id}
+                              </div>
+                              <div>{s.reason}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            <p className="text-[11px] text-muted mt-3">
+              <strong>Безопасность:</strong> перед каждым push — авто-снимок. На
+              стороне API conflict resolution идёт по last-write-wins на поле{" "}
+              <code>changed</code> — если кто-то в облаке поменял ту же операцию
+              позже вашего snapshot-timestamp, ваш push может проиграть. Это
+              нормально и ожидаемо — phase 1.1 добавит детект конфликтов с диалогом.
             </p>
           </div>
         </>

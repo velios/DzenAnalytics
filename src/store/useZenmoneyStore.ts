@@ -15,14 +15,23 @@ import {
   applyDiff,
   cacheToDiffResponse,
 } from "../lib/zenmoneyCache";
+import {
+  buildPushItems,
+  sendPush,
+  type PushBuildResult,
+} from "../lib/zenmoneyPush";
+import { takeSnapshot } from "../lib/cloudSnapshots";
 import { useDataStore } from "./useDataStore";
 import { useCalibrationStore } from "./useCalibrationStore";
 import { useCategoryMetaStore } from "./useCategoryMetaStore";
+import { useEditsStore } from "./useEditsStore";
 import type { ImportMeta } from "../types";
 
 const TOKEN_KEY = "zenmoneyToken";
 const TIMESTAMP_KEY = "zenmoneyServerTimestamp";
 const LAST_SYNC_KEY = "zenmoneyLastSyncAt";
+const PUSH_ENABLED_KEY = "zenmoneyPushEnabled";
+const LAST_PUSH_KEY = "zenmoneyLastPushAt";
 
 export type SyncStatus = "idle" | "checking" | "syncing" | "ok" | "error";
 
@@ -74,6 +83,15 @@ export interface SyncResult {
   };
 }
 
+export interface PushResult {
+  /** How many local edits were successfully sent and acknowledged by Zenmoney. */
+  pushed: number;
+  /** Edits that couldn't be pushed (with reasons). They stay in the local overlay. */
+  skipped: PushBuildResult["skipped"];
+  /** ISO timestamp of the snapshot we took right before sending — for audit. */
+  snapshotId: string | null;
+}
+
 interface ZenmoneyState {
   token: string | null;
   serverTimestamp: number;
@@ -81,6 +99,19 @@ interface ZenmoneyState {
   status: SyncStatus;
   error: string | null;
   loaded: boolean;
+
+  // ── Phase 1: bi-directional sync (opt-in, off by default) ─────────────
+  /** User has explicitly enabled push-to-Zenmoney. Default off. */
+  pushEnabled: boolean;
+  /** ISO timestamp of the last successful push, or null. */
+  lastPushAt: string | null;
+  /** "idle" / "syncing" while a push is in flight; mirrors regular sync. */
+  pushStatus: SyncStatus;
+  /** Last push error message (for inline UI display). Cleared on next push. */
+  pushError: string | null;
+  /** Last push result (counts of pushed / skipped). */
+  lastPushResult: PushResult | null;
+
   hydrate: () => Promise<void>;
   saveToken: (token: string) => Promise<void>;
   validateAndSaveToken: (token: string) => Promise<boolean>;
@@ -92,6 +123,22 @@ interface ZenmoneyState {
    * for support).
    */
   sync: (opts?: { force?: boolean }) => Promise<SyncResult>;
+
+  setPushEnabled: (enabled: boolean) => Promise<void>;
+  /**
+   * Push all currently-pending local edits (`useEditsStore.edits`) to
+   * Zenmoney via `POST /v8/diff/`. Side effects:
+   *   • takes a fresh cloud snapshot first (Phase 0 safety net);
+   *   • merges the server response into local cache + re-runs the
+   *     forward mapper so the UI sees the canonical post-push state;
+   *   • clears successfully-pushed entries from the local overlay
+   *     (the edit is now part of cloud truth, no need to apply it again).
+   *
+   * Returns `PushResult` describing how many went through and what was
+   * skipped (with reasons). Throws on transport / auth errors so the
+   * caller can surface an inline message.
+   */
+  pushPendingEdits: () => Promise<PushResult>;
 }
 
 export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
@@ -101,17 +148,26 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   status: "idle",
   error: null,
   loaded: false,
+  pushEnabled: false,
+  lastPushAt: null,
+  pushStatus: "idle",
+  pushError: null,
+  lastPushResult: null,
 
   hydrate: async () => {
-    const [token, ts, last] = await Promise.all([
+    const [token, ts, last, pushEnabled, lastPushAt] = await Promise.all([
       db.loadJSON<string>(TOKEN_KEY),
       db.loadJSON<number>(TIMESTAMP_KEY),
       db.loadJSON<string>(LAST_SYNC_KEY),
+      db.loadJSON<boolean>(PUSH_ENABLED_KEY),
+      db.loadJSON<string>(LAST_PUSH_KEY),
     ]);
     set({
       token: token || null,
       serverTimestamp: ts || 0,
       lastSyncAt: last || null,
+      pushEnabled: pushEnabled === true,
+      lastPushAt: lastPushAt || null,
       loaded: true,
     });
   },
@@ -243,6 +299,128 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         msg = "Не удалось синхронизировать";
       }
       set({ status: "error", error: msg });
+      throw e;
+    }
+  },
+
+  setPushEnabled: async (enabled) => {
+    await db.saveJSON(PUSH_ENABLED_KEY, enabled);
+    set({ pushEnabled: enabled, pushError: null });
+  },
+
+  pushPendingEdits: async () => {
+    const { token, pushEnabled } = get();
+    if (!token) {
+      const msg = "Сначала подключите токен";
+      set({ pushStatus: "error", pushError: msg });
+      throw new Error(msg);
+    }
+    if (!pushEnabled) {
+      const msg = "Двусторонняя синхронизация выключена в настройках";
+      set({ pushStatus: "error", pushError: msg });
+      throw new Error(msg);
+    }
+    set({ pushStatus: "syncing", pushError: null });
+    try {
+      // 1) Phase 0 safety net — always snapshot what's in cloud right
+      //    before we touch anything. If push misbehaves, this is the
+      //    rollback source of truth.
+      let snapshotId: string | null = null;
+      try {
+        const snap = await takeSnapshot(token);
+        snapshotId = snap.id;
+      } catch (e) {
+        // Snapshot failure shouldn't strand the user — log via state.error
+        // but proceed with the push. The risk is bounded: Phase 1 only
+        // updates existing transactions and we have the recent cache.
+        // eslint-disable-next-line no-console
+        console.warn("Pre-push snapshot failed:", e);
+      }
+
+      // 2) Build push items from the current overlay.
+      const cache = await loadZenCache();
+      if (!cache) {
+        const msg = "Локальный кэш Zenmoney пуст — сначала синхронизируйтесь";
+        set({ pushStatus: "error", pushError: msg });
+        throw new Error(msg);
+      }
+      const edits = useEditsStore.getState().edits;
+      const { toPush, skipped } = buildPushItems(edits, cache);
+      if (toPush.length === 0) {
+        const result: PushResult = { pushed: 0, skipped, snapshotId };
+        set({
+          pushStatus: "ok",
+          pushError: null,
+          lastPushResult: result,
+        });
+        return result;
+      }
+
+      // 3) Send to /v8/diff/. Server applies last-write-wins by `changed`,
+      //    returns the saved entities (with possibly bumped `changed`) and
+      //    its current `serverTimestamp`.
+      const response = await sendPush(token, get().serverTimestamp, toPush);
+
+      // 4) Merge server response into local cache so subsequent diffs
+      //    are anchored to the post-push state. `applyDiff` handles
+      //    upserts + deletions identically for push echoes and regular
+      //    pulls — the same shape comes back.
+      const nextCache = applyDiff(cache, response);
+      await saveZenCache(nextCache);
+      const mapped = mapZenmoneyDiff(cacheToDiffResponse(nextCache));
+
+      // 5) Clear successfully-pushed edits from the overlay. The edit's
+      //    intent now lives in cloud truth (and in our cache), so
+      //    applying it on top again would be a no-op at best, or worse
+      //    re-introduce a stale value if cloud later changes the field.
+      for (const item of toPush) {
+        await useEditsStore.getState().clearEdit(item.id);
+      }
+
+      // 6) Refresh main data store. Same pattern as `sync`, minus
+      //    calibration (push doesn't move account balances locally).
+      const importMeta: ImportMeta = {
+        importedAt: new Date().toISOString(),
+        fileName: `Zen-мани API · ${mapped.accountsActive} счетов · ${mapped.tagsTotal} тегов`,
+        totalRows: nextCache.transactions.length,
+        parsed: mapped.transactions.length,
+        skipped: nextCache.transactions.length - mapped.transactions.length,
+        source: "api",
+      };
+      await useCategoryMetaStore.getState().setAll(mapped.categoryMeta);
+      await db.saveRates(mapped.rates);
+      useDataStore.setState({ rates: mapped.rates });
+      await useDataStore.getState().setTransactions(mapped.transactions, importMeta);
+
+      const nowIso = new Date().toISOString();
+      await db.saveJSON(TIMESTAMP_KEY, response.serverTimestamp);
+      await db.saveJSON(LAST_PUSH_KEY, nowIso);
+      const result: PushResult = {
+        pushed: toPush.length,
+        skipped,
+        snapshotId,
+      };
+      set({
+        serverTimestamp: response.serverTimestamp,
+        lastPushAt: nowIso,
+        pushStatus: "ok",
+        pushError: null,
+        lastPushResult: result,
+      });
+      return result;
+    } catch (e) {
+      let msg: string;
+      if (e instanceof ZenApiError) {
+        msg =
+          e.status === 401
+            ? "Токен недействителен или истёк (401). Подключите заново."
+            : `Сервер: ${e.message}`;
+      } else if (e instanceof Error) {
+        msg = e.message;
+      } else {
+        msg = "Не удалось отправить правки в облако";
+      }
+      set({ pushStatus: "error", pushError: msg });
       throw e;
     }
   },

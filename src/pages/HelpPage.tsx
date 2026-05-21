@@ -966,6 +966,57 @@ const SECTIONS: Section[] = [
     ),
   },
   {
+    id: "concept-push-phase1",
+    group: "concepts",
+    icon: CloudIcon,
+    title: "Push в облако — двусторонняя синхронизация (Phase 1, бета)",
+    body: (
+      <>
+        <p>
+          По умолчанию приложение читает из Zenmoney API, но <strong>ничего туда
+          не пишет</strong>: ваши локальные правки операций живут как overlay
+          поверх данных. В «Настройки → Push в облако (бета)» (виден только при
+          подключённом токене) этот режим можно расширить до двустороннего.
+        </p>
+        <p className="mt-2">
+          <strong>Что делает push:</strong>
+        </p>
+        <ol className="list-decimal list-inside space-y-1 mt-1">
+          <li>
+            Автоматически берёт свежий облачный снимок (см. предыдущий раздел) —
+            если что-то пойдёт не так, есть из чего восстанавливаться.
+          </li>
+          <li>
+            Отправляет ваши overlay-правки через тот же{" "}
+            <code>POST /v8/diff/</code>, что и обычный синк, но с массивом{" "}
+            <code>transaction</code> в теле.
+          </li>
+          <li>
+            При успешном ответе сервера: чистит отправленные правки из локального
+            overlay (теперь они часть облачной правды), мерджит ответ в локальный
+            кэш и обновляет UI.
+          </li>
+        </ol>
+        <p className="mt-2">
+          <strong>Phase 1 ограничения (что push-ится):</strong> только «безопасные»
+          поля операции — date, payee, comment, category, subcategory, amount,
+          currency. Смена типа операции (Расход / Доход / Перевод) и смена счёта
+          пока не поддерживаются (требуют переписывания обеих ног транзакции и
+          conflict-handling, который мы вынесли в Phase 1.1/2). Такие правки
+          остаются в overlay со скип-причиной — для них пока используйте
+          мобильное приложение Zenmoney.
+        </p>
+        <p className="mt-2 text-muted text-xs">
+          <strong>Conflict resolution:</strong> Zenmoney сравнивает поля{" "}
+          <code>changed</code> last-write-wins. Если кто-то правил ту же операцию
+          в облаке после вашего snapshot-timestamp — ваш push может проиграть и
+          ничего не запишется. Это by design и нормально; Phase 1.1 добавит
+          детект и явный UI для разрешения.
+        </p>
+      </>
+    ),
+  },
+  {
     id: "concept-auto-backup",
     group: "concepts",
     icon: Save,
