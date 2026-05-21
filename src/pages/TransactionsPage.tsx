@@ -26,6 +26,20 @@ import type { Transaction } from "../types";
 type SortMode = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
 
 /**
+ * For transfer transactions `payee` is blank. The "Счёт" column already
+ * shows the source, so we only need to surface the target account in
+ * the "Получатель" slot.
+ */
+function transferCounterparty(t: Transaction): string | null {
+  if (t.kind !== "transfer") return null;
+  const from = t.outcomeAccount?.trim();
+  const to = t.incomeAccount?.trim();
+  if (!to) return null;
+  if (from && to === from) return null;
+  return to;
+}
+
+/**
  * Column templates are defined as CSS grid-template-columns and applied to
  * every row + the header so widths can never drift between days/rows.
  * Комментарий — самый широкий столбец (2.5fr), все остальные tracks
@@ -208,7 +222,7 @@ export function TransactionsPage() {
           icon={<TrendingDown className="w-4 h-4" />}
         />
         <Stat
-          label="Чистый"
+          label="Прибыль"
           value={formatMoney(totals.net, base, { decimals: 0, signed: true })}
           tone={totals.net >= 0 ? "income" : "expense"}
           icon={<Wallet className="w-4 h-4" />}
@@ -435,8 +449,10 @@ function Row({
           </div>
         )}
       </div>
-      <div className="truncate" title={tx.payee || ""}>
-        {tx.payee || <span className="text-muted">—</span>}
+      <div className="truncate" title={tx.payee || transferCounterparty(tx) || ""}>
+        {tx.payee || transferCounterparty(tx) || (
+          <span className="text-muted">—</span>
+        )}
       </div>
       <div className="text-xs text-muted truncate" title={tx.comment || ""}>
         {tx.comment || ""}

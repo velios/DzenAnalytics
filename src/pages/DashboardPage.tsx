@@ -66,6 +66,7 @@ import {
   chartAxisStroke,
   ymdKey,
 } from "../lib/format";
+import { AccountLogo } from "../components/AccountLogo";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { InsightsPanel } from "../components/InsightsPanel";
@@ -103,33 +104,6 @@ const ACCOUNT_TYPE_RU: Record<string, string> = {
 function accountTypeLabel(type: string): string {
   if (!type) return "—";
   return ACCOUNT_TYPE_RU[type] || type;
-}
-
-/** Stable hash → hue for the avatar tint. */
-function hueFromString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
-
-function AccountAvatar({ title, type }: { title: string; type: string }) {
-  const first = (title.trim()[0] || "?").toUpperCase();
-  const hue = hueFromString(title);
-  // Loans get a neutral grey tint to read as "не свои деньги".
-  const isDebt = type === "loan" || type === "credit" || type === "debt";
-  const bg = isDebt
-    ? "rgb(var(--c-panel2))"
-    : `hsl(${hue} 70% 92%)`;
-  const fg = isDebt ? "rgb(var(--c-muted))" : `hsl(${hue} 50% 35%)`;
-  return (
-    <div
-      className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0"
-      style={{ background: bg, color: fg }}
-      title={accountTypeLabel(type)}
-    >
-      {first}
-    </div>
-  );
 }
 
 function buildBins(values: number[], n = 8): number[] {
@@ -847,10 +821,7 @@ export function DashboardPage() {
                         }`}
                       >
                           <td className="py-2 pr-2">
-                            <AccountAvatar
-                              title={a.title}
-                              type={a.type}
-                            />
+                            <AccountLogo title={a.title} type={a.type} />
                           </td>
                           <td className="py-2 pr-2">
                             <div

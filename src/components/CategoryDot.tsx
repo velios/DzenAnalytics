@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, type ComponentType } from "react";
+import { HandCoins, ArrowLeftRight } from "lucide-react";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { zenIconToEmoji } from "../lib/zenIconEmoji";
 
@@ -13,10 +14,29 @@ interface Props {
 }
 
 /**
+ * Synthetic categories the mapper produces locally — never present in
+ * `categoryMeta` from Zenmoney, so without an explicit fallback they'd
+ * render as nothing. Each entry: an icon component + the badge colour.
+ *
+ * (See `lib/zenmoneyMap.ts` — categories "Долг" and "Перевод" are
+ * forced for transfer / debt-related transactions.)
+ */
+const SYNTHETIC_CATEGORIES: Record<
+  string,
+  { icon: ComponentType<{ className?: string }>; color: string }
+> = {
+  Долг: { icon: HandCoins, color: "#64748B" /* slate-500 */ },
+  Перевод: { icon: ArrowLeftRight, color: "#A78BFA" /* accent2 */ },
+};
+
+/**
  * Small coloured badge next to a category label. When the Zenmoney sync has
  * populated `categoryMeta` (icon + colour from the API tag), it renders a
  * coloured circle with the emoji glyph for the icon. With colour only — a
  * plain coloured disc. With nothing — null (or a muted fallback dot).
+ *
+ * For our two synthetic categories (Долг, Перевод) — where the API doesn't
+ * supply meta — we fall back to a Lucide glyph on a brand-coloured circle.
  */
 export function CategoryDot({
   category,
@@ -30,6 +50,28 @@ export function CategoryDot({
   useEffect(() => {
     if (!loaded) hydrate();
   }, [loaded, hydrate]);
+
+  // Synthetic category fallback (Долг / Перевод).
+  //
+  // We don't gate on `meta.color` here — the mapper deliberately seeds
+  // `categoryMeta` with neutral grey for both names so legacy code that
+  // expects a colour doesn't see undefined, but that meant the
+  // "color-only" branch would beat our icon. We *do* defer to a real
+  // `meta.icon` (an emoji set by the user on a Zenmoney tag of the same
+  // name would win), but if there isn't one, render the Lucide glyph.
+  const synthetic = SYNTHETIC_CATEGORIES[category];
+  if (synthetic && !meta?.icon) {
+    const Icon = synthetic.icon;
+    return (
+      <span
+        aria-hidden
+        className={`inline-flex items-center justify-center rounded-full shrink-0 text-white ${size}`}
+        style={{ background: synthetic.color }}
+      >
+        <Icon className="w-3 h-3" />
+      </span>
+    );
+  }
 
   const color = meta?.color ?? fallback;
   const emoji = zenIconToEmoji(meta?.icon);

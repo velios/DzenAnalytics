@@ -52,7 +52,12 @@ export function formatNum(value: number, opts?: { compact?: boolean }): string {
 export function formatDate(iso: string, fmt: "short" | "medium" | "month" = "medium"): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  if (fmt === "short") return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+  if (fmt === "short")
+    return d.toLocaleDateString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    });
   if (fmt === "month") return d.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
   return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });
 }

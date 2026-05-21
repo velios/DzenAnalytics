@@ -20,6 +20,23 @@ import type { Transaction } from "../types";
 type SortKey = "date" | "amount" | "category" | "payee";
 type SortDir = "asc" | "desc";
 
+/**
+ * For transfer transactions Zenmoney leaves `payee` blank. The "Счёт"
+ * column already shows the source account, so we only need to surface
+ * the *target* account here as the counterparty.
+ *
+ * Returns null for non-transfers or when the target is missing / equal
+ * to the source (a degenerate self-transfer).
+ */
+function transferCounterparty(t: Transaction): string | null {
+  if (t.kind !== "transfer") return null;
+  const from = t.outcomeAccount?.trim();
+  const to = t.incomeAccount?.trim();
+  if (!to) return null;
+  if (from && to === from) return null;
+  return to;
+}
+
 export function TransactionsDrawer() {
   const { open, title, subtitle, transactions, close, show } = useDrillStore();
   const base = useDataStore((s) => s.rates.base);
@@ -284,8 +301,10 @@ export function TransactionsDrawer() {
                         </div>
                       )}
                     </td>
-                    <td className="table-td max-w-[180px] truncate" title={t.payee}>
-                      {t.payee || <span className="text-muted">—</span>}
+                    <td className="table-td max-w-[180px] truncate" title={transferCounterparty(t) || t.payee}>
+                      {t.payee || transferCounterparty(t) || (
+                        <span className="text-muted">—</span>
+                      )}
                     </td>
                     <td className="table-td max-w-[260px] text-xs text-muted">
                       <div className="line-clamp-2" title={t.comment}>

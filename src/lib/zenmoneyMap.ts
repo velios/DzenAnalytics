@@ -24,6 +24,10 @@ export interface CategoryMeta {
   icon: string | null;
   /** Optional picture URL — set rarely. */
   picture: string | null;
+  /** Tag is offered as a candidate for income transactions. */
+  showIncome?: boolean;
+  /** Tag is offered as a candidate for expense transactions. */
+  showOutcome?: boolean;
 }
 
 export interface MappedDiff {
@@ -246,12 +250,24 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
     if (tag.archive) continue;
     const cur = categoryMeta[tag.title];
     const color = colorIntToCss(tag.color);
+    // Aggregate `showIncome` / `showOutcome` across sub-tags with the
+    // same title — if any sibling is allowed for income (or expense),
+    // the parent name should be too. This matters when a "Прочее" tag
+    // exists under both an income and an expense parent.
+    const nextShowIncome = (cur?.showIncome ?? false) || !!tag.showIncome;
+    const nextShowOutcome = (cur?.showOutcome ?? false) || !!tag.showOutcome;
     if (!cur || (!cur.color && color)) {
       categoryMeta[tag.title] = {
         color,
         icon: tag.icon || null,
         picture: tag.picture || null,
+        showIncome: nextShowIncome,
+        showOutcome: nextShowOutcome,
       };
+    } else {
+      // Keep existing colour/icon but update the show-flags.
+      cur.showIncome = nextShowIncome;
+      cur.showOutcome = nextShowOutcome;
     }
   }
   // Our local-only labels — give them neutral tones so they aren't styleless.

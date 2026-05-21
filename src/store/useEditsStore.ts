@@ -22,7 +22,13 @@ export type EditableField =
   | "comment"
   | "amount"
   | "currency"
-  | "account";
+  | "account"
+  // Transfer-aware fields. Editing `kind` lets the user fix
+  | "kind"
+  // misclassified expense/income/transfer rows; the two side-fields
+  | "outcomeAccount"
+  // are required to keep both legs of a transfer in sync.
+  | "incomeAccount";
 
 export type TransactionEdit = Partial<Pick<Transaction, EditableField>>;
 
