@@ -13,6 +13,7 @@ import {
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { CategoryDot } from "../components/CategoryDot";
 import { EmptyState } from "../components/EmptyState";
@@ -51,6 +52,7 @@ export function TransactionsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
   const edits = useEditsStore((s) => s.edits);
   const editsLoaded = useEditsStore((s) => s.loaded);
@@ -64,8 +66,8 @@ export function TransactionsPage() {
   const [editing, setEditing] = useState<Transaction | null>(null);
 
   const filtered = useMemo(
-    () => applyFilters(transactions, filters),
-    [transactions, filters]
+    () => applyFilters(transactions, filters, monthStartDay),
+    [transactions, filters, monthStartDay]
   );
 
   const searched = useMemo(() => {

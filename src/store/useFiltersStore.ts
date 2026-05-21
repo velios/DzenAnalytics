@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Transaction } from "../types";
+import { currentPeriod, periodRange, shiftPeriod } from "../lib/period";
 
 export type DatePreset = "all" | "ytd" | "12m" | "6m" | "3m" | "30d" | "month" | "custom";
 
@@ -22,33 +23,27 @@ interface FiltersState {
   resetSet: (kind: "accounts" | "categories" | "currencies") => void;
   setSearch: (s: string) => void;
   setExcludeTransfers: (v: boolean) => void;
+  resetToCurrentPeriod: (startDay: number) => void;
   reset: () => void;
 }
 
-function currentMonthYM(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
 const initial = {
-  // Default to the current calendar month — most actions are about
-  // "what's happening NOW", and 12-month view drowns the present.
+  // Default to the current period — most actions are about "what's
+  // happening NOW", and 12-month view drowns the present. The actual
+  // period boundaries respect the user's `monthStartDay` setting (see
+  // useReportPeriodStore); the initial value here is the calendar month
+  // (startDay=1) and gets reconciled in App.tsx once the period store
+  // hydrates.
   preset: "month" as DatePreset,
   from: null,
   to: null,
-  monthYM: currentMonthYM() as string | null,
+  monthYM: currentPeriod(1) as string | null,
   accounts: new Set<string>(),
   categories: new Set<string>(),
   currencies: new Set<string>(),
   search: "",
   excludeTransfers: true,
 };
-
-function shiftYM(ym: string, delta: number): string {
-  const [y, m] = ym.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
 
 export const useFiltersStore = create<FiltersState>((set, get) => ({
   ...initial,
@@ -58,7 +53,7 @@ export const useFiltersStore = create<FiltersState>((set, get) => ({
   stepMonth: (delta, fallbackMaxYM) => {
     const { preset, monthYM } = get();
     const cur = preset === "month" && monthYM ? monthYM : fallbackMaxYM;
-    set({ preset: "month", monthYM: shiftYM(cur, delta) });
+    set({ preset: "month", monthYM: shiftPeriod(cur, delta) });
   },
   toggleSet: (kind, value) =>
     set((s) => {
@@ -71,27 +66,21 @@ export const useFiltersStore = create<FiltersState>((set, get) => ({
     set(() => ({ [kind]: new Set<string>() }) as Pick<FiltersState, typeof kind>),
   setSearch: (search) => set({ search }),
   setExcludeTransfers: (excludeTransfers) => set({ excludeTransfers }),
-  reset: () => set({ ...initial, monthYM: currentMonthYM() }),
+  resetToCurrentPeriod: (startDay) =>
+    set({ preset: "month", monthYM: currentPeriod(startDay) }),
+  reset: () => set({ ...initial, monthYM: currentPeriod(1) }),
 }));
-
-function monthRange(ym: string): { from: string; to: string } {
-  const [y, m] = ym.split("-").map(Number);
-  const first = new Date(y, m - 1, 1);
-  const last = new Date(y, m, 0);
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return { from: fmt(first), to: fmt(last) };
-}
 
 export function presetToRange(
   preset: DatePreset,
   maxDate: string | null,
-  monthYM?: string | null
+  monthYM?: string | null,
+  monthStartDay: number = 1
 ): { from: string | null; to: string | null } {
   if (preset === "all" || preset === "custom") return { from: null, to: null };
   if (preset === "month") {
     if (!monthYM) return { from: null, to: null };
-    return monthRange(monthYM);
+    return periodRange(monthYM, monthStartDay);
   }
   const today = maxDate ? new Date(maxDate) : new Date();
   const to = today.toISOString().slice(0, 10);
@@ -110,15 +99,23 @@ export function presetToRange(
   return { from: from.toISOString().slice(0, 10), to };
 }
 
+/**
+ * Compute the date window for the current filter state.
+ *
+ * Pass `monthStartDay` when the caller respects the user's reporting
+ * period setting (most analytics pages do). Default `1` keeps the old
+ * calendar-month behaviour for callers that haven't been updated yet.
+ */
 export function applyFilters(
   txs: Transaction[],
-  state: FiltersState
+  state: FiltersState,
+  monthStartDay: number = 1
 ): Transaction[] {
   const maxDate = txs.reduce((m, t) => (t.date > m ? t.date : m), "");
   const range =
     state.preset === "custom"
       ? { from: state.from, to: state.to }
-      : presetToRange(state.preset, maxDate, state.monthYM);
+      : presetToRange(state.preset, maxDate, state.monthYM, monthStartDay);
   const search = state.search.trim().toLowerCase();
   return txs.filter((t) => {
     if (state.excludeTransfers && t.kind === "transfer") return false;

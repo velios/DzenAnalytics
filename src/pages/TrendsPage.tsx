@@ -19,6 +19,7 @@ import {
 import { Activity, Calendar } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import {
   categoryMonthlySeries,
@@ -43,13 +44,14 @@ export function TrendsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const showDrill = useDrillStore((s) => s.show);
 
   const [kind, setKind] = useState<"expense" | "income">("expense");
   const [level, setLevel] = useState<"top" | "full">("top");
   const [selected, setSelected] = useState<string[]>([]);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
 
   const allCategories = useMemo(
     () =>

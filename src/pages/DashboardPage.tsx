@@ -35,6 +35,8 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { currentPeriod, periodKey } from "../lib/period";
 import {
   groupByMonth,
   groupByCategory,
@@ -300,8 +302,15 @@ export function DashboardPage() {
     if (!annLoaded) annHydrate();
   }, [calibLoaded, hydrateCalibration, flagsLoaded, flagsHydrate, annLoaded, annHydrate]);
 
-  const months = useMemo(() => groupByMonth(transactions), [transactions]);
-  const forecast = useMemo(() => buildForecast(transactions, 3, 6), [transactions]);
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+  const months = useMemo(
+    () => groupByMonth(transactions, { monthStartDay }),
+    [transactions, monthStartDay]
+  );
+  const forecast = useMemo(
+    () => buildForecast(transactions, 3, 6, { monthStartDay }),
+    [transactions, monthStartDay]
+  );
   const netWorth = useMemo(
     () => netWorthSeries(transactions, calibration),
     [transactions, calibration]
@@ -323,10 +332,12 @@ export function DashboardPage() {
     }
     const lastMonthYM = months[months.length - 1]?.ym;
     const lastTxs = lastMonthYM
-      ? transactions.filter((t) => t.date.startsWith(lastMonthYM))
+      ? transactions.filter(
+          (t) => periodKey(t.date, monthStartDay) === lastMonthYM
+        )
       : transactions;
     return applyCategoryFlags(lastTxs, fixed, disc);
-  }, [flags, months, transactions]);
+  }, [flags, months, transactions, monthStartDay]);
   const dayMap = useMemo(() => dailyExpenseMap(transactions), [transactions]);
 
   // Account balances. If the Zenmoney cache is present, prefer real
@@ -382,16 +393,18 @@ export function DashboardPage() {
   const hasArchived = !!liveAccounts?.some((a) => a.archive && a.inBalance);
 
   // Top-10 categories of the CURRENT month (replaces all-time top-7).
-  const currentYM = useMemo(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  }, []);
+  const currentYM = useMemo(
+    () => currentPeriod(monthStartDay),
+    [monthStartDay]
+  );
   const catsThisMonth = useMemo(() => {
-    const thisMonthTxs = transactions.filter((t) => t.date.startsWith(currentYM));
+    const thisMonthTxs = transactions.filter(
+      (t) => periodKey(t.date, monthStartDay) === currentYM
+    );
     return groupByCategory(thisMonthTxs, "top")
       .filter((c) => c.expense > 0)
       .slice(0, 10);
-  }, [transactions, currentYM]);
+  }, [transactions, currentYM, monthStartDay]);
 
   function openAccount(title: string) {
     const txs = transactions.filter(
@@ -424,7 +437,9 @@ export function DashboardPage() {
   }
 
   function openMonth(ym: string) {
-    const txs = transactions.filter((t) => t.date.startsWith(ym));
+    const txs = transactions.filter(
+      (t) => periodKey(t.date, monthStartDay) === ym
+    );
     showDrill(monthLabel(ym), txs, "Месяц");
   }
 

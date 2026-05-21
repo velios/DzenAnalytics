@@ -1,5 +1,6 @@
 import type { Transaction } from "../types";
 import { ymKey, ymdKey } from "./format";
+import { periodKey } from "./period";
 
 export interface MonthBucket {
   ym: string;
@@ -9,11 +10,23 @@ export interface MonthBucket {
   count: number;
 }
 
-export function groupByMonth(txs: Transaction[]): MonthBucket[] {
+/**
+ * Group transactions by month bucket.
+ *
+ * `monthStartDay` lets callers respect the user's reporting-period
+ * setting — passing `11` makes every period span e.g. `11/05 → 10/06`
+ * and the bucket key is `YYYY-MM` of the start month. Default `1`
+ * collapses to plain calendar months (the historical behaviour).
+ */
+export function groupByMonth(
+  txs: Transaction[],
+  opts: { monthStartDay?: number } = {}
+): MonthBucket[] {
+  const startDay = opts.monthStartDay ?? 1;
   const map = new Map<string, MonthBucket>();
   for (const t of txs) {
     if (t.kind === "transfer") continue;
-    const ym = ymKey(t.date);
+    const ym = startDay === 1 ? ymKey(t.date) : periodKey(t.date, startDay);
     if (!ym) continue;
     let b = map.get(ym);
     if (!b) {
@@ -649,9 +662,10 @@ export interface ScenarioForecast {
 export function buildScenarioForecast(
   txs: Transaction[],
   monthsAhead = 6,
-  lookback = 6
+  lookback = 6,
+  opts: { monthStartDay?: number } = {}
 ): ScenarioForecast[] {
-  const months = groupByMonth(txs);
+  const months = groupByMonth(txs, { monthStartDay: opts.monthStartDay });
   if (months.length === 0) return [];
   const recent = months.slice(-lookback);
   const incomes = recent.map((m) => m.income);
@@ -723,9 +737,10 @@ export function statsByHourOfWeek(
 }
 
 export function vsAverageStats(
-  txs: Transaction[]
+  txs: Transaction[],
+  opts: { monthStartDay?: number } = {}
 ): { current: { ym: string; expense: number; income: number; net: number } | null; avg: { expense: number; income: number; net: number } } {
-  const months = groupByMonth(txs);
+  const months = groupByMonth(txs, { monthStartDay: opts.monthStartDay });
   if (months.length === 0) {
     return { current: null, avg: { expense: 0, income: 0, net: 0 } };
   }
@@ -1485,8 +1500,13 @@ export interface ForecastPoint {
   isForecast: boolean;
 }
 
-export function buildForecast(txs: Transaction[], monthsAhead = 3, lookback = 6): ForecastPoint[] {
-  const months = groupByMonth(txs);
+export function buildForecast(
+  txs: Transaction[],
+  monthsAhead = 3,
+  lookback = 6,
+  opts: { monthStartDay?: number } = {}
+): ForecastPoint[] {
+  const months = groupByMonth(txs, { monthStartDay: opts.monthStartDay });
   if (months.length === 0) return [];
 
   const recent = months.slice(-lookback);

@@ -26,7 +26,17 @@ import {
 } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { periodKey, periodRange, shiftPeriod } from "../lib/period";
 import type { Transaction } from "../types";
+
+/** Same logic as `periodKey` but accepts a Date instead of an ISO string. */
+function periodKeyFromDate(d: Date, startDay: number): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return periodKey(`${yyyy}-${mm}-${dd}`, startDay);
+}
 
 type Preset = "this_vs_prev_month" | "ytd_vs_prev_ytd" | "last_30_vs_prev_30" | "last_90_vs_prev_90" | "custom";
 
@@ -36,20 +46,32 @@ interface Range {
   label: string;
 }
 
-function rangeOf(preset: Preset, maxDate: string): { a: Range; b: Range } {
+function rangeOf(
+  preset: Preset,
+  maxDate: string,
+  monthStartDay: number = 1
+): { a: Range; b: Range } {
   const max = new Date(maxDate);
-  const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
-  const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
   const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
   if (preset === "this_vs_prev_month") {
-    const aFrom = startOfMonth(max);
-    const aTo = max;
-    const bFrom = startOfMonth(new Date(max.getFullYear(), max.getMonth() - 1, 1));
-    const bTo = endOfMonth(bFrom);
+    // Respect the user's reporting period. The "current month" is the
+    // billing period the latest transaction falls into; "previous month"
+    // is one billing period earlier.
+    const curYM = periodKeyFromDate(max, monthStartDay);
+    const prevYM = shiftPeriod(curYM, -1);
+    const aRange = periodRange(curYM, monthStartDay);
+    const bRange = periodRange(prevYM, monthStartDay);
+    const labelFor = (ym: string) => {
+      const [y, m] = ym.split("-").map(Number);
+      return new Date(y, m - 1, 1).toLocaleDateString("ru-RU", {
+        month: "long",
+        year: "numeric",
+      });
+    };
     return {
-      a: { from: ymd(aFrom), to: ymd(aTo), label: aFrom.toLocaleDateString("ru-RU", { month: "long", year: "numeric" }) },
-      b: { from: ymd(bFrom), to: ymd(bTo), label: bFrom.toLocaleDateString("ru-RU", { month: "long", year: "numeric" }) },
+      a: { from: aRange.from, to: ymd(max) < aRange.to ? ymd(max) : aRange.to, label: labelFor(curYM) },
+      b: { from: bRange.from, to: bRange.to, label: labelFor(prevYM) },
     };
   }
   if (preset === "ytd_vs_prev_ytd") {
@@ -136,6 +158,7 @@ export function ComparePage() {
     [filtered]
   );
 
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const ranges = useMemo<{ a: Range; b: Range }>(() => {
     if (preset === "custom") {
       return {
@@ -143,8 +166,12 @@ export function ComparePage() {
         b: { ...customB, label: customB.label || "Период Б" },
       };
     }
-    return rangeOf(preset, maxDate || new Date().toISOString().slice(0, 10));
-  }, [preset, customA, customB, maxDate]);
+    return rangeOf(
+      preset,
+      maxDate || new Date().toISOString().slice(0, 10),
+      monthStartDay
+    );
+  }, [preset, customA, customB, maxDate, monthStartDay]);
 
   const txsA = useMemo(
     () => filtered.filter((t) => ranges.a.from && ranges.a.to && inRange(t, ranges.a)),

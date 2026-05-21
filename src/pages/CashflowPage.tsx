@@ -31,6 +31,8 @@ import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { periodKey } from "../lib/period";
 import {
   groupByMonth,
   computeKPI,
@@ -65,13 +67,26 @@ export function CashflowPage() {
   const filters = useFiltersStore();
 
   const showDrill = useDrillStore((s) => s.show);
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
-  const months = useMemo(() => groupByMonth(filtered), [filtered]);
+  const filtered = useMemo(
+    () => applyFilters(transactions, filters, monthStartDay),
+    [transactions, filters, monthStartDay]
+  );
+  const months = useMemo(
+    () => groupByMonth(filtered, { monthStartDay }),
+    [filtered, monthStartDay]
+  );
   const kpi = useMemo(() => computeKPI(filtered), [filtered]);
   const insights = useMemo(() => buildInsights(filtered), [filtered]);
-  const scenarios = useMemo(() => buildScenarioForecast(filtered, 6, 6), [filtered]);
-  const vsAvg = useMemo(() => vsAverageStats(filtered), [filtered]);
+  const scenarios = useMemo(
+    () => buildScenarioForecast(filtered, 6, 6, { monthStartDay }),
+    [filtered, monthStartDay]
+  );
+  const vsAvg = useMemo(
+    () => vsAverageStats(filtered, { monthStartDay }),
+    [filtered, monthStartDay]
+  );
 
   const annotations = useAnnotationsStore((s) => s.annotations);
   const annHydrate = useAnnotationsStore((s) => s.hydrate);
@@ -103,7 +118,11 @@ export function CashflowPage() {
   const seasonality = useMemo(() => detectSeasonality(transactions), [transactions]);
 
   function openMonth(ym: string) {
-    const txs = filtered.filter((t) => ymKey(t.date) === ym);
+    const txs = filtered.filter(
+      (t) =>
+        (monthStartDay === 1 ? ymKey(t.date) : periodKey(t.date, monthStartDay)) ===
+        ym
+    );
     showDrill(monthLabel(ym), txs, "Месяц");
   }
   function openAll() {

@@ -3,6 +3,7 @@ import { ResponsiveContainer, Sankey, Tooltip } from "recharts";
 import { GitFork } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { buildSankey } from "../lib/aggregations";
 import { formatMoney, toNum, chartTooltipProps } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
@@ -19,8 +20,9 @@ export function SankeyPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
   const data = useMemo(() => buildSankey(filtered), [filtered]);
 
   if (transactions.length === 0) return <EmptyState />;

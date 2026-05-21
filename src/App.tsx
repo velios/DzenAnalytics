@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { TopNav } from "./components/TopNav";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
@@ -34,6 +34,8 @@ import { DigestPage } from "./pages/DigestPage";
 import { useDataStore } from "./store/useDataStore";
 import { useThemeStore } from "./store/useThemeStore";
 import { useBackupStore } from "./store/useBackupStore";
+import { useReportPeriodStore } from "./store/useReportPeriodStore";
+import { useFiltersStore } from "./store/useFiltersStore";
 
 /**
  * All routes use the same outer layout now. Pages that need global filters
@@ -52,6 +54,10 @@ function App() {
   const backupHydrate = useBackupStore((s) => s.hydrate);
   const backupRunIfDue = useBackupStore((s) => s.runIfDue);
   const backupLoaded = useBackupStore((s) => s.loaded);
+  const reportPeriodHydrate = useReportPeriodStore((s) => s.hydrate);
+  const reportPeriodLoaded = useReportPeriodStore((s) => s.loaded);
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+  const resetToCurrentPeriod = useFiltersStore((s) => s.resetToCurrentPeriod);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   useGlobalShortcuts(() => setPaletteOpen(true));
@@ -59,8 +65,22 @@ function App() {
   useEffect(() => {
     hydrate();
     backupHydrate();
+    reportPeriodHydrate();
     return initTheme();
-  }, [hydrate, backupHydrate, initTheme]);
+  }, [hydrate, backupHydrate, reportPeriodHydrate, initTheme]);
+
+  // Once the report-period setting is known, reset the filter's "current
+  // month" to the matching billing period — so that fresh visits always
+  // start with the correct window when startDay != 1. We do this only
+  // once on first hydrate to avoid stomping over the user's manual
+  // month-step navigation later in the session.
+  const reportPeriodReconciled = useRef(false);
+  useEffect(() => {
+    if (!reportPeriodLoaded) return;
+    if (reportPeriodReconciled.current) return;
+    reportPeriodReconciled.current = true;
+    resetToCurrentPeriod(monthStartDay);
+  }, [reportPeriodLoaded, monthStartDay, resetToCurrentPeriod]);
 
   // Once backup settings are loaded, check on mount + every 10 minutes.
   useEffect(() => {

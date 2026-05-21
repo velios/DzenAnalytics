@@ -18,6 +18,7 @@ import { useEffect } from "react";
 import { useDataStore } from "../store/useDataStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { groupByCategory } from "../lib/aggregations";
@@ -227,6 +228,7 @@ export function CategoriesPage() {
     return m;
   }, [categoryMeta]);
   const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
   const [view, setView] = useState<View>("donut");
   const [kind, setKind] = useState<"expense" | "income">("expense");
@@ -248,7 +250,7 @@ export function CategoriesPage() {
     else setFlag(category, null);
   }
 
-  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
   const tree = useMemo(() => buildHierarchy(filtered, kind), [filtered, kind]);
 
   const totalAll = tree.reduce((s, n) => s + n.total, 0);

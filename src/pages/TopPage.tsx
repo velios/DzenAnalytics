@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { topPayees, topTransactions, groupByCategory, type CategoryBucket, type PayeeBucket } from "../lib/aggregations";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -17,13 +18,14 @@ export function TopPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
   const [tab, setTab] = useState<Tab>("categories");
   const [kind, setKind] = useState<"expense" | "income">("expense");
 
   const showDrill = useDrillStore((s) => s.show);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
 
   const cats = useMemo(() => groupByCategory(filtered, "full"), [filtered]);
   const payees = useMemo(() => topPayees(filtered, kind, 30), [filtered, kind]);

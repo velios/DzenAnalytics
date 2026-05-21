@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
@@ -61,6 +62,7 @@ export function AccountsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [view, setView] = useState<View>("stacked");
@@ -95,7 +97,7 @@ export function AccountsPage() {
     setCalibAmount(calibration ? String(calibration.amount) : "");
   }, [calibration]);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
   const baseTxs = scope === "all" ? transactions : filtered;
 
   const accounts = useMemo(() => balancesByAccount(filtered), [filtered]);

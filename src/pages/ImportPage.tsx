@@ -23,6 +23,7 @@ import {
   Link as LinkIcon,
   Unlink,
   Clock,
+  CalendarRange,
   Settings,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
@@ -36,6 +37,7 @@ import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
 import { SectionHeading } from "../components/SectionHeading";
@@ -156,6 +158,15 @@ export function ImportPage() {
     await zenRemoveToken();
     setSyncSuccess(null);
   }
+
+  // Report period (reporting month start day)
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+  const reportPeriodLoaded = useReportPeriodStore((s) => s.loaded);
+  const reportPeriodHydrate = useReportPeriodStore((s) => s.hydrate);
+  const setMonthStartDay = useReportPeriodStore((s) => s.setMonthStartDay);
+  useEffect(() => {
+    if (!reportPeriodLoaded) reportPeriodHydrate();
+  }, [reportPeriodLoaded, reportPeriodHydrate]);
 
   // Scheduled backup
   const backupInterval = useBackupStore((s) => s.interval);
@@ -817,6 +828,47 @@ export function ImportPage() {
           )}
         </div>
       )}
+
+      <SectionHeading>Отчётный период</SectionHeading>
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <CalendarRange className="w-5 h-5 text-accent2" />
+          <span className="font-medium">Первый день отчётного месяца</span>
+        </div>
+        <p className="text-xs text-muted mb-3 max-w-prose">
+          Многие ведут аналитику не «1 число — последнее число», а от зарплаты
+          до зарплаты — например с 11-го по 10-е. Здесь можно задать день, с
+          которого начинается ваш расчётный месяц. Влияет на: фильтр «Месяц»,
+          бары и таблицу Cash-flow, hero-KPI «Доход / Расход за …», «Топ-10
+          категорий за …» и drill-down по месяцу.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="text-sm flex items-center gap-2">
+            <span className="text-muted">День месяца:</span>
+            <input
+              type="number"
+              min={1}
+              max={28}
+              value={monthStartDay}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n)) setMonthStartDay(n);
+              }}
+              className="input text-sm w-20 tabular-nums"
+            />
+          </label>
+          <span className="text-xs text-muted">
+            {monthStartDay === 1
+              ? "Календарный месяц (по умолчанию)."
+              : `Каждый период длится с ${monthStartDay}-го числа по ${monthStartDay - 1}-е следующего месяца.`}
+          </span>
+        </div>
+        <p className="text-[11px] text-muted mt-3">
+          Допустимы значения 1–28 (29/30/31 пропускаем — этих чисел нет в
+          каждом месяце). Год к году и сезонность остаются по календарю — там
+          месяц имеет смысл только как календарный.
+        </p>
+      </div>
 
       <SectionHeading>Резервные копии</SectionHeading>
       <div className="card card-pad">

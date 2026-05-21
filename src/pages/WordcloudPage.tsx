@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Cloud, MousePointerClick } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { buildWordcloud, type WordcloudWord } from "../lib/aggregations";
 import { formatMoney, formatNum } from "../lib/format";
@@ -26,12 +27,13 @@ export function WordcloudPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const showDrill = useDrillStore((s) => s.show);
 
   const [minLen, setMinLen] = useState(3);
   const [topN, setTopN] = useState(120);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
   const words = useMemo(
     () => buildWordcloud(filtered, minLen, topN),
     [filtered, minLen, topN]
