@@ -24,6 +24,8 @@ import {
   Unlink,
   Clock,
   CalendarRange,
+  History,
+  CloudDownload,
   Settings,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
@@ -39,6 +41,7 @@ import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
+import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
 import { SectionHeading } from "../components/SectionHeading";
@@ -200,6 +203,19 @@ export function ImportPage() {
     await removeAlias(from);
     await reapplyRules();
   }
+
+  // Cloud snapshots — safety net before any future push-to-cloud work.
+  const cloudSnapshots = useCloudSnapshotStore((s) => s.snapshots);
+  const cloudSnapshotsLoaded = useCloudSnapshotStore((s) => s.loaded);
+  const cloudSnapshotsBusy = useCloudSnapshotStore((s) => s.busy);
+  const cloudSnapshotsError = useCloudSnapshotStore((s) => s.error);
+  const hydrateCloudSnapshots = useCloudSnapshotStore((s) => s.hydrate);
+  const takeCloudSnapshot = useCloudSnapshotStore((s) => s.takeSnapshot);
+  const deleteCloudSnapshot = useCloudSnapshotStore((s) => s.deleteSnapshot);
+  const downloadCloudSnapshot = useCloudSnapshotStore((s) => s.download);
+  useEffect(() => {
+    if (!cloudSnapshotsLoaded) hydrateCloudSnapshots();
+  }, [cloudSnapshotsLoaded, hydrateCloudSnapshots]);
 
   // Report period (reporting month start day)
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
@@ -1108,6 +1124,106 @@ export function ImportPage() {
           {scheduledMsg && <span className="text-income">{scheduledMsg}</span>}
         </div>
       </div>
+
+      {zenToken && (
+        <>
+          <SectionHeading>Облачный снимок (safety net)</SectionHeading>
+          <div className="card card-pad">
+            <div className="flex items-center gap-2 mb-3">
+              <History className="w-5 h-5 text-accent2" />
+              <span className="font-medium">Снимки данных из Дзен-мани</span>
+            </div>
+            <p className="text-xs text-muted mb-3">
+              Полный «слепок» того, что сейчас в облаке — сырой ответ{" "}
+              <code className="pill">POST /v8/diff/</code>. Сохраняется в
+              IndexedDB и доступен для скачивания. Это страховка для будущих
+              операций push → облако: если что-то пойдёт не так, восстановиться
+              можно из снимка. Хранятся последние <strong>5</strong> снимков —
+              старые автоматически вытесняются.
+            </p>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <button
+                onClick={() => takeCloudSnapshot()}
+                disabled={cloudSnapshotsBusy}
+                className="btn-primary text-sm"
+              >
+                {cloudSnapshotsBusy ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CloudDownload className="w-3.5 h-3.5" />
+                )}
+                {cloudSnapshotsBusy ? "Делаю снимок..." : "Сделать снимок сейчас"}
+              </button>
+              <span className="text-xs text-muted">
+                {cloudSnapshots.length === 0
+                  ? "Снимков ещё не было"
+                  : `${cloudSnapshots.length} из 5 слотов занято`}
+              </span>
+            </div>
+
+            {cloudSnapshotsError && (
+              <div className="text-xs text-expense flex items-start gap-2 mb-3">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{cloudSnapshotsError}</span>
+              </div>
+            )}
+
+            {cloudSnapshots.length > 0 && (
+              <div className="text-xs space-y-1 -mx-1 px-1 max-h-72 overflow-y-auto">
+                {cloudSnapshots.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-3 py-2 border-b border-border/40 last:border-b-0"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium">
+                        {new Date(s.createdAt).toLocaleString("ru-RU")}
+                      </div>
+                      <div className="text-[11px] text-muted tabular-nums truncate">
+                        {formatNum(s.counts.transactions)} оп. ·{" "}
+                        {s.counts.accounts} счёт. · {s.counts.tags} тег. ·{" "}
+                        {s.counts.instruments} вал. · {Math.round(s.approxBytes / 1024)}{" "}
+                        КБ
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => downloadCloudSnapshot(s.id)}
+                      className="btn-ghost !px-2 !py-1 text-xs"
+                      title="Скачать как JSON-файл"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Удалить снимок от ${new Date(s.createdAt).toLocaleString("ru-RU")}?`
+                          )
+                        ) {
+                          deleteCloudSnapshot(s.id);
+                        }
+                      }}
+                      className="text-muted hover:text-expense p-1"
+                      title="Удалить снимок"
+                      disabled={cloudSnapshotsBusy}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-[11px] text-muted mt-3">
+              <strong>Зачем:</strong> когда мы добавим push-операции в облако
+              (Фаза 1+ интеграции), любая ошибка может перезаписать ваши данные
+              в Дзен-мани. Снимок — это страховой полис: его можно использовать
+              для отката, и он содержит ровно то, что отдал API, без нашего
+              маппинга.
+            </p>
+          </div>
+        </>
+      )}
 
     </div>
   );
