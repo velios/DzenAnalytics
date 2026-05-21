@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Upload,
@@ -38,6 +38,7 @@ import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
 import { SectionHeading } from "../components/SectionHeading";
@@ -159,6 +160,47 @@ export function ImportPage() {
     setSyncSuccess(null);
   }
 
+  // Manual payee aliases — user-curated overrides on top of (or in
+  // place of) the fuzzy auto-grouping above.
+  const manualAliases = usePayeeAliasStore((s) => s.aliases);
+  const aliasesLoaded = usePayeeAliasStore((s) => s.loaded);
+  const aliasesHydrate = usePayeeAliasStore((s) => s.hydrate);
+  const addAlias = usePayeeAliasStore((s) => s.add);
+  const removeAlias = usePayeeAliasStore((s) => s.remove);
+  const reapplyRules = useDataStore((s) => s.reapplyRules);
+  useEffect(() => {
+    if (!aliasesLoaded) aliasesHydrate();
+  }, [aliasesLoaded, aliasesHydrate]);
+  const [aliasFrom, setAliasFrom] = useState("");
+  const [aliasTo, setAliasTo] = useState("");
+
+  // Distinct payees from the current dataset — used as datalist options
+  // for the manual alias inputs so the user can pick existing names by
+  // typing a few letters.
+  const allPayeeOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of transactions) {
+      if (t.payee) set.add(t.payee);
+      if (t.payeeOriginal) set.add(t.payeeOriginal);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [transactions]);
+
+  async function submitAlias() {
+    const f = aliasFrom.trim();
+    const t = aliasTo.trim();
+    if (!f || !t || f === t) return;
+    await addAlias(f, t);
+    await reapplyRules();
+    setAliasFrom("");
+    setAliasTo("");
+  }
+
+  async function dropAlias(from: string) {
+    await removeAlias(from);
+    await reapplyRules();
+  }
+
   // Report period (reporting month start day)
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const reportPeriodLoaded = useReportPeriodStore((s) => s.loaded);
@@ -224,6 +266,8 @@ export function ImportPage() {
         categoryFlags: await db.loadJSON("categoryFlags"),
         inflation: await db.loadJSON("inflation"),
         payeeGrouping: await db.loadJSON("payeeGrouping"),
+        payeeAliases: await db.loadJSON("payeeAliases"),
+        reportPeriod: await db.loadJSON("reportPeriod"),
       };
       const json = JSON.stringify(dump, null, 2);
       const blob = new Blob([json], { type: "application/json" });
@@ -252,7 +296,7 @@ export function ImportPage() {
       if (dump.transactions) await db.saveTransactions(dump.transactions);
       if (dump.rates) await db.saveRates(dump.rates);
       if (dump.importMeta) await db.saveImportMeta(dump.importMeta);
-      const keys = ["budgets", "goals", "calibration", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping"];
+      const keys = ["budgets", "goals", "calibration", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping", "payeeAliases", "reportPeriod"];
       for (const k of keys) {
         if (dump[k] !== undefined) await db.saveJSON(k, dump[k]);
       }
@@ -265,6 +309,8 @@ export function ImportPage() {
         annHydrate(),
         flagsHydrate(),
         hydrateInflation(),
+        aliasesHydrate(),
+        reportPeriodHydrate(),
       ]);
       setBackupMsg(`Восстановлено: ${formatNum((dump.transactions || []).length)} операций`);
     } catch (e) {
@@ -547,7 +593,10 @@ export function ImportPage() {
             onDragLeave={() => setDragOver(false)}
             onDrop={onDrop}
             onClick={() => fileRef.current?.click()}
-            className={`cursor-pointer transition-all border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center px-4 py-5 gap-1.5 min-h-[120px] ${
+            // No `min-h-…`: grid `items-stretch` auto-sizes both columns to
+            // the same height, so the dropzone's bottom edge naturally aligns
+            // with the bottom of the descriptive text on the left.
+            className={`cursor-pointer transition-all border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center px-4 py-4 gap-1.5 ${
               dragOver
                 ? "border-accent bg-accent/5"
                 : "border-border hover:border-accent/50 hover:bg-panel2/30"
@@ -829,13 +878,102 @@ export function ImportPage() {
         </div>
       )}
 
+      {transactions.length > 0 && (
+        <div className="card card-pad">
+          <div className="flex items-center gap-2 mb-3">
+            <Users className="w-5 h-5 text-accent2" />
+            <span className="font-medium">Ручные объединения получателей</span>
+          </div>
+          <p className="text-xs text-muted mb-3">
+            Если авто-группировка что-то пропустила или, наоборот, объединила
+            не то — добавьте явное правило «откуда → куда». Ручные правила
+            применяются <em>поверх</em> авто-группировки и работают независимо
+            от её переключателя.
+          </p>
+
+          {/* Add new alias */}
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] items-center gap-2 mb-3">
+            <input
+              list="payee-options"
+              value={aliasFrom}
+              onChange={(e) => setAliasFrom(e.target.value)}
+              placeholder="Откуда (как сейчас называется)"
+              className="input text-sm"
+            />
+            <span className="text-muted hidden md:inline">→</span>
+            <input
+              list="payee-options"
+              value={aliasTo}
+              onChange={(e) => setAliasTo(e.target.value)}
+              placeholder="Куда (как должно стать)"
+              className="input text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitAlias();
+              }}
+            />
+            <button
+              onClick={submitAlias}
+              disabled={
+                !aliasFrom.trim() ||
+                !aliasTo.trim() ||
+                aliasFrom.trim() === aliasTo.trim()
+              }
+              className="btn-primary text-sm whitespace-nowrap"
+            >
+              Добавить
+            </button>
+            <datalist id="payee-options">
+              {allPayeeOptions.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+          </div>
+
+          {/* Existing aliases */}
+          {manualAliases.length === 0 ? (
+            <div className="text-xs text-muted">
+              Пока нет ручных правил. Используйте поля выше, чтобы добавить
+              первое — например, <code className="pill">Pyaterochka</code> →{" "}
+              <code className="pill">Пятёрочка</code>.
+            </div>
+          ) : (
+            <div className="max-h-60 overflow-y-auto text-xs space-y-1 -mx-1 px-1">
+              {manualAliases.map((a) => (
+                <div
+                  key={a.from}
+                  className="flex items-center gap-2 py-1 border-b border-border/40 last:border-b-0"
+                >
+                  <span className="truncate flex-1 text-text" title={a.from}>
+                    {a.from}
+                  </span>
+                  <span className="text-muted">→</span>
+                  <span
+                    className="truncate flex-1 text-text font-medium"
+                    title={a.to}
+                  >
+                    {a.to}
+                  </span>
+                  <button
+                    onClick={() => dropAlias(a.from)}
+                    className="text-muted hover:text-expense p-1"
+                    title="Удалить правило"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <SectionHeading>Отчётный период</SectionHeading>
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
           <CalendarRange className="w-5 h-5 text-accent2" />
           <span className="font-medium">Первый день отчётного месяца</span>
         </div>
-        <p className="text-xs text-muted mb-3 max-w-prose">
+        <p className="text-xs text-muted mb-3">
           Многие ведут аналитику не «1 число — последнее число», а от зарплаты
           до зарплаты — например с 11-го по 10-е. Здесь можно задать день, с
           которого начинается ваш расчётный месяц. Влияет на: фильтр «Месяц»,

@@ -16,6 +16,7 @@ import { ChevronRight, ChevronDown, Lock, Coffee } from "lucide-react";
 import clsx from "clsx";
 import { useEffect } from "react";
 import { useDataStore } from "../store/useDataStore";
+import { useThemeStore } from "../store/useThemeStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -43,28 +44,22 @@ const COLORS = [
   "#8B5CF6", "#06B6D4", "#FBBF24", "#34D399", "#F472B6",
 ];
 
-// Pick black/white text colour by the cell's perceived brightness so labels
-// stay readable against any palette colour. Accepts both `#RRGGBB` (palette)
-// and `rgb(R, G, B)` (Zenmoney-derived) forms.
-function readableTextOn(color: string): string {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  const rgb = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-  const hex = color.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (rgb) {
-    r = Number(rgb[1]);
-    g = Number(rgb[2]);
-    b = Number(rgb[3]);
-  } else if (hex) {
-    r = parseInt(hex[1], 16);
-    g = parseInt(hex[2], 16);
-    b = parseInt(hex[3], 16);
-  } else {
-    return "#0B1120";
-  }
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  return yiq > 160 ? "#0B1120" : "#FFFFFF";
+/**
+ * Treemap text colour — uniform across all cells in a theme.
+ *
+ * We used to flip between black/white per-cell based on the fill's
+ * perceived brightness (YIQ), which gave a confused, "patchwork" look:
+ * some labels black, some white, all in the same chart. Users read it
+ * as a bug. The new rule is dead-simple:
+ *   • Light theme — dark text everywhere
+ *   • Dark theme  — white text everywhere
+ *
+ * The label gets a faint `paint-order: stroke; stroke` halo in
+ * `<TreemapCell>` so it stays readable even on a cell that approaches
+ * the text colour (e.g. dark text on a dark-blue cell in light mode).
+ */
+function readableTextOn(_color: string, theme: "light" | "dark"): string {
+  return theme === "dark" ? "#FFFFFF" : "#0B1120";
 }
 
 function truncateToWidth(text: string, maxChars: number): string {
@@ -84,6 +79,7 @@ interface TreemapCellProps {
   base: string;
   colors: string[];
   categoryColors?: Record<string, string | null>;
+  theme: "light" | "dark";
 }
 
 function TreemapCell(props: TreemapCellProps) {
@@ -98,17 +94,20 @@ function TreemapCell(props: TreemapCellProps) {
     base,
     colors,
     categoryColors,
+    theme,
   } = props;
   if (width < 1 || height < 1) return <g />;
   // Prefer the category's own colour from Zenmoney; fall back to the palette.
   const fill =
     (categoryColors && categoryColors[name]) || colors[index % colors.length];
-  const textColor = readableTextOn(fill);
-  const subColor = textColor === "#FFFFFF" ? "rgba(255,255,255,0.78)" : "rgba(11,17,32,0.72)";
+  const textColor = readableTextOn(fill, theme);
+  const subColor =
+    textColor === "#FFFFFF" ? "rgba(255,255,255,0.78)" : "rgba(11,17,32,0.72)";
 
-  // Choose label sizing by cell area so small cells still show their name
-  // (just smaller), big cells get a bolder layout. Char width estimates are
-  // tuned for the system sans-serif at the chosen px size.
+  // Compact, more uniform tiering. Earlier 13/12/11 sizes made bigger
+  // cells feel "shouty" and inconsistent with neighbours; this scheme
+  // keeps the spread inside a tight 11/10/9 band so the label visually
+  // anchors the cell without dominating it.
   const tier =
     width >= 140 && height >= 60
       ? "lg"
@@ -118,7 +117,7 @@ function TreemapCell(props: TreemapCellProps) {
           ? "sm"
           : "xs";
 
-  const titleSize = tier === "lg" ? 13 : tier === "md" ? 12 : 11;
+  const titleSize = tier === "lg" ? 11 : tier === "md" ? 11 : tier === "sm" ? 10 : 9;
   const charPx = titleSize * 0.55;
   const padX = tier === "xs" ? 4 : 6;
   const maxChars = Math.max(1, Math.floor((width - padX * 2) / charPx));
@@ -126,41 +125,71 @@ function TreemapCell(props: TreemapCellProps) {
 
   const showAmount = tier !== "xs" && height >= titleSize * 2 + 6;
   const amountText = formatMoney(value, base, { compact: true });
-  const amountSize = tier === "lg" ? 12 : 11;
+  const amountSize = tier === "lg" ? 10 : 10;
   const amountChars = Math.max(1, Math.floor((width - padX * 2) / (amountSize * 0.55)));
   const amount = truncateToWidth(amountText, amountChars);
+
+  // Round all SVG coordinates to whole pixels. Recharts gives us floats
+  // from its layout pass; combined with the body-level
+  // `text-rendering: optimizeLegibility`, sub-pixel anchors produce a
+  // ghosted / haloed look on `<text>` elements ("each glyph rendered with
+  // a faint outline"). Snapping to integer pixels makes glyphs land on
+  // exact device pixels and removes the artefact.
+  const rx = Math.round(x);
+  const ry = Math.round(y);
+  const rw = Math.round(width);
+  const rh = Math.round(height);
+  const titleX = Math.round(rx + padX);
+  const titleY = Math.round(ry + titleSize + 4);
+  const amountX = titleX;
+  const amountY = Math.round(ry + titleSize + amountSize + 8);
+
+  // Common SVG-text props that:
+  //   • disable inherited `stroke` (Recharts can propagate the parent
+  //     <Treemap stroke> to children — would draw a 2px outline AROUND
+  //     each glyph, the second source of the "double-rendered" look);
+  //   • switch text-rendering to `geometricPrecision` so SVG ignores the
+  //     body's `optimizeLegibility` that triggers fractional-pixel
+  //     anti-aliasing inside <text>.
+  const textBase = {
+    stroke: "none",
+    style: {
+      pointerEvents: "none" as const,
+      textRendering: "geometricPrecision" as const,
+    },
+    fontFamily:
+      "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+  };
 
   return (
     <g style={{ cursor: "pointer" }}>
       <title>{`${name} · ${amountText}`}</title>
       <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
+        x={rx}
+        y={ry}
+        width={rw}
+        height={rh}
         fill={fill}
         stroke="rgb(var(--c-bg))"
         strokeWidth={2}
       />
       <text
-        x={x + padX}
-        y={y + titleSize + 4}
+        x={titleX}
+        y={titleY}
         fill={textColor}
         fontSize={titleSize}
-        fontWeight={600}
-        fontFamily="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-        style={{ pointerEvents: "none" }}
+        fontWeight={500}
+        {...textBase}
       >
         {label}
       </text>
       {showAmount && (
         <text
-          x={x + padX}
-          y={y + titleSize + amountSize + 8}
+          x={amountX}
+          y={amountY}
           fill={subColor}
           fontSize={amountSize}
-          fontFamily="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-          style={{ pointerEvents: "none" }}
+          {...textBase}
         >
           {amount}
         </text>
@@ -214,6 +243,7 @@ function buildHierarchy(txs: Transaction[], kind: "expense" | "income"): Categor
 export function CategoriesPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const theme = useThemeStore((s) => s.resolved);
   const categoryMeta = useCategoryMetaStore((s) => s.meta);
   const metaLoaded = useCategoryMetaStore((s) => s.loaded);
   const hydrateMeta = useCategoryMetaStore((s) => s.hydrate);
@@ -252,6 +282,20 @@ export function CategoriesPage() {
 
   const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
   const tree = useMemo(() => buildHierarchy(filtered, kind), [filtered, kind]);
+
+  // Single source of truth for "what colour belongs to this category".
+  // Donut / Treemap / Иерархия sidebar all consult this map, so a
+  // category's swatch is identical across all three visualisations.
+  // Zenmoney-provided colour (from `tag.color`) wins; otherwise we pick
+  // a palette colour by the category's index in the *tree* — that's the
+  // order the user sees in the sidebar, so palette-based fallbacks line up.
+  const resolvedCategoryColors = useMemo(() => {
+    const m: Record<string, string> = {};
+    tree.forEach((node, i) => {
+      m[node.name] = categoryColors[node.name] || COLORS[i % COLORS.length];
+    });
+    return m;
+  }, [tree, categoryColors]);
 
   const totalAll = tree.reduce((s, n) => s + n.total, 0);
 
@@ -362,9 +406,20 @@ export function CategoriesPage() {
                       percent && percent > 0.04 ? `${name} ${(percent * 100).toFixed(0)}%` : ""
                     }
                     labelLine={false}
+                    // Same rationale as Treemap: Recharts' default
+                    // sector-grow animation creates a momentary double-
+                    // paint when filters change. Static render is plenty
+                    // fast and looks calmer.
+                    isAnimationActive={false}
                   >
-                    {data.slice(0, 15).map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    {data.slice(0, 15).map((d, i) => (
+                      <Cell
+                        key={i}
+                        fill={
+                          resolvedCategoryColors[d.name] ||
+                          COLORS[i % COLORS.length]
+                        }
+                      />
                     ))}
                   </Pie>
                   <Tooltip
@@ -386,6 +441,11 @@ export function CategoriesPage() {
                   dataKey="value"
                   stroke="rgb(var(--c-bg))"
                   fill="#22D3EE"
+                  // Recharts' default cell animation re-paints SVG between
+                  // frames; when intermediate paints overlap a freshly-
+                  // rendered cell at the same place, glyphs can briefly
+                  // double-stamp. Static layout is plenty fast here.
+                  isAnimationActive={false}
                   onClick={(d: { name?: string }) => d?.name && openCategory(d.name)}
                   content={(props: {
                     x?: number;
@@ -400,7 +460,8 @@ export function CategoriesPage() {
                       {...props}
                       base={base}
                       colors={COLORS}
-                      categoryColors={categoryColors}
+                      categoryColors={resolvedCategoryColors}
+                      theme={theme}
                     />
                   )}
                 />
@@ -424,7 +485,10 @@ export function CategoriesPage() {
           </div>
           <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
             {tree.map((node, i) => {
-              const color = categoryColors[node.name] || COLORS[i % COLORS.length];
+              // Single source of truth — same map the Donut and Treemap
+              // consult, so the swatch next to a category here always
+              // matches its slice/cell in the chart on the left.
+              const color = resolvedCategoryColors[node.name] || COLORS[i % COLORS.length];
               const isOpen = expanded.has(node.name);
               const hasSubs = node.subs.length > 0;
               return (
@@ -564,8 +628,13 @@ export function CategoriesPage() {
                 radius={[0, 4, 4, 0]}
                 activeBar={false}
               >
-                {data.slice(0, 25).map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                {data.slice(0, 25).map((d, i) => (
+                  <Cell
+                    key={i}
+                    fill={
+                      resolvedCategoryColors[d.name] || COLORS[i % COLORS.length]
+                    }
+                  />
                 ))}
               </Bar>
             </BarChart>

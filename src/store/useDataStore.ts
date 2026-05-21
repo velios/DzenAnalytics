@@ -6,6 +6,7 @@ import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import { applyCategoryRules, type CategoryRule } from "./useCategoryRulesStore";
 import { applyEdits } from "../lib/applyEdits";
 import { useEditsStore } from "./useEditsStore";
+import { aliasesToMap, type PayeeAlias } from "./usePayeeAliasStore";
 
 // Rough cross-rates relative to RUB — purely a starting point so the rates UI
 // is populated out of the box. Users adjust to their own actual rates.
@@ -101,24 +102,54 @@ async function loadEditsFromStore(): Promise<
   return disk || {};
 }
 
-function applyPayeeGrouping(txs: Transaction[], enabled: boolean): Transaction[] {
-  if (!enabled) {
-    return txs.map((t) =>
-      t.payeeOriginal && t.payee !== t.payeeOriginal
-        ? { ...t, payee: t.payeeOriginal }
-        : t
-    );
-  }
-  const restored = txs.map((t) =>
+/** Read the user's manual payee aliases straight from IDB, so this
+ *  module doesn't depend on the React component lifecycle. */
+async function loadManualAliasesFromStore(): Promise<PayeeAlias[]> {
+  const data = await db.loadJSON<PayeeAlias[]>("payeeAliases");
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Apply payee-grouping pipeline:
+ *   1. Restore every tx's `payee` to `payeeOriginal` (clean slate).
+ *   2. If auto-grouping is enabled, run the fuzzy alias detector
+ *      and map variants to their canonical representative.
+ *   3. Apply the user's manual aliases on top — these always win,
+ *      so the user can pin down anything fuzzy missed (or override
+ *      it when it grouped too eagerly).
+ */
+function applyPayeeGrouping(
+  txs: Transaction[],
+  enabled: boolean,
+  manualAliases: PayeeAlias[] = []
+): Transaction[] {
+  // Step 1 — restore originals.
+  let out = txs.map((t) =>
     t.payeeOriginal ? { ...t, payee: t.payeeOriginal } : t
   );
-  const allPayees = restored.map((t) => t.payee).filter(Boolean);
-  const aliases = buildPayeeAliasMap(allPayees);
-  if (aliases.size === 0) return restored;
-  return restored.map((t) => {
-    const canonical = aliases.get(t.payee);
-    return canonical ? { ...t, payee: canonical } : t;
-  });
+
+  // Step 2 — fuzzy auto-grouping (only when toggle is on).
+  if (enabled) {
+    const allPayees = out.map((t) => t.payee).filter(Boolean);
+    const aliases = buildPayeeAliasMap(allPayees);
+    if (aliases.size > 0) {
+      out = out.map((t) => {
+        const canonical = aliases.get(t.payee);
+        return canonical ? { ...t, payee: canonical } : t;
+      });
+    }
+  }
+
+  // Step 3 — manual aliases (curated by the user), always applied.
+  if (manualAliases.length > 0) {
+    const manual = aliasesToMap(manualAliases);
+    out = out.map((t) => {
+      const next = manual.get(t.payee);
+      return next ? { ...t, payee: next } : t;
+    });
+  }
+
+  return out;
 }
 
 export const useDataStore = create<DataState>((set, get) => ({
@@ -130,16 +161,17 @@ export const useDataStore = create<DataState>((set, get) => ({
   loaded: false,
 
   hydrate: async () => {
-    const [txs, savedRates, meta, grouping, rules] = await Promise.all([
+    const [txs, savedRates, meta, grouping, rules, manualAliases] = await Promise.all([
       db.loadTransactions(),
       db.loadRates(),
       db.loadImportMeta(),
       db.loadJSON<boolean>("payeeGrouping"),
       loadRules(),
+      loadManualAliasesFromStore(),
     ]);
     const rates = mergeRatesWithDefaults(savedRates);
     let raw = recalcBase(txs, rates);
-    raw = applyPayeeGrouping(raw, grouping || false);
+    raw = applyPayeeGrouping(raw, grouping || false, manualAliases);
     raw = applyCategoryRules(raw, rules);
     const final = applyEdits(raw, await loadEditsFromStore(), rates);
     set({
@@ -157,8 +189,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     const rates = ensureCurrenciesInRates(get().rates, txs);
     if (rates !== get().rates) await db.saveRates(rates);
     const rules = await loadRules();
+    const manualAliases = await loadManualAliasesFromStore();
     let raw = recalcBase(txs, rates);
-    raw = applyPayeeGrouping(raw, payeeGroupingEnabled);
+    raw = applyPayeeGrouping(raw, payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     await db.saveImportMeta(meta);
@@ -171,11 +204,12 @@ export const useDataStore = create<DataState>((set, get) => ({
     const rates = ensureCurrenciesInRates(get().rates, incoming);
     if (rates !== get().rates) await db.saveRates(rates);
     const rules = await loadRules();
+    const manualAliases = await loadManualAliasesFromStore();
     const existingIds = new Set(existing.map((t) => t.id));
     const fresh = incoming.filter((t) => !existingIds.has(t.id));
     const combined = [...existing, ...fresh];
     let raw = recalcBase(combined, rates);
-    raw = applyPayeeGrouping(raw, payeeGroupingEnabled);
+    raw = applyPayeeGrouping(raw, payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     const mergedMeta: ImportMeta = {
@@ -206,8 +240,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     };
     await db.saveRates(rates);
     const rules = await loadRules();
+    const manualAliases = await loadManualAliasesFromStore();
     let raw = recalcBase(get().transactionsRaw, rates);
-    raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled);
+    raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     const final = applyEdits(raw, await loadEditsFromStore(), rates);
@@ -234,8 +269,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     const rates: CurrencyRates = { base: newBase, rates: nextRates };
     await db.saveRates(rates);
     const rules = await loadRules();
+    const manualAliases = await loadManualAliasesFromStore();
     let raw = recalcBase(get().transactionsRaw, rates);
-    raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled);
+    raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     const final = applyEdits(raw, await loadEditsFromStore(), rates);
@@ -246,8 +282,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     await db.saveJSON("payeeGrouping", enabled);
     const { transactionsRaw: existing, rates } = get();
     const rules = await loadRules();
+    const manualAliases = await loadManualAliasesFromStore();
     let raw = recalcBase(existing, rates);
-    raw = applyPayeeGrouping(raw, enabled);
+    raw = applyPayeeGrouping(raw, enabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     const final = applyEdits(raw, await loadEditsFromStore(), rates);
@@ -257,8 +294,9 @@ export const useDataStore = create<DataState>((set, get) => ({
   reapplyRules: async () => {
     const { transactionsRaw: existing, rates, payeeGroupingEnabled } = get();
     const rules = await loadRules();
+    const manualAliases = await loadManualAliasesFromStore();
     let raw = recalcBase(existing, rates);
-    raw = applyPayeeGrouping(raw, payeeGroupingEnabled);
+    raw = applyPayeeGrouping(raw, payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     const final = applyEdits(raw, await loadEditsFromStore(), rates);
