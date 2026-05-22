@@ -21,6 +21,7 @@ import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
 import { formatMoney, formatNum } from "../lib/format";
+import { kindColorClass, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
 type SortMode = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
@@ -412,13 +413,8 @@ function Row({
   hideDate?: boolean;
 }) {
   const template = hideDate ? GRID_COLS_NODATE : GRID_COLS_FULL;
-  const amountColor =
-    tx.kind === "income"
-      ? "text-income"
-      : tx.kind === "expense"
-        ? "text-expense"
-        : "text-warn";
-  const amountSign = tx.kind === "income" ? "+" : tx.kind === "expense" ? "−" : "↔";
+  const amountColor = kindColorClass(tx.kind);
+  const amountSign = kindSignGlyph(tx.kind);
 
   return (
     <div

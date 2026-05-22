@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, RotateCcw, Save, X, TrendingUp, TrendingDown, ArrowLeftRight } from "lucide-react";
+import { Pencil, RotateCcw, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
@@ -170,7 +170,10 @@ export function EditTransactionModal({ tx, onClose }: Props) {
         patch.account = account.trim() || tx.account;
         // Keep outcome/income aligned with the selected kind so charts
         // that look at those fields directly don't see stale data.
-        if (kind === "income") {
+        // Refund is an income-side flow too — the merchant returned
+        // money TO the account — so the same convention as `income`
+        // applies for which leg gets the account id.
+        if (kind === "income" || kind === "refund") {
           patch.incomeAccount = account.trim() || tx.account;
           patch.outcomeAccount = "";
         } else {
@@ -241,7 +244,9 @@ export function EditTransactionModal({ tx, onClose }: Props) {
           </button>
         </div>
         <div className="p-5 space-y-3">
-          {/* Kind switcher — three-way pill toggle. */}
+          {/* Kind switcher — 4-way pill toggle. "Возврат" is a money-back
+              flow on an expense category; it inflows the account but
+              shrinks the category's spend rather than adding to income. */}
           <Field label="Тип операции">
             <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5 w-full">
               <KindButton
@@ -257,6 +262,13 @@ export function EditTransactionModal({ tx, onClose }: Props) {
                 icon={TrendingUp}
                 label="Доход"
                 tone="income"
+              />
+              <KindButton
+                active={kind === "refund"}
+                onClick={() => setKind("refund")}
+                icon={Undo2}
+                label="Возврат"
+                tone="accent2"
               />
               <KindButton
                 active={kind === "transfer"}
@@ -445,14 +457,16 @@ function KindButton({
   onClick: () => void;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  tone: "income" | "expense" | "warn";
+  tone: "income" | "expense" | "warn" | "accent2";
 }) {
   const activeBg =
     tone === "income"
       ? "bg-income text-white"
       : tone === "expense"
         ? "bg-expense text-white"
-        : "bg-warn text-white";
+        : tone === "accent2"
+          ? "bg-accent2 text-white"
+          : "bg-warn text-white";
   return (
     <button
       type="button"

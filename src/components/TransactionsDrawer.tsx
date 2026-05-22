@@ -15,6 +15,7 @@ import { useEditsStore } from "../store/useEditsStore";
 import { CategoryDot } from "./CategoryDot";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { formatMoney, formatDate } from "../lib/format";
+import { kindColorClass, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
 type SortKey = "date" | "amount" | "category" | "payee";
@@ -36,6 +37,7 @@ function transferCounterparty(t: Transaction): string | null {
   if (from && to === from) return null;
   return to;
 }
+
 
 export function TransactionsDrawer() {
   const { open, title, subtitle, transactions, close, show } = useDrillStore();
@@ -315,15 +317,10 @@ export function TransactionsDrawer() {
                       {t.account}
                     </td>
                     <td
-                      className={`table-td text-right tabular-nums font-medium whitespace-nowrap ${
-                        t.kind === "income"
-                          ? "text-income"
-                          : t.kind === "expense"
-                            ? "text-expense"
-                            : "text-warn"
-                      }`}
+                      className={`table-td text-right tabular-nums font-medium whitespace-nowrap ${kindColorClass(t.kind)}`}
+                      title={t.kind === "refund" ? "Возврат — уменьшает расход категории" : undefined}
                     >
-                      {t.kind === "income" ? "+" : t.kind === "expense" ? "−" : "↔"}
+                      {kindSignGlyph(t.kind)}
                       {formatMoney(t.amount, t.currency)}
                     </td>
                     <td className="table-td w-8 text-right">

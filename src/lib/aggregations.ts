@@ -34,7 +34,12 @@ export function groupByMonth(
       map.set(ym, b);
     }
     if (t.kind === "income") b.income += t.amountBase;
-    else b.expense += t.amountBase;
+    else if (t.kind === "refund") {
+      // Refund is an inflow on the account but logically a *reversal*
+      // of a previous expense — so it shrinks the expense bucket
+      // rather than swelling income. See `TxKind` doc in `types.ts`.
+      b.expense -= t.amountBase;
+    } else b.expense += t.amountBase;
     b.count++;
   }
   for (const b of map.values()) b.net = b.income - b.expense;
@@ -63,7 +68,11 @@ export function groupByCategory(
       map.set(key, b);
     }
     if (t.kind === "income") b.income += t.amountBase;
-    else b.expense += t.amountBase;
+    else if (t.kind === "refund") {
+      // Refund reduces this category's expense total — that's the
+      // whole point of refunds in Zenmoney's data model.
+      b.expense -= t.amountBase;
+    } else b.expense += t.amountBase;
     b.count++;
   }
   for (const b of map.values()) b.net = b.income - b.expense;
@@ -83,8 +92,14 @@ export function balancesByAccount(txs: Transaction[]): AccountBalance[] {
   for (const t of txs) {
     const accs: { acc: string; delta: number }[] = [];
     if (t.kind === "expense") accs.push({ acc: t.outcomeAccount, delta: -t.amountBase });
-    else if (t.kind === "income") accs.push({ acc: t.incomeAccount, delta: t.amountBase });
-    else if (t.kind === "transfer") {
+    else if (t.kind === "income" || t.kind === "refund") {
+      // Refund is a real cash inflow on the account (the merchant
+      // gave money back to the card), so the account's running
+      // balance grows just like with regular income. The semantic
+      // difference vs. income only matters at the category / KPI
+      // level, not at the account level.
+      accs.push({ acc: t.incomeAccount, delta: t.amountBase });
+    } else if (t.kind === "transfer") {
       accs.push({ acc: t.outcomeAccount, delta: -t.amountBase });
       accs.push({ acc: t.incomeAccount, delta: t.amountBase });
     }
@@ -120,10 +135,11 @@ export function dailyBalanceSeries(
     if (!d) continue;
     let delta = 0;
     if (account) {
+      // Refund is an inflow on the account-of-record, same as income.
       if (t.outcomeAccount === account && (t.kind === "expense" || t.kind === "transfer")) delta -= t.amountBase;
-      if (t.incomeAccount === account && (t.kind === "income" || t.kind === "transfer")) delta += t.amountBase;
+      if (t.incomeAccount === account && (t.kind === "income" || t.kind === "refund" || t.kind === "transfer")) delta += t.amountBase;
     } else {
-      if (t.kind === "income") delta += t.amountBase;
+      if (t.kind === "income" || t.kind === "refund") delta += t.amountBase;
       else if (t.kind === "expense") delta -= t.amountBase;
     }
     if (delta !== 0) days.set(d, (days.get(d) || 0) + delta);
@@ -169,8 +185,11 @@ export function stackedBalanceByAccount(
       dayMap.set(key, (dayMap.get(key) || 0) + delta);
     };
     if (t.kind === "expense") apply(t.outcomeAccount, -t.amountBase);
-    else if (t.kind === "income") apply(t.incomeAccount, t.amountBase);
-    else if (t.kind === "transfer") {
+    else if (t.kind === "income" || t.kind === "refund") {
+      // Refund is a cash inflow on the account — treat like income for
+      // the running stacked-balance series.
+      apply(t.incomeAccount, t.amountBase);
+    } else if (t.kind === "transfer") {
       apply(t.outcomeAccount, -t.amountBase);
       apply(t.incomeAccount, t.amountBase);
     }
@@ -234,6 +253,12 @@ export function buildWaterfall(
       expenseByCategory.set(
         t.category,
         (expenseByCategory.get(t.category) || 0) + t.amountBase
+      );
+    } else if (t.kind === "refund") {
+      // Refund reduces that category's expense bar in the waterfall.
+      expenseByCategory.set(
+        t.category,
+        (expenseByCategory.get(t.category) || 0) - t.amountBase
       );
     }
   }
@@ -386,6 +411,7 @@ export function detectSeasonality(txs: Transaction[]): SeasonalityPoint[] {
       monthly.set(ym, m);
     }
     if (t.kind === "income") m.income += t.amountBase;
+    else if (t.kind === "refund") m.expense -= t.amountBase;
     else m.expense += t.amountBase;
   }
 
@@ -812,6 +838,16 @@ export function buildSankey(txs: Transaction[]): SankeyData {
       const k = t.category || "Прочие";
       expenseCats.set(k, (expenseCats.get(k) || 0) + t.amountBase);
       totalExpense += t.amountBase;
+    } else if (t.kind === "refund") {
+      // Refund flows back to the source category — shrink that ribbon
+      // accordingly rather than adding a new income source. Clamp at
+      // zero so the Sankey doesn't try to draw negative-width ribbons
+      // if a category somehow ends up net-positive after refunds.
+      const k = t.category || "Прочие";
+      const prev = expenseCats.get(k) || 0;
+      const next = Math.max(0, prev - t.amountBase);
+      expenseCats.set(k, next);
+      totalExpense -= Math.min(prev, t.amountBase);
     }
   }
   const incomeArr = Array.from(incomeCats.entries())
@@ -1565,6 +1601,12 @@ export function computeKPI(txs: Transaction[]): KPI {
     if (t.kind === "income") {
       income += t.amountBase;
       countInc++;
+    } else if (t.kind === "refund") {
+      // Refund net-reduces the period's expense; doesn't show up in
+      // income KPIs. Count it on the expense side for transaction
+      // count so the dashboard "X операций" doesn't drop refunds.
+      expense -= t.amountBase;
+      countExp++;
     } else {
       expense += t.amountBase;
       countExp++;

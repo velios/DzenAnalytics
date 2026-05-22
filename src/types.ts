@@ -1,6 +1,21 @@
 export type Currency = "RUB" | "USD" | "CNY" | "TRY" | string;
 
-export type TxKind = "expense" | "income" | "transfer";
+/**
+ * Kinds of money movement we track.
+ *
+ *   • expense  — money out, classifies into expense KPIs and category totals.
+ *   • income   — money in, classifies into income KPIs.
+ *   • transfer — between two of the user's own accounts, neutral on net.
+ *   • refund   — money back from a previous expense (returned purchase,
+ *                cashback within an expense category, etc.). Renders as
+ *                an inflow on the account, but aggregates as a *negative
+ *                expense* on the original category — i.e. it shrinks the
+ *                category's spend, never inflates income totals.
+ *                Zenmoney encodes refunds as `income > 0` transactions
+ *                tagged with an *expense* category (a tag whose
+ *                `showOutcome` flag is on). See `zenmoneyMap.ts`.
+ */
+export type TxKind = "expense" | "income" | "transfer" | "refund";
 
 export interface RawRow {
   date: string;
