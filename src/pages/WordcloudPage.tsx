@@ -33,7 +33,7 @@ export function WordcloudPage() {
   const [minLen, setMinLen] = useState(3);
   const [topN, setTopN] = useState(120);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const words = useMemo(
     () => buildWordcloud(filtered, minLen, topN),
     [filtered, minLen, topN]

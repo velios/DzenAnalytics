@@ -69,7 +69,7 @@ export function CalendarPage() {
 
   const [kind, setKind] = useState<"expense" | "income">("expense");
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const dayMap = useMemo(() => dailyExpenseMap(filtered), [filtered]);
 
   const dates = useMemo(() => {

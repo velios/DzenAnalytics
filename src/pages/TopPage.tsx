@@ -25,7 +25,7 @@ export function TopPage() {
 
   const showDrill = useDrillStore((s) => s.show);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
 
   const cats = useMemo(() => groupByCategory(filtered, "full"), [filtered]);
   const payees = useMemo(() => topPayees(filtered, kind, 30), [filtered, kind]);

@@ -22,7 +22,7 @@ export function SankeyPage() {
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const data = useMemo(() => buildSankey(filtered), [filtered]);
 
   if (transactions.length === 0) return <EmptyState />;

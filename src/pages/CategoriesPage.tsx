@@ -280,7 +280,7 @@ export function CategoriesPage() {
     else setFlag(category, null);
   }
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const tree = useMemo(() => buildHierarchy(filtered, kind), [filtered, kind]);
 
   // Single source of truth for "what colour belongs to this category".

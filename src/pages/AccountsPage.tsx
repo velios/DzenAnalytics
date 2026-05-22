@@ -97,7 +97,7 @@ export function AccountsPage() {
     setCalibAmount(calibration ? String(calibration.amount) : "");
   }, [calibration]);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const baseTxs = scope === "all" ? transactions : filtered;
 
   const accounts = useMemo(() => balancesByAccount(filtered), [filtered]);

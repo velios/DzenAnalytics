@@ -18,7 +18,7 @@ export function TagsPage() {
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const showDrill = useDrillStore((s) => s.show);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const tags = useMemo(() => groupByHashtag(filtered), [filtered]);
 
   const totalExpense = tags.reduce((s, t) => s + t.expense, 0);

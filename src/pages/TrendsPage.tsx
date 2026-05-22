@@ -51,7 +51,7 @@ export function TrendsPage() {
   const [level, setLevel] = useState<"top" | "full">("top");
   const [selected, setSelected] = useState<string[]>([]);
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters]);
+  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
 
   const allCategories = useMemo(
     () =>
