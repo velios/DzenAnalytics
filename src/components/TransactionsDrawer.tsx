@@ -15,7 +15,7 @@ import { useEditsStore } from "../store/useEditsStore";
 import { CategoryDot } from "./CategoryDot";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { formatMoney, formatDate } from "../lib/format";
-import { kindColorClass, kindSignGlyph } from "../lib/txKindStyle";
+import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
 type SortKey = "date" | "amount" | "category" | "payee";
@@ -108,6 +108,10 @@ export function TransactionsDrawer() {
     for (const t of sorted) {
       if (t.kind === "income") inc += t.amountBase;
       else if (t.kind === "expense") exp += t.amountBase;
+      // Refunds net out of the drawer's expense total — so when the
+      // user drills into «category X» and sees both a purchase and
+      // its refund, the footer says net spend, not double-counted.
+      else if (t.kind === "refund") exp -= t.amountBase;
     }
     return { inc, exp, net: inc - exp };
   }, [sorted]);
@@ -127,7 +131,7 @@ export function TransactionsDrawer() {
       ...sorted.map((t) =>
         [
           t.date,
-          t.kind === "income" ? "доход" : t.kind === "expense" ? "расход" : "перевод",
+          kindLabel(t.kind),
           `"${t.categoryFull.replace(/"/g, '""')}"`,
           `"${(t.payee || "").replace(/"/g, '""')}"`,
           `"${(t.comment || "").replace(/"/g, '""')}"`,
@@ -320,7 +324,7 @@ export function TransactionsDrawer() {
                       className={`table-td text-right tabular-nums font-medium whitespace-nowrap ${kindColorClass(t.kind)}`}
                       title={t.kind === "refund" ? "Возврат — уменьшает расход категории" : undefined}
                     >
-                      {kindSignGlyph(t.kind)}
+                      <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
                       {formatMoney(t.amount, t.currency)}
                     </td>
                     <td className="table-td w-8 text-right">

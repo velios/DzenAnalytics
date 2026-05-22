@@ -4,6 +4,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { detectDuplicates } from "../lib/aggregations";
 import { formatMoney, formatDate, formatNum } from "../lib/format";
+import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 
 export function DuplicatesPage() {
@@ -92,7 +93,7 @@ export function DuplicatesPage() {
                       {first.payee || first.categoryFull}
                     </div>
                     <div className="text-xs text-muted mt-0.5">
-                      {first.kind === "expense" ? "Расход" : "Доход"} ·{" "}
+                      {kindLabel(first.kind).replace(/^./, (c) => c.toUpperCase())} ·{" "}
                       {first.categoryFull} ·{" "}
                       {formatMoney(first.amount, first.currency)} ·{" "}
                       {g.txs.length} копий
@@ -134,11 +135,10 @@ export function DuplicatesPage() {
                           {t.account}
                         </td>
                         <td
-                          className={`table-td text-right tabular-nums whitespace-nowrap ${
-                            t.kind === "income" ? "text-income" : "text-expense"
-                          }`}
+                          className={`table-td text-right tabular-nums whitespace-nowrap ${kindColorClass(t.kind)}`}
+                          title={t.kind === "refund" ? "Возврат — уменьшает расход категории" : undefined}
                         >
-                          {t.kind === "income" ? "+" : "−"}
+                          <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
                           {formatMoney(t.amount, t.currency)}
                         </td>
                       </tr>

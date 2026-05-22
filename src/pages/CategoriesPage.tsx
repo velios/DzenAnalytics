@@ -23,6 +23,7 @@ import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { groupByCategory } from "../lib/aggregations";
+import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
 import {
   formatMoney,
   formatNum,
@@ -216,13 +217,18 @@ interface CategoryNode {
 function buildHierarchy(txs: Transaction[], kind: "expense" | "income"): CategoryNode[] {
   const map = new Map<string, CategoryNode>();
   for (const t of txs) {
-    if (t.kind !== kind) continue;
+    // For the expense view, include refunds (signed negative) so a
+    // returned purchase shrinks the category's bar in the hierarchy.
+    // Income view stays strict — refunds are not income.
+    const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
+    if (!include) continue;
+    const delta = kind === "expense" ? expenseDelta(t) : t.amountBase;
     let node = map.get(t.category);
     if (!node) {
       node = { name: t.category, total: 0, count: 0, subs: [] };
       map.set(t.category, node);
     }
-    node.total += t.amountBase;
+    node.total += delta;
     node.count++;
     if (t.subcategory) {
       let sub = node.subs.find((s) => s.name === t.subcategory);
@@ -230,14 +236,19 @@ function buildHierarchy(txs: Transaction[], kind: "expense" | "income"): Categor
         sub = { name: t.subcategory, fullName: t.categoryFull, total: 0, count: 0 };
         node.subs.push(sub);
       }
-      sub.total += t.amountBase;
+      sub.total += delta;
       sub.count++;
     }
   }
   for (const node of map.values()) {
     node.subs.sort((a, b) => b.total - a.total);
   }
-  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  // Drop categories that fully cancel out (sum exactly 0); but keep
+  // negative ones — those are a useful flag that "категория ушла
+  // в минус из-за возвратов" and the user might want to look.
+  return Array.from(map.values())
+    .filter((n) => n.total !== 0)
+    .sort((a, b) => b.total - a.total);
 }
 
 export function CategoriesPage() {
@@ -311,11 +322,19 @@ export function CategoriesPage() {
   }));
 
   function openCategory(name: string) {
-    const txs = filtered.filter((t) => t.kind === kind && t.category === name);
+    // When drilling into an expense category, also show refunds tagged
+    // with that category — they're what shrank the total the user just
+    // clicked on, so it'd be confusing to hide them.
+    const matches = (t: Transaction) =>
+      (kind === "expense" ? affectsExpense(t.kind) : t.kind === kind) && t.category === name;
+    const txs = filtered.filter(matches);
     showDrill(name, txs, kind === "expense" ? "Расходы по категории" : "Доходы по категории");
   }
   function openSubcategory(fullName: string) {
-    const txs = filtered.filter((t) => t.kind === kind && t.categoryFull === fullName);
+    const matches = (t: Transaction) =>
+      (kind === "expense" ? affectsExpense(t.kind) : t.kind === kind) &&
+      t.categoryFull === fullName;
+    const txs = filtered.filter(matches);
     showDrill(
       fullName,
       txs,

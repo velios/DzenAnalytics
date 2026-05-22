@@ -1,5 +1,6 @@
 import type { Transaction } from "../types";
 import { groupByMonth, groupByCategory } from "./aggregations";
+import { affectsExpense, expenseDelta } from "./txKindStyle";
 
 export interface YearTopItem {
   name: string;
@@ -137,7 +138,8 @@ export function buildYearReview(
   let totalExpense = 0;
   for (const t of thisYear) {
     if (t.kind === "income") totalIncome += t.amountBase;
-    else if (t.kind === "expense") totalExpense += t.amountBase;
+    // Refund nets out of the year's expense; never inflates income.
+    else if (affectsExpense(t.kind)) totalExpense += expenseDelta(t);
   }
   const netFlow = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? netFlow / totalIncome : 0;
@@ -147,7 +149,7 @@ export function buildYearReview(
   let prevExpense = 0;
   for (const t of prevYear) {
     if (t.kind === "income") prevIncome += t.amountBase;
-    else if (t.kind === "expense") prevExpense += t.amountBase;
+    else if (affectsExpense(t.kind)) prevExpense += expenseDelta(t);
   }
   const prevNet = prevIncome - prevExpense;
   const dRel = (cur: number, prev: number) =>
@@ -181,15 +183,18 @@ export function buildYearReview(
 
   const payeeMap = new Map<string, { amount: number; count: number }>();
   for (const t of thisYear) {
-    if (t.kind !== "expense") continue;
+    // Include refunds so a year's top-payee total reflects net spend
+    // ("я заказал на 200к и вернул на 50к" → net 150к, не 200к).
+    if (!affectsExpense(t.kind)) continue;
     const key = t.payee || "—";
     const cur = payeeMap.get(key) || { amount: 0, count: 0 };
-    cur.amount += t.amountBase;
+    cur.amount += expenseDelta(t);
     cur.count++;
     payeeMap.set(key, cur);
   }
   const topPayees: YearTopItem[] = Array.from(payeeMap.entries())
     .map(([name, v]) => ({ name, amount: v.amount, count: v.count }))
+    .filter((p) => p.amount > 0) // fully refunded payees drop out
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 8);
 

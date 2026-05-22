@@ -21,7 +21,7 @@ import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
 import { formatMoney, formatNum } from "../lib/format";
-import { kindColorClass, kindSignGlyph } from "../lib/txKindStyle";
+import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
 type SortMode = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
@@ -116,6 +116,9 @@ export function TransactionsPage() {
     for (const t of searched) {
       if (t.kind === "income") inc += t.amountBase;
       else if (t.kind === "expense") exp += t.amountBase;
+      // Refunds reduce the displayed expense total in the feed
+      // footer — they're not earnings.
+      else if (t.kind === "refund") exp -= t.amountBase;
     }
     return { inc, exp, net: inc - exp, count: searched.length };
   }, [searched]);
@@ -177,7 +180,7 @@ export function TransactionsPage() {
       ...sorted.map((t) =>
         [
           t.date,
-          t.kind === "income" ? "доход" : t.kind === "expense" ? "расход" : "перевод",
+          kindLabel(t.kind),
           `"${t.categoryFull.replace(/"/g, '""')}"`,
           `"${(t.payee || "").replace(/"/g, '""')}"`,
           `"${(t.comment || "").replace(/"/g, '""')}"`,
@@ -357,6 +360,8 @@ function DayGroup({
     for (const t of txs) {
       if (t.kind === "income") inc += t.amountBase;
       else if (t.kind === "expense") exp += t.amountBase;
+      // Refund subtracts from the day header's expense total.
+      else if (t.kind === "refund") exp -= t.amountBase;
     }
     return { inc, exp, net: inc - exp };
   }, [txs]);
@@ -415,6 +420,7 @@ function Row({
   const template = hideDate ? GRID_COLS_NODATE : GRID_COLS_FULL;
   const amountColor = kindColorClass(tx.kind);
   const amountSign = kindSignGlyph(tx.kind);
+  const amountSignClass = kindGlyphClass(tx.kind);
 
   return (
     <div
@@ -459,7 +465,7 @@ function Row({
       <div
         className={`text-right tabular-nums font-medium whitespace-nowrap ${amountColor}`}
       >
-        {amountSign}
+        <span className={amountSignClass}>{amountSign}</span>
         {formatMoney(tx.amount, tx.currency)}
       </div>
       <div className="text-right">

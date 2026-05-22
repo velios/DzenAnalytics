@@ -1,6 +1,7 @@
 import type { Transaction } from "../types";
 import { ymKey, ymdKey } from "./format";
 import { periodKey } from "./period";
+import { affectsExpense, expenseDelta } from "./txKindStyle";
 
 export interface MonthBucket {
   ym: string;
@@ -350,17 +351,22 @@ export function buildStreamData(
   const byMonthCat = new Map<string, Map<string, number>>();
 
   for (const t of txs) {
-    if (t.kind !== kind) continue;
+    // For the expense view we also include refunds, but signed
+    // negative — so a refunded purchase shrinks its category's
+    // ribbon, matching how Zenmoney's own reports look.
+    const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
+    if (!include) continue;
     const ym = t.date.slice(0, 7);
     if (!ym) continue;
     monthsSet.add(ym);
-    totals.set(t.category, (totals.get(t.category) || 0) + t.amountBase);
+    const delta = kind === "expense" ? expenseDelta(t) : t.amountBase;
+    totals.set(t.category, (totals.get(t.category) || 0) + delta);
     let m = byMonthCat.get(ym);
     if (!m) {
       m = new Map();
       byMonthCat.set(ym, m);
     }
-    m.set(t.category, (m.get(t.category) || 0) + t.amountBase);
+    m.set(t.category, (m.get(t.category) || 0) + delta);
   }
 
   const topCats = Array.from(totals.entries())
@@ -801,9 +807,13 @@ export function yearOverYearMonthly(
   const months = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
   const totals = new Map<string, number>();
   for (const t of txs) {
-    if (t.kind !== kind) continue;
+    // Expense YoY nets refunds out of the same month they belong to;
+    // income YoY only counts true `income` (refunds are not income).
+    const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
+    if (!include) continue;
     const ym = t.date.slice(0, 7);
-    totals.set(ym, (totals.get(ym) || 0) + t.amountBase);
+    const delta = kind === "expense" ? expenseDelta(t) : t.amountBase;
+    totals.set(ym, (totals.get(ym) || 0) + delta);
   }
   const out: YoYPoint[] = [];
   for (let m = 0; m < 12; m++) {
@@ -901,10 +911,14 @@ export function applyCategoryFlags(
   let discretionary = 0;
   let unflagged = 0;
   for (const t of txs) {
-    if (t.kind !== "expense") continue;
-    if (fixedCategories.has(t.category)) fixed += t.amountBase;
-    else if (discretionaryCategories.has(t.category)) discretionary += t.amountBase;
-    else unflagged += t.amountBase;
+    if (!affectsExpense(t.kind)) continue;
+    // Refunds for a fixed/discretionary category subtract from that
+    // category's bucket — `expenseDelta` already returns a negative
+    // amount in that case, so we just add it through.
+    const delta = expenseDelta(t);
+    if (fixedCategories.has(t.category)) fixed += delta;
+    else if (discretionaryCategories.has(t.category)) discretionary += delta;
+    else unflagged += delta;
   }
   return { fixed, discretionary, unflagged };
 }
@@ -947,7 +961,9 @@ export function cumulativeNetAt(txs: Transaction[], date: string): number {
   let net = 0;
   for (const t of txs) {
     if (t.date > date) continue;
-    if (t.kind === "income") net += t.amountBase;
+    // Refund is a real cash inflow on the running cumulative net,
+    // same direction as income.
+    if (t.kind === "income" || t.kind === "refund") net += t.amountBase;
     else if (t.kind === "expense") net -= t.amountBase;
   }
   return net;
@@ -968,7 +984,8 @@ export function netWorthSeries(
     const d = ymdKey(t.date);
     if (!d) continue;
     let delta = 0;
-    if (t.kind === "income") delta += t.amountBase;
+    // Refund increments net worth on the day, like income.
+    if (t.kind === "income" || t.kind === "refund") delta += t.amountBase;
     else if (t.kind === "expense") delta -= t.amountBase;
     if (delta !== 0) days.set(d, (days.get(d) || 0) + delta);
   }
@@ -1002,7 +1019,12 @@ export function accountMonthlyDeltas(
     if (t.outcomeAccount === account && (t.kind === "expense" || t.kind === "transfer")) {
       delta -= t.amountBase;
     }
-    if (t.incomeAccount === account && (t.kind === "income" || t.kind === "transfer")) {
+    // Refund lands on the account's income side (the merchant gave
+    // money back) so it bumps the monthly delta upward.
+    if (
+      t.incomeAccount === account &&
+      (t.kind === "income" || t.kind === "refund" || t.kind === "transfer")
+    ) {
       delta += t.amountBase;
     }
     if (delta !== 0) map.set(ym, (map.get(ym) || 0) + delta);
@@ -1021,17 +1043,22 @@ export interface PayeeBucket {
 export function topPayees(txs: Transaction[], kind: "expense" | "income" = "expense", limit = 20): PayeeBucket[] {
   const map = new Map<string, PayeeBucket>();
   for (const t of txs) {
-    if (t.kind !== kind) continue;
+    // For the expense view, a refund to the same payee should reduce
+    // that payee's net spend ("I bought X then returned it" → net 0).
+    const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
+    if (!include) continue;
     const key = t.payee || "—";
     let b = map.get(key);
     if (!b) {
       b = { payee: key, total: 0, count: 0 };
       map.set(key, b);
     }
-    b.total += t.amountBase;
+    b.total += kind === "expense" ? expenseDelta(t) : t.amountBase;
     b.count++;
   }
+  // Drop fully-refunded payees (net 0) so they don't pollute the top.
   return Array.from(map.values())
+    .filter((b) => b.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, limit);
 }
@@ -1076,6 +1103,10 @@ export function groupByHashtag(txs: Transaction[]): TagBucket[] {
         map.set(tag, b);
       }
       if (t.kind === "income") b.income += t.amountBase;
+      // Refund shrinks the hashtag's expense bucket — without this
+      // it would be lumped into income (wrong: refund is reversal,
+      // not earnings) or expense (wrong direction).
+      else if (t.kind === "refund") b.expense -= t.amountBase;
       else b.expense += t.amountBase;
       b.count++;
       b.txIds.push(t.id);
@@ -1103,6 +1134,9 @@ export function dailyExpenseMap(txs: Transaction[]): Map<string, DayCell> {
       map.set(d, cell);
     }
     if (t.kind === "income") cell.income += t.amountBase;
+    // Refund nets out of the day's expense (used by Calendar
+    // heat-map). Without this it would be added on top.
+    else if (t.kind === "refund") cell.expense -= t.amountBase;
     else cell.expense += t.amountBase;
     cell.count++;
   }
@@ -1409,7 +1443,10 @@ export interface MonthSpike {
 export function detectMonthSpikes(txs: Transaction[], minRatio = 1.5): MonthSpike[] {
   const monthsCats = new Map<string, Map<string, number>>();
   for (const t of txs) {
-    if (t.kind !== "expense") continue;
+    // Net refunds against the same-month/category total — otherwise
+    // a "category jumped 2× this month" alert would fire even when
+    // the user fully returned the purchases.
+    if (!affectsExpense(t.kind)) continue;
     const ym = t.date.slice(0, 7);
     if (!ym) continue;
     let mc = monthsCats.get(ym);
@@ -1417,7 +1454,7 @@ export function detectMonthSpikes(txs: Transaction[], minRatio = 1.5): MonthSpik
       mc = new Map();
       monthsCats.set(ym, mc);
     }
-    mc.set(t.category, (mc.get(t.category) || 0) + t.amountBase);
+    mc.set(t.category, (mc.get(t.category) || 0) + expenseDelta(t));
   }
 
   const sortedMonths = Array.from(monthsCats.keys()).sort();
@@ -1467,7 +1504,10 @@ export function categoryMonthlySeries(
 ): CategoryMonthPoint[] {
   const map = new Map<string, CategoryMonthPoint>();
   for (const t of txs) {
-    if (t.kind !== kind) continue;
+    // Expense series nets refunds against the same month; income
+    // series is unaffected (refunds are not income).
+    const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
+    if (!include) continue;
     const matches = level === "top" ? t.category === category : t.categoryFull === category;
     if (!matches) continue;
     const ym = t.date.slice(0, 7);
@@ -1477,7 +1517,7 @@ export function categoryMonthlySeries(
       p = { ym, total: 0, count: 0 };
       map.set(ym, p);
     }
-    p.total += t.amountBase;
+    p.total += kind === "expense" ? expenseDelta(t) : t.amountBase;
     p.count++;
   }
   const allMonths = new Set<string>();

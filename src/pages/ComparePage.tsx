@@ -14,6 +14,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { computeKPI, groupByCategory } from "../lib/aggregations";
+import { affectsExpense } from "../lib/txKindStyle";
 import {
   formatMoney,
   formatPct,
@@ -197,7 +198,7 @@ export function ComparePage() {
   }
   function openCategoryInPeriod(category: string, label: "A" | "B") {
     const txs = (label === "A" ? txsA : txsB).filter(
-      (t) => t.kind === "expense" && t.category === category
+      (t) => affectsExpense(t.kind) && t.category === category
     );
     const range = label === "A" ? ranges.a : ranges.b;
     showDrill(`${category} · ${range.label}`, txs, `Расходы в периоде ${label}`);

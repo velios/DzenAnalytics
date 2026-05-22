@@ -36,6 +36,7 @@ import {
   chartGridStroke,
   chartAxisStroke,
 } from "../lib/format";
+import { affectsExpense } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
@@ -112,10 +113,14 @@ export function TrendsPage() {
     );
   }
 
+  // Expense-side drill-downs include refunds so the rows in the
+  // drawer add up to the net figure the user clicked on.
+  const matchesKind = (k: typeof kind | "refund") =>
+    kind === "expense" ? affectsExpense(k) : k === kind;
   function openCategoryMonth(cat: string, ym: string) {
     const txs = filtered.filter(
       (t) =>
-        t.kind === kind &&
+        matchesKind(t.kind) &&
         (level === "top" ? t.category === cat : t.categoryFull === cat) &&
         t.date.slice(0, 7) === ym
     );
@@ -123,7 +128,7 @@ export function TrendsPage() {
   }
 
   function openDay(dow: number) {
-    const txs = filtered.filter((t) => t.kind === kind && new Date(t.date).getDay() === dow);
+    const txs = filtered.filter((t) => matchesKind(t.kind) && new Date(t.date).getDay() === dow);
     const name = ["воскресеньям", "понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам"][dow];
     showDrill(`Все по ${name}`, txs, "День недели");
   }

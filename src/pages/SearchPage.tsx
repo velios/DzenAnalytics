@@ -3,6 +3,7 @@ import { Search, Calendar, Coins, Tag, X, ArrowUpDown } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { formatMoney, formatDate, formatNum } from "../lib/format";
+import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import type { Transaction } from "../types";
 
@@ -96,6 +97,10 @@ export function SearchPage() {
     for (const t of matches) {
       if (t.kind === "income") inc += t.amountBase;
       else if (t.kind === "expense") exp += t.amountBase;
+      // Refund nets out of the expense total in the search summary —
+      // a result set with «one purchase + its refund» should show
+      // zero expense, not double-count.
+      else if (t.kind === "refund") exp -= t.amountBase;
     }
     return { inc, exp, net: inc - exp };
   }, [matches]);
@@ -330,11 +335,10 @@ export function SearchPage() {
                       {t.account}
                     </td>
                     <td
-                      className={`table-td text-right tabular-nums font-medium whitespace-nowrap ${
-                        t.kind === "income" ? "text-income" : "text-expense"
-                      }`}
+                      className={`table-td text-right tabular-nums font-medium whitespace-nowrap ${kindColorClass(t.kind)}`}
+                      title={t.kind === "refund" ? "Возврат — уменьшает расход категории" : undefined}
                     >
-                      {t.kind === "income" ? "+" : "−"}
+                      <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
                       {formatMoney(t.amount, t.currency)}
                     </td>
                   </tr>
