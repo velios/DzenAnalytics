@@ -20,7 +20,7 @@ import {
   sendPush,
   type PushBuildResult,
 } from "../lib/zenmoneyPush";
-import { takeSnapshot } from "../lib/cloudSnapshots";
+import { loadSnapshotIndex, takeSnapshot } from "../lib/cloudSnapshots";
 import { useDataStore } from "./useDataStore";
 import { useCalibrationStore } from "./useCalibrationStore";
 import { useCategoryMetaStore } from "./useCategoryMetaStore";
@@ -32,6 +32,20 @@ const TIMESTAMP_KEY = "zenmoneyServerTimestamp";
 const LAST_SYNC_KEY = "zenmoneyLastSyncAt";
 const PUSH_ENABLED_KEY = "zenmoneyPushEnabled";
 const LAST_PUSH_KEY = "zenmoneyLastPushAt";
+const SNAPSHOT_POLICY_KEY = "zenmoneySnapshotPolicy";
+
+/**
+ * When to take a cloud safety snapshot before pushing local edits.
+ *   • "always" — every push triggers a full diff (slowest, safest;
+ *     used during debugging).
+ *   • "daily"  — at most once per 24h. Snapshot is skipped if a fresh
+ *     one already exists. Sensible default for everyday use.
+ *   • "never"  — no automatic snapshots. User can still take them
+ *     manually from Settings.
+ */
+export type SnapshotPolicy = "always" | "daily" | "never";
+const SNAPSHOT_POLICY_DEFAULT: SnapshotPolicy = "daily";
+const DAILY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type SyncStatus = "idle" | "checking" | "syncing" | "ok" | "error";
 
@@ -111,6 +125,8 @@ interface ZenmoneyState {
   pushError: string | null;
   /** Last push result (counts of pushed / skipped). */
   lastPushResult: PushResult | null;
+  /** How often to auto-snapshot before push. See `SnapshotPolicy`. */
+  snapshotPolicy: SnapshotPolicy;
 
   hydrate: () => Promise<void>;
   saveToken: (token: string) => Promise<void>;
@@ -125,6 +141,7 @@ interface ZenmoneyState {
   sync: (opts?: { force?: boolean }) => Promise<SyncResult>;
 
   setPushEnabled: (enabled: boolean) => Promise<void>;
+  setSnapshotPolicy: (policy: SnapshotPolicy) => Promise<void>;
   /**
    * Push all currently-pending local edits (`useEditsStore.edits`) to
    * Zenmoney via `POST /v8/diff/`. Side effects:
@@ -153,21 +170,25 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   pushStatus: "idle",
   pushError: null,
   lastPushResult: null,
+  snapshotPolicy: SNAPSHOT_POLICY_DEFAULT,
 
   hydrate: async () => {
-    const [token, ts, last, pushEnabled, lastPushAt] = await Promise.all([
-      db.loadJSON<string>(TOKEN_KEY),
-      db.loadJSON<number>(TIMESTAMP_KEY),
-      db.loadJSON<string>(LAST_SYNC_KEY),
-      db.loadJSON<boolean>(PUSH_ENABLED_KEY),
-      db.loadJSON<string>(LAST_PUSH_KEY),
-    ]);
+    const [token, ts, last, pushEnabled, lastPushAt, snapshotPolicy] =
+      await Promise.all([
+        db.loadJSON<string>(TOKEN_KEY),
+        db.loadJSON<number>(TIMESTAMP_KEY),
+        db.loadJSON<string>(LAST_SYNC_KEY),
+        db.loadJSON<boolean>(PUSH_ENABLED_KEY),
+        db.loadJSON<string>(LAST_PUSH_KEY),
+        db.loadJSON<SnapshotPolicy>(SNAPSHOT_POLICY_KEY),
+      ]);
     set({
       token: token || null,
       serverTimestamp: ts || 0,
       lastSyncAt: last || null,
       pushEnabled: pushEnabled === true,
       lastPushAt: lastPushAt || null,
+      snapshotPolicy: snapshotPolicy || SNAPSHOT_POLICY_DEFAULT,
       loaded: true,
     });
   },
@@ -308,6 +329,11 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     set({ pushEnabled: enabled, pushError: null });
   },
 
+  setSnapshotPolicy: async (policy) => {
+    await db.saveJSON(SNAPSHOT_POLICY_KEY, policy);
+    set({ snapshotPolicy: policy });
+  },
+
   pushPendingEdits: async () => {
     const { token, pushEnabled } = get();
     if (!token) {
@@ -322,19 +348,39 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     }
     set({ pushStatus: "syncing", pushError: null });
     try {
-      // 1) Phase 0 safety net — always snapshot what's in cloud right
-      //    before we touch anything. If push misbehaves, this is the
-      //    rollback source of truth.
+      // 1) Phase 0 safety net — snapshot what's in cloud right before
+      //    we touch anything. Frequency depends on `snapshotPolicy`:
+      //      • "always" → every push (slow but bulletproof; debug-mode)
+      //      • "daily"  → only if no snapshot in the last 24h
+      //      • "never"  → user opted out; they take manual snapshots
+      //    If push misbehaves, the most recent snapshot is the rollback
+      //    source of truth.
       let snapshotId: string | null = null;
-      try {
-        const snap = await takeSnapshot(token);
-        snapshotId = snap.id;
-      } catch (e) {
-        // Snapshot failure shouldn't strand the user — log via state.error
-        // but proceed with the push. The risk is bounded: Phase 1 only
-        // updates existing transactions and we have the recent cache.
-        // eslint-disable-next-line no-console
-        console.warn("Pre-push snapshot failed:", e);
+      const policy = get().snapshotPolicy;
+      let shouldSnapshot = false;
+      if (policy === "always") {
+        shouldSnapshot = true;
+      } else if (policy === "daily") {
+        const idx = await loadSnapshotIndex();
+        const newest = idx[0]; // sorted newest first by loadSnapshotIndex
+        shouldSnapshot =
+          !newest || Date.now() - newest.createdAt >= DAILY_WINDOW_MS;
+        // Surface the most-recent snapshot id even when we skipped
+        // taking a new one — the UI can show "snapshot already exists"
+        // rather than blank.
+        if (!shouldSnapshot && newest) snapshotId = newest.id;
+      }
+      if (shouldSnapshot) {
+        try {
+          const snap = await takeSnapshot(token);
+          snapshotId = snap.id;
+        } catch (e) {
+          // Snapshot failure shouldn't strand the user — log to console
+          // but proceed with the push. The risk is bounded: Phase 1 only
+          // updates existing transactions and we have the recent cache.
+          // eslint-disable-next-line no-console
+          console.warn("Pre-push snapshot failed:", e);
+        }
       }
 
       // 2) Build push items from the current overlay.

@@ -34,6 +34,7 @@ import {
 import clsx from "clsx";
 import { useThemeStore } from "../store/useThemeStore";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { CloudSyncQuickActions } from "./CloudSyncQuickActions";
 import logoHorizontal from "../assets/logo-horizontal.svg";
 import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
 
@@ -165,6 +166,8 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         >
           <Search className="w-4 h-4" />
         </button>
+
+        <CloudSyncQuickActions />
 
         <ThemeSwitcher />
 

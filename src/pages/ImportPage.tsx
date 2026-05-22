@@ -93,6 +93,8 @@ export function ImportPage() {
   const lastPushResult = useZenmoneyStore((s) => s.lastPushResult);
   const setPushEnabled = useZenmoneyStore((s) => s.setPushEnabled);
   const pushPendingEdits = useZenmoneyStore((s) => s.pushPendingEdits);
+  const snapshotPolicy = useZenmoneyStore((s) => s.snapshotPolicy);
+  const setSnapshotPolicy = useZenmoneyStore((s) => s.setSnapshotPolicy);
   // Pending edit count (the badge on the push button).
   const editsMap = useEditsStore((s) => s.edits);
   const editsLoaded = useEditsStore((s) => s.loaded);
@@ -1177,6 +1179,35 @@ export function ImportPage() {
                   ? "Снимков ещё не было"
                   : `${cloudSnapshots.length} из 5 слотов занято`}
               </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <span className="text-xs text-muted">Автоснимок перед push:</span>
+              <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
+                {(
+                  [
+                    ["always", "Каждый раз", "Безопаснее, медленнее. Для отладки."],
+                    ["daily", "Раз в день", "Если в последние 24ч уже был — пропускаем."],
+                    ["never", "Никогда", "Только вручную, кнопкой выше."],
+                  ] as const
+                ).map(([value, label, hint]) => {
+                  const active = snapshotPolicy === value;
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => setSnapshotPolicy(value)}
+                      title={hint}
+                      className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                        active
+                          ? "bg-accent text-accent-fg"
+                          : "text-muted hover:text-text"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {cloudSnapshotsError && (
