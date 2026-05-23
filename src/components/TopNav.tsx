@@ -34,6 +34,7 @@ import {
 import clsx from "clsx";
 import { useThemeStore } from "../store/useThemeStore";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { HeaderSyncActions } from "./HeaderSyncActions";
 import logoHorizontal from "../assets/logo-horizontal.svg";
 import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
 
@@ -42,11 +43,14 @@ const PRIMARY = [
   { to: "/transactions", label: "Операции", icon: ListChecks },
   { to: "/accounts", label: "Счета", icon: Wallet },
   { to: "/categories", label: "Категории", icon: PieChart },
-  { to: "/trends", label: "Тренды", icon: Activity },
-  { to: "/goals", label: "Цели", icon: Target },
 ];
 
+// Тренды и Цели жили в PRIMARY, но реже всего используются из шести
+// первичных пунктов — перенесли их в Ещё и поставили в самом начале
+// списка (перед Cash-flow), чтобы было легко найти.
 const SECONDARY = [
+  { to: "/trends", label: "Тренды", icon: Activity },
+  { to: "/goals", label: "Цели", icon: Target },
   { to: "/cashflow", label: "Cash-flow", icon: LineChart },
   { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/whatif", label: "Что-если", icon: FlaskConical },
@@ -149,14 +153,20 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         {/* Spacer on mobile pushes right group to the end */}
         <div className="flex-1 lg:hidden" />
 
+        {/* Command palette trigger. Widened (min/max width with
+            `justify-between`) so it reads more as a search field than
+            a button — the ⌘K hotkey sits flush right, leaving room for
+            the placeholder text to feel airier. */}
         <button
           onClick={onOpenPalette}
-          className="hidden md:flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs border bg-panel2 text-muted hover:text-text border-border"
+          className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border bg-panel2 text-muted hover:text-text border-border min-w-[220px] lg:min-w-[260px] justify-between"
           title="Командная палитра (Ctrl+K)"
         >
-          <Search className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">Команды…</span>
-          <kbd className="kbd hidden lg:inline-block">⌘K</kbd>
+          <span className="flex items-center gap-2 min-w-0">
+            <Search className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Команды…</span>
+          </span>
+          <kbd className="kbd hidden lg:inline-block shrink-0">⌘K</kbd>
         </button>
         <button
           onClick={onOpenPalette}
@@ -167,6 +177,12 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </button>
 
         <ThemeSwitcher />
+
+        {/* Zenmoney sync quick actions — incremental + full re-sync.
+            Hidden when no token is configured (CSV-mode users see a
+            clean header without dangling icons). Lives next to the
+            gear because that's where the token gets connected. */}
+        <HeaderSyncActions />
 
         {/* Settings — gear icon. Active style matches PRIMARY nav (bg-accent/10
             text-accent) so the whole header speaks one design language. */}
