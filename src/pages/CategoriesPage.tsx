@@ -46,21 +46,18 @@ const COLORS = [
 ];
 
 /**
- * Treemap text colour — uniform across all cells in a theme.
+ * Treemap text colour — uniform across all cells in both themes.
  *
  * We used to flip between black/white per-cell based on the fill's
- * perceived brightness (YIQ), which gave a confused, "patchwork" look:
- * some labels black, some white, all in the same chart. Users read it
- * as a bug. The new rule is dead-simple:
- *   • Light theme — dark text everywhere
- *   • Dark theme  — white text everywhere
- *
- * The label gets a faint `paint-order: stroke; stroke` halo in
- * `<TreemapCell>` so it stays readable even on a cell that approaches
- * the text colour (e.g. dark text on a dark-blue cell in light mode).
+ * perceived brightness (YIQ), which gave a confused, "patchwork" look.
+ * Then we settled on dark-text-on-light / white-text-on-dark, but the
+ * dark text on saturated cells (deep blue, pink) was hard to read and
+ * felt heavy. Final rule: white text everywhere — the treemap fills
+ * are already mid-to-saturated category colours that take a white
+ * label cleanly in both themes.
  */
-function readableTextOn(_color: string, theme: "light" | "dark"): string {
-  return theme === "dark" ? "#FFFFFF" : "#0B1120";
+function readableTextOn(_color: string, _theme: "light" | "dark"): string {
+  return "#FFFFFF";
 }
 
 function truncateToWidth(text: string, maxChars: number): string {
