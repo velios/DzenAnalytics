@@ -7,6 +7,7 @@ import { topPayees, topTransactions, groupByCategory, type CategoryBucket, type 
 import { SortableTable, type Column } from "../components/SortableTable";
 import type { Transaction } from "../types";
 import { formatMoney, formatDate, formatPct } from "../lib/format";
+import { affectsExpense } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
@@ -31,12 +32,17 @@ export function TopPage() {
   const payees = useMemo(() => topPayees(filtered, kind, 30), [filtered, kind]);
   const txs = useMemo(() => topTransactions(filtered, kind, 50), [filtered, kind]);
 
+  // Expense-side drill-downs include refunds for the same
+  // category/payee — they're what made the displayed net total
+  // smaller than the raw spend would suggest.
+  const matchesKind = (k: Transaction["kind"]) =>
+    kind === "expense" ? affectsExpense(k) : k === kind;
   function openCategoryFull(name: string) {
-    const list = filtered.filter((t) => t.kind === kind && t.categoryFull === name);
+    const list = filtered.filter((t) => matchesKind(t.kind) && t.categoryFull === name);
     showDrill(name, list, kind === "expense" ? "Расходы по категории" : "Доходы по категории");
   }
   function openPayee(name: string) {
-    const list = filtered.filter((t) => t.kind === kind && t.payee === name);
+    const list = filtered.filter((t) => matchesKind(t.kind) && t.payee === name);
     showDrill(name, list, kind === "expense" ? "Расходы получателю" : "Поступления от");
   }
   function openSingle(id: string) {

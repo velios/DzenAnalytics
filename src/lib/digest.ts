@@ -1,5 +1,6 @@
 import type { Transaction } from "../types";
 import { groupByCategory } from "./aggregations";
+import { expenseDelta } from "./txKindStyle";
 
 export type DigestPeriod = "week" | "month";
 
@@ -116,7 +117,11 @@ function aggregate(txs: Transaction[]): {
     if (t.kind === "transfer") continue;
     txCount++;
     if (t.kind === "income") income += t.amountBase;
-    else expense += t.amountBase;
+    // `expenseDelta` returns +amount for expense and -amount for
+    // refund, so refunds correctly net out of the period's expense
+    // total instead of inflating it (which is what the old
+    // `else expense += amount` branch did).
+    else expense += expenseDelta(t);
   }
   return { income, expense, net: income - expense, txCount };
 }

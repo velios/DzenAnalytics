@@ -5,6 +5,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useBudgetsStore } from "../store/useBudgetsStore";
 import { groupByCategory } from "../lib/aggregations";
 import { formatMoney } from "../lib/format";
+import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 
 function currentMonth(): string {
@@ -44,15 +45,18 @@ export function BudgetsPage() {
   const dom = dayOfMonth();
   const monthProgress = dom / dim;
 
+  // Budget tracking includes refunds — a returned purchase should
+  // bring the category's "spent" back down, otherwise the user
+  // would burn through their budget on a fully-refunded order.
   const monthTxs = useMemo(
-    () => transactions.filter((t) => t.kind === "expense" && t.date.startsWith(ym)),
+    () => transactions.filter((t) => affectsExpense(t.kind) && t.date.startsWith(ym)),
     [transactions, ym]
   );
 
   const spentByCat = useMemo(() => {
     const map = new Map<string, number>();
     for (const t of monthTxs) {
-      map.set(t.category, (map.get(t.category) || 0) + t.amountBase);
+      map.set(t.category, (map.get(t.category) || 0) + expenseDelta(t));
     }
     return map;
   }, [monthTxs]);

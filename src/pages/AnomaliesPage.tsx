@@ -5,6 +5,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { detectAnomalies, detectMonthSpikes, type Anomaly, type MonthSpike } from "../lib/aggregations";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { formatMoney, formatDate, monthLabel } from "../lib/format";
+import { affectsExpense } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 
 export function AnomaliesPage() {
@@ -27,8 +28,10 @@ export function AnomaliesPage() {
   }
 
   function openCategoryMonth(cat: string, ym: string) {
+    // Include refunds for the same category — they offset the spike
+    // total shown in the row, so they belong in the drilldown list.
     const txs = transactions.filter(
-      (t) => t.kind === "expense" && t.category === cat && t.date.startsWith(ym)
+      (t) => affectsExpense(t.kind) && t.category === cat && t.date.startsWith(ym)
     );
     showDrill(`${cat} · ${monthLabel(ym)}`, txs, "Всплеск трат");
   }

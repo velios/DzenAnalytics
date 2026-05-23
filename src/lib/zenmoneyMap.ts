@@ -162,6 +162,20 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       amount = income;
       currency = inCurrency;
       account = inAcc?.title || "";
+
+      // Refund detection: an income-side movement tagged with an
+      // *expense* category (a tag whose `showOutcome` is on while
+      // `showIncome` is off) is semantically a refund — money coming
+      // back from a previous purchase, not new income. Zenmoney shows
+      // these as "Возврат" and subtracts them from the category's
+      // expense total. We mirror that by classifying as `kind=refund`
+      // and letting the aggregations treat the amount as a negative
+      // expense rather than positive income. Tags with both flags on
+      // (rare, e.g. a custom dual-purpose tag) stay as `income`.
+      const firstTag = zt.tag && zt.tag.length > 0 ? tagsById.get(zt.tag[0]) : null;
+      if (firstTag && firstTag.showOutcome && !firstTag.showIncome) {
+        kind = "refund";
+      }
     }
 
     const cat = buildCategory(zt.tag, tagsById);

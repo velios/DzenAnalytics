@@ -66,6 +66,7 @@ import {
   chartAxisStroke,
   ymdKey,
 } from "../lib/format";
+import { affectsExpense } from "../lib/txKindStyle";
 import { AccountLogo } from "../components/AccountLogo";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -406,7 +407,9 @@ export function DashboardPage() {
     .slice(0, 5);
 
   function openCategory(name: string) {
-    const txs = transactions.filter((t) => t.kind === "expense" && t.category === name);
+    // Include refunds for that category — they're what made the
+    // displayed net total smaller in the chart the user clicked on.
+    const txs = transactions.filter((t) => affectsExpense(t.kind) && t.category === name);
     showDrill(name, txs, "Расходы по категории");
   }
 

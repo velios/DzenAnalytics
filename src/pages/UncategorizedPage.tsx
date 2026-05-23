@@ -9,6 +9,7 @@ import {
   type CategorySuggestion,
 } from "../lib/aggregations";
 import { formatMoney, formatDate, formatNum, formatPct } from "../lib/format";
+import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { SortableTable, type Column } from "../components/SortableTable";
 import type { Transaction } from "../types";
@@ -292,11 +293,10 @@ export function UncategorizedPage() {
                   sortValue: (t) => t.amountBase,
                   render: (t) => (
                     <span
-                      className={`tabular-nums whitespace-nowrap ${
-                        t.kind === "income" ? "text-income" : "text-expense"
-                      }`}
+                      className={`tabular-nums whitespace-nowrap ${kindColorClass(t.kind)}`}
+                      title={t.kind === "refund" ? "Возврат — уменьшает расход категории" : undefined}
                     >
-                      {t.kind === "income" ? "+" : "−"}
+                      <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
                       {formatMoney(t.amount, t.currency)}
                     </span>
                   ),

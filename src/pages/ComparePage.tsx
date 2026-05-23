@@ -14,6 +14,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { computeKPI, groupByCategory } from "../lib/aggregations";
+import { affectsExpense } from "../lib/txKindStyle";
 import {
   formatMoney,
   formatPct,
@@ -197,7 +198,7 @@ export function ComparePage() {
   }
   function openCategoryInPeriod(category: string, label: "A" | "B") {
     const txs = (label === "A" ? txsA : txsB).filter(
-      (t) => t.kind === "expense" && t.category === category
+      (t) => affectsExpense(t.kind) && t.category === category
     );
     const range = label === "A" ? ranges.a : ranges.b;
     showDrill(`${category} · ${range.label}`, txs, `Расходы в периоде ${label}`);
@@ -428,7 +429,16 @@ export function ComparePage() {
             <BarChart data={compareData} layout="vertical" margin={{ left: 100 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
               <XAxis type="number" stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
-              <YAxis type="category" dataKey="category" stroke={chartAxisStroke} fontSize={11} width={150} />
+              {/* interval={0} prevents Recharts from auto-skipping
+                  category labels when the list gets long. */}
+              <YAxis
+                type="category"
+                dataKey="category"
+                stroke={chartAxisStroke}
+                fontSize={11}
+                width={160}
+                interval={0}
+              />
               <Tooltip
                 {...chartTooltipProps}
                 formatter={(v: unknown) => formatMoney(toNum(v), base, { compact: true })}
