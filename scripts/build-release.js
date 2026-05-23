@@ -22,12 +22,21 @@ const releaseDir = join(ROOT, "release");
 const stagingDir = join(releaseDir, baseName);
 const zipPath = join(releaseDir, `${baseName}.zip`);
 
-// 1. Build standalone bundle if missing
+// 1. Build standalone bundle — ALWAYS from scratch.
+//
+// The previous "skip rebuild if file exists" heuristic looked like
+// a nice cache but silently shipped stale binaries: if dist-standalone
+// existed from a previous release, the script just rewrapped it under
+// a new version label without actually rebuilding the source. As a
+// result, v0.5.5 and v0.5.6 standalone zips both shipped v0.5.4-era
+// code. Always rebuilding costs ~10s of vite, and is the only way to
+// guarantee the binary matches the tag.
 const indexHtml = join(distDir, "index.html");
-if (!existsSync(indexHtml)) {
-  console.log("→ dist-standalone/index.html not found, running build:standalone…");
-  execSync("npm run build:standalone", { cwd: ROOT, stdio: "inherit" });
+if (existsSync(distDir)) {
+  rmSync(distDir, { recursive: true, force: true });
 }
+console.log("→ running build:standalone (clean build)…");
+execSync("npm run build:standalone", { cwd: ROOT, stdio: "inherit" });
 if (!existsSync(indexHtml)) {
   console.error("✗ build:standalone did not produce dist-standalone/index.html");
   process.exit(1);

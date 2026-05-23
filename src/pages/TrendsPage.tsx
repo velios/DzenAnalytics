@@ -37,6 +37,7 @@ import {
   chartAxisStroke,
 } from "../lib/format";
 import { affectsExpense } from "../lib/txKindStyle";
+import type { Transaction } from "../types";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
@@ -114,8 +115,11 @@ export function TrendsPage() {
   }
 
   // Expense-side drill-downs include refunds so the rows in the
-  // drawer add up to the net figure the user clicked on.
-  const matchesKind = (k: typeof kind | "refund") =>
+  // drawer add up to the net figure the user clicked on. Parameter
+  // is the full `TxKind` (incl. "transfer") because the callers pass
+  // `t.kind` straight in — the function just returns `false` for
+  // anything that isn't a match.
+  const matchesKind = (k: Transaction["kind"]) =>
     kind === "expense" ? affectsExpense(k) : k === kind;
   function openCategoryMonth(cat: string, ym: string) {
     const txs = filtered.filter(
