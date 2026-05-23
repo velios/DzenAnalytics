@@ -41,3 +41,11 @@ zen_*.csv
 # Claude Code local-only settings
 .claude/settings.local.json
 
+# AI-agent tooling (skills, lockfiles) — developer-local only,
+# not part of the project source. `.claude/launch.json` is kept
+# tracked because it's a project-level run config (akin to
+# `.vscode/launch.json`).
+.agents/
+.claude/skills/
+skills-lock.json
+
