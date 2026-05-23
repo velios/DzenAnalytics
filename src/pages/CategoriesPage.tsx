@@ -636,7 +636,21 @@ export function CategoriesPage() {
             >
               <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
               <XAxis type="number" stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
-              <YAxis type="category" dataKey="name" stroke={chartAxisStroke} fontSize={11} width={150} />
+              {/*
+                `interval={0}` forces Recharts to render *every* tick.
+                Without it the YAxis default (`preserveEnd`) starts
+                skipping labels when there are more bars than can be
+                spaced out — users were reporting bars with no label
+                next to them at the top of this chart.
+              */}
+              <YAxis
+                type="category"
+                dataKey="name"
+                stroke={chartAxisStroke}
+                fontSize={11}
+                width={160}
+                interval={0}
+              />
               <Tooltip
                 {...chartTooltipProps}
                 formatter={(v: unknown) => formatMoney(toNum(v), base, { compact: true })}

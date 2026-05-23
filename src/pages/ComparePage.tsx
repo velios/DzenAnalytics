@@ -429,7 +429,16 @@ export function ComparePage() {
             <BarChart data={compareData} layout="vertical" margin={{ left: 100 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
               <XAxis type="number" stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
-              <YAxis type="category" dataKey="category" stroke={chartAxisStroke} fontSize={11} width={150} />
+              {/* interval={0} prevents Recharts from auto-skipping
+                  category labels when the list gets long. */}
+              <YAxis
+                type="category"
+                dataKey="category"
+                stroke={chartAxisStroke}
+                fontSize={11}
+                width={160}
+                interval={0}
+              />
               <Tooltip
                 {...chartTooltipProps}
                 formatter={(v: unknown) => formatMoney(toNum(v), base, { compact: true })}
