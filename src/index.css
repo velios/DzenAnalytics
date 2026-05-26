@@ -26,8 +26,15 @@
   --c-bg: 11 17 32;
   --c-panel: 17 24 39;
   --c-panel2: 31 41 55;
-  --c-border: 31 41 55;
-  --c-muted: 107 114 128;
+  /* Border was the same colour as panel2 (#1f2937) — meaning any
+     bordered control on a panel2 background had an invisible edge.
+     Bumped to slate-700 (#334155) so cards, inputs, segmented
+     controls actually show their outline in dark mode. */
+  --c-border: 51 65 85;
+  /* Muted text was slate-500 (#6b7280) on panel2 (#1f2937) —
+     contrast about 4.0, borderline for AA. Slate-400 (#94a3b8) is
+     noticeably more legible without becoming attention-grabbing. */
+  --c-muted: 148 163 184;
   --c-text: 229 231 235;
   --c-accent: 34 211 238;
   --c-accent-fg: 15 23 42;

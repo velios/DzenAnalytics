@@ -181,7 +181,7 @@ export function HeaderSyncActions() {
             closing ? "animate-flash-out" : "animate-flash-in"
           )}
         >
-          <div className="flex items-stretch overflow-hidden rounded-lg border border-border bg-panel/70 backdrop-blur-md shadow-lg ring-1 ring-black/5">
+          <div className="flex items-stretch overflow-hidden rounded-lg border border-border bg-panel/70 backdrop-blur-md shadow-lg">
             {/* Tone accent bar — 3px wide, full height. Reads as a
                 "status stripe" so the chip itself can stay neutral. */}
             <div
