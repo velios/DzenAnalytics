@@ -44,6 +44,26 @@ export interface Transaction {
   categoryFullOriginal?: string;
   payee: string;
   payeeOriginal?: string;
+  /**
+   * Raw payee text exactly as the bank printed it
+   * (`ZenTransaction.originalPayee` from the API). Immutable —
+   * never modified by any pipeline. Useful as a "trust but verify"
+   * hint in the Edit modal when the user wonders where a weird name
+   * came from. Null on CSV imports (we only see one already-cleaned
+   * column there) and on transactions that pre-date Zenmoney's
+   * `originalPayee` field.
+   */
+  payeeRaw?: string | null;
+  /**
+   * Brand title from Zenmoney's curated merchant dictionary
+   * (`ZenTransaction.merchant` → `ZenMerchant.title`). Different from
+   * `payee` — payee is what's currently displayed (possibly cleaned
+   * by Zenmoney auto-grouping or our local pipeline), brand is the
+   * specific merchant entity the user / Zenmoney tagged the
+   * transaction with. Null when there's no brand attached. CSV
+   * imports always have null — only the API populates this field.
+   */
+  brand?: string | null;
   comment: string;
   outcomeAccount: string;
   outcomeAmount: number;

@@ -14,7 +14,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { CategoryDot } from "./CategoryDot";
 import { EditTransactionModal } from "./EditTransactionModal";
-import { formatMoney, formatDate } from "../lib/format";
+import { formatMoney, formatDate, displayPayee, secondaryPayee } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
@@ -307,10 +307,27 @@ export function TransactionsDrawer() {
                         </div>
                       )}
                     </td>
-                    <td className="table-td max-w-[180px] truncate" title={transferCounterparty(t) || t.payee}>
-                      {t.payee || transferCounterparty(t) || (
-                        <span className="text-muted">—</span>
-                      )}
+                    {/* Brand (Zenmoney-curated) is the primary line;
+                        raw payee text goes under it small-muted when
+                        it differs. Tooltip shows the full pair. */}
+                    <td className="table-td max-w-[180px]">
+                      {(() => {
+                        const primary = displayPayee(t) || transferCounterparty(t) || "";
+                        const secondary = secondaryPayee(t);
+                        const tooltip = secondary ? `${primary} — ${secondary}` : primary;
+                        return (
+                          <div className="min-w-0">
+                            <div className="truncate" title={tooltip}>
+                              {primary || <span className="text-muted">—</span>}
+                            </div>
+                            {secondary && (
+                              <div className="truncate text-[10px] text-muted/80" title={secondary}>
+                                {secondary}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="table-td max-w-[260px] text-xs text-muted">
                       <div className="line-clamp-2" title={t.comment}>

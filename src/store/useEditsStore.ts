@@ -19,6 +19,10 @@ export type EditableField =
   | "subcategory"
   | "categoryFull"
   | "payee"
+  // Zenmoney-curated brand (separate from raw payee). Lets the user
+  // override or set a brand when working with API data, and provides
+  // a way to attach brands manually on CSV imports.
+  | "brand"
   | "comment"
   | "amount"
   | "currency"

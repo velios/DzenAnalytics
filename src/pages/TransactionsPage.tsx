@@ -20,7 +20,7 @@ import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
-import { formatMoney, formatNum } from "../lib/format";
+import { formatMoney, formatNum, displayPayee, secondaryPayee } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
@@ -451,10 +451,28 @@ function Row({
           </div>
         )}
       </div>
-      <div className="truncate" title={tx.payee || transferCounterparty(tx) || ""}>
-        {tx.payee || transferCounterparty(tx) || (
-          <span className="text-muted">—</span>
-        )}
+      {/* Show brand (Zenmoney's curated name) as the primary payee
+          line. Raw bank-statement text (`tx.payee`) goes underneath
+          in muted small if it differs — keeps the "WB-MOSCOW-12345"
+          info visible without dominating. Tooltip shows both. */}
+      <div className="min-w-0">
+        {(() => {
+          const primary = displayPayee(tx) || transferCounterparty(tx) || "";
+          const secondary = secondaryPayee(tx);
+          const tooltip = secondary ? `${primary} — ${secondary}` : primary;
+          return (
+            <>
+              <div className="truncate" title={tooltip}>
+                {primary || <span className="text-muted">—</span>}
+              </div>
+              {secondary && (
+                <div className="truncate text-[10px] text-muted/80" title={secondary}>
+                  {secondary}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
       <div className="text-xs text-muted truncate" title={tx.comment || ""}>
         {tx.comment || ""}

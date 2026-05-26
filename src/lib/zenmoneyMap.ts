@@ -91,6 +91,12 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
   const instrumentsById = new Map<number, ZenInstrument>(
     diff.instrument.map((i) => [i.id, i])
   );
+  // Merchant dictionary — Zenmoney's curated brand catalogue. Each
+  // transaction can carry a `merchant` id pointing into this; we
+  // resolve to the brand title and store it on `Transaction.brand`.
+  const merchantsById = new Map<string, string>(
+    (diff.merchant || []).map((m) => [m.id, m.title])
+  );
 
   // Base currency comes from the user record (instrument id of their default).
   const userCurrencyId = diff.user[0]?.currency;
@@ -220,6 +226,17 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       categoryFullOriginal: display.full,
       payee: zt.payee || "",
       payeeOriginal: zt.payee || "",
+      // Raw bank-statement text — the unmodified value. Captured here
+      // for info only (Edit-modal hint, debugging weird names). NOT
+      // used by the payee-grouping pipeline; that still operates on
+      // `payeeOriginal` so the user's Zenmoney-side fixes survive a
+      // re-sync.
+      payeeRaw: zt.originalPayee || null,
+      // Resolve brand from the merchant dictionary. `zt.merchant` is
+      // an id pointing into `merchantsById`; null when Zenmoney hasn't
+      // attached a brand (older transactions, ones the user explicitly
+      // un-branded, or pre-brand-feature data).
+      brand: zt.merchant ? merchantsById.get(zt.merchant) || null : null,
       comment: zt.comment || "",
       outcomeAccount: outAcc?.title || "",
       outcomeAmount: outcome,

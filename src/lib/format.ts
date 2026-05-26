@@ -1,5 +1,29 @@
 import type { CSSProperties } from "react";
-import type { Currency } from "../types";
+import type { Currency, Transaction } from "../types";
+
+/**
+ * Primary display name for a transaction's counterparty. Prefers the
+ * Zenmoney-curated brand (cleaner: "Wildberries" instead of
+ * "WB-RU-MOSCOW-12345") and falls back to raw payee text. CSV-mode
+ * transactions never have `brand`, so they always show `payee`.
+ */
+export function displayPayee(t: Pick<Transaction, "payee" | "brand">): string {
+  return (t.brand && t.brand.trim()) || t.payee || "";
+}
+
+/**
+ * Raw payee value to show as a secondary line / tooltip *when* it
+ * differs from the brand. Returns null if there's no brand or the
+ * payee is already the same string — avoids the noisy "Wildberries /
+ * Wildberries" double-render.
+ */
+export function secondaryPayee(t: Pick<Transaction, "payee" | "brand">): string | null {
+  if (!t.brand) return null;
+  const payee = (t.payee || "").trim();
+  const brand = t.brand.trim();
+  if (!payee || payee === brand) return null;
+  return payee;
+}
 
 const symbolByCurrency: Record<string, string> = {
   RUB: "₽",

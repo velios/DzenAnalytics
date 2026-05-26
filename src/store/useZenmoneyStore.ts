@@ -60,6 +60,22 @@ export async function getLiveAccountsFromCache(): Promise<LiveAccount[] | null> 
   }));
 }
 
+/**
+ * Full brand titles list from the Zenmoney merchant dictionary.
+ * That's broader than "brands that appear in the user's transactions" —
+ * it includes brands the user has set up but never charged through,
+ * brands attached only to deleted operations, etc. Returns null when
+ * there's no Zenmoney cache (CSV-only users).
+ */
+export async function getBrandTitlesFromCache(): Promise<string[] | null> {
+  const cache = await loadZenCache();
+  if (!cache) return null;
+  return cache.merchants
+    .map((m) => m.title.trim())
+    .filter((t) => t.length > 0)
+    .sort((a, b) => a.localeCompare(b, "ru"));
+}
+
 export interface SyncResult {
   count: number;
   currentBalance: number;

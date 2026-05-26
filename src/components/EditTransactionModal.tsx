@@ -3,6 +3,7 @@ import { Pencil, RotateCcw, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, U
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
+import { getBrandTitlesFromCache } from "../store/useZenmoneyStore";
 import { Combobox } from "./Combobox";
 import type { Transaction, TxKind } from "../types";
 
@@ -82,20 +83,36 @@ export function EditTransactionModal({ tx, onClose }: Props) {
     };
   }, [allTransactions, kind, categoryMeta]);
 
-  // Payee suggestions: every non-empty payee that's appeared in user's data.
-  // Sorted by frequency desc, so the names you use most often surface first
-  // when you open the dropdown with an empty query.
+  // Combined "Получатель" suggestions — Zenmoney calls these
+  // "merchants" / "Бренды" in their UI but in the API there's no
+  // distinction between curated brands and user-created entries, so
+  // we treat them as one flat list. Source priority:
+  //   1) Full merchant dictionary from the Zenmoney cache (async).
+  //   2) `brand` values seen in the user's transactions (fallback for
+  //      CSV-only users + a safety net in case the cache lookup races).
+  //   3) Historical `payee` values — what the bank ever printed.
+  // Deduped, sorted alphabetically.
+  const [cachedBrands, setCachedBrands] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getBrandTitlesFromCache().then((list) => {
+      if (!cancelled) setCachedBrands(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const payeeOptions = useMemo(() => {
-    const counts = new Map<string, number>();
+    const set = new Set<string>();
+    if (cachedBrands) for (const b of cachedBrands) set.add(b);
     for (const t of allTransactions) {
+      const b = t.brand?.trim();
+      if (b) set.add(b);
       const p = t.payee?.trim();
-      if (!p) continue;
-      counts.set(p, (counts.get(p) ?? 0) + 1);
+      if (p) set.add(p);
     }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ru"))
-      .map(([p]) => p);
-  }, [allTransactions]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [cachedBrands, allTransactions]);
 
   // All account names ever used in the dataset (debit / cash / credit /
   // debt — anything that's appeared either as `account`, `outcomeAccount`
@@ -113,7 +130,13 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   const [date, setDate] = useState(tx.date);
   const [category, setCategory] = useState(tx.category);
   const [subcategory, setSubcategory] = useState(tx.subcategory ?? "");
-  const [payee, setPayee] = useState(tx.payee);
+  // Single "Получатель" field — saves into `brand`, which is the
+  // displayed counterparty name. Falls back to `tx.payee` for
+  // transactions that don't have a brand attached yet (CSV imports,
+  // unbranded operations). The raw bank-statement text (`tx.payee`)
+  // is left untouched in the data — it stays as the source of truth
+  // for what the bank actually printed.
+  const [payee, setPayee] = useState(tx.brand?.trim() || tx.payee || "");
   const [comment, setComment] = useState(tx.comment);
   const [amount, setAmount] = useState(String(tx.amount));
   const [currency, setCurrency] = useState(tx.currency);
@@ -150,11 +173,16 @@ export function EditTransactionModal({ tx, onClose }: Props) {
       // For transfers we have to keep both legs consistent: `account`
       // shadows the source (matches the original mapper convention),
       // `outcomeAccount` + `incomeAccount` carry the actual pair.
+      // The single "Получатель" UI field is the displayed counterparty
+      // name — saved into `brand`. The raw `payee` (bank-statement
+      // text) is preserved untouched as historical source-of-truth.
+      // Empty input → brand = null → display falls back to raw payee.
+      const payeeTrimmed = payee.trim();
       const patch: Record<string, unknown> = {
         date: safeDate,
         category: category.trim() || tx.category,
         subcategory: subcategory.trim() || null,
-        payee: payee.trim(),
+        brand: payeeTrimmed ? payeeTrimmed : null,
         comment: comment.trim(),
         amount: safeAmount,
         currency: currency.trim() || tx.currency,
@@ -316,8 +344,10 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               />
             </Field>
           </div>
-          {/* Payee — hidden for transfers (counterparty is the income
-              account, surfaced below in its own field). */}
+          {/* Single "Получатель" field — autocompletes from the
+              Zenmoney merchant dictionary plus historical raw-payee
+              strings. Hidden for transfers (counterparty there is the
+              income account, surfaced below in its own field). */}
           {kind !== "transfer" && (
             <Field label="Получатель">
               <Combobox
@@ -327,6 +357,19 @@ export function EditTransactionModal({ tx, onClose }: Props) {
                 placeholder="Введите или выберите из списка"
                 maxHeight={DROPDOWN_MAX}
               />
+              {tx.payeeRaw && tx.payeeRaw !== payee && (
+                // Honest "as printed by the bank" hint — uses the
+                // immutable `payeeRaw` (originalPayee from the API),
+                // not the possibly-edited `payee`. Helps the user
+                // figure out where a weird counterparty name came
+                // from. Hidden when raw equals current value.
+                <div
+                  className="text-[10px] text-muted/80 mt-1 truncate"
+                  title={tx.payeeRaw}
+                >
+                  В выписке: {tx.payeeRaw}
+                </div>
+              )}
             </Field>
           )}
           <Field label="Комментарий">
