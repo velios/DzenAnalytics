@@ -49,9 +49,11 @@ export function HeaderSyncActions() {
   }, [loaded, hydrate]);
 
   // Schedule: 5s visible, then 0.18s fade-out, then unmount.
+  // `closing` is reset in `setFlash(...)` callers (not here) so this
+  // effect can stay free of in-effect setState — matters for the
+  // react-hooks/set-state-in-effect lint rule and for cleaner renders.
   useEffect(() => {
     if (!flash) return;
-    setClosing(false);
     const tFade = setTimeout(() => setClosing(true), 5000);
     const tDrop = setTimeout(() => setFlash(null), 5000 + 200);
     return () => {
@@ -63,6 +65,14 @@ export function HeaderSyncActions() {
   if (!loaded || !token) return null;
 
   const busy = status === "syncing" || status === "checking";
+
+  // Helper that resets the closing flag before showing a new toast.
+  // Doing this here keeps the dismiss-effect free of inner setState
+  // calls (which the lint rule warns about).
+  function showFlash(next: { tone: "ok" | "err"; text: string }) {
+    setClosing(false);
+    setFlash(next);
+  }
 
   function formatResult(r: SyncResult): string {
     if (r.full) return `Полный синк: ${formatNum(r.count)} операций.`;
@@ -80,9 +90,9 @@ export function HeaderSyncActions() {
     setFlash(null);
     try {
       const r = await sync();
-      setFlash({ tone: "ok", text: formatResult(r) });
+      showFlash({ tone: "ok", text: formatResult(r) });
     } catch {
-      setFlash({ tone: "err", text: useZenmoneyStore.getState().error || "Ошибка синхронизации" });
+      showFlash({ tone: "err", text: useZenmoneyStore.getState().error || "Ошибка синхронизации" });
     }
   }
 
@@ -97,9 +107,9 @@ export function HeaderSyncActions() {
     setFlash(null);
     try {
       const r = await sync({ force: true });
-      setFlash({ tone: "ok", text: formatResult(r) });
+      showFlash({ tone: "ok", text: formatResult(r) });
     } catch {
-      setFlash({ tone: "err", text: useZenmoneyStore.getState().error || "Ошибка синхронизации" });
+      showFlash({ tone: "err", text: useZenmoneyStore.getState().error || "Ошибка синхронизации" });
     }
   }
 

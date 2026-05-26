@@ -1,0 +1,52 @@
+name: CI
+
+# Runs on every push and PR — catches the kind of bug that bit v0.5.5
+# and v0.5.6: a strict TypeScript error that `tsc --noEmit` glossed
+# over but `tsc -b` (which the release build uses) refused to compile.
+#
+# Two jobs:
+#   • build  — `npm run build` (= tsc -b + vite build). Required.
+#     Builds both the regular bundle and the standalone single-file
+#     bundle so we never ship a broken release.
+#   • lint   — `npm run lint`. NOT required yet — the project has
+#     pre-existing react-hooks/set-state-in-effect warnings we haven't
+#     paid down. Surfaces them as a status check but doesn't block.
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build (tsc -b + vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Regular build
+        run: npm run build
+      - name: Standalone build
+        run: npm run build:standalone
+
+  lint:
+    name: Lint (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Don't block merges on lint until we've paid down the existing
+    # warnings. Surfaces the number so we can watch it shrink.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
