@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Repeat, Calendar, AlertCircle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Repeat, Calendar, AlertCircle, TrendingUp, TrendingDown } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { detectRecurring, type RecurringCandidate } from "../lib/aggregations";
@@ -7,12 +7,37 @@ import { formatMoney, formatDate, formatNum } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { SortableTable, type Column } from "../components/SortableTable";
 
+// One pill per coarse cadence bucket, plus an "all" pseudo-option.
+// Order matches the user's likely usage frequency on this page:
+// most subscriptions are monthly, weekly is the next bucket, and
+// quarterly ones are the rare-but-meaningful tail.
+type CadenceFilter = "all" | "weekly" | "monthly" | "quarterly";
+const CADENCE_LABEL: Record<Exclude<CadenceFilter, "all">, string> = {
+  weekly: "Еженедельные",
+  monthly: "Ежемесячные",
+  quarterly: "Реже раза в месяц",
+};
+
 export function RecurringPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const showDrill = useDrillStore((s) => s.show);
 
-  const candidates = useMemo(() => detectRecurring(transactions), [transactions]);
+  const allCandidates = useMemo(() => detectRecurring(transactions), [transactions]);
+  const [cadenceFilter, setCadenceFilter] = useState<CadenceFilter>("all");
+  const [onlyPriceUp, setOnlyPriceUp] = useState(false);
+
+  const candidates = useMemo(() => {
+    return allCandidates.filter((c) => {
+      if (cadenceFilter !== "all" && c.cadence !== cadenceFilter) return false;
+      if (onlyPriceUp && c.priceTrend.priceFlag !== "up") return false;
+      return true;
+    });
+  }, [allCandidates, cadenceFilter, onlyPriceUp]);
+
+  const priceUpCount = allCandidates.filter(
+    (c) => c.priceTrend.priceFlag === "up"
+  ).length;
 
   if (transactions.length === 0) return <EmptyState />;
 
@@ -63,12 +88,72 @@ export function RecurringPage() {
           </div>
           <div className="text-xs text-muted mt-1">экстраполяция</div>
         </div>
-        <div className="card card-pad">
-          <div className="label mb-1">Ожидаются</div>
-          <div className="stat-num">{upcoming.length}</div>
-          <div className="text-xs text-muted mt-1">в ближайшие платежи</div>
-        </div>
+        {/* "Подорожали" — surfaces subscriptions where the last charge
+            jumped 10%+ above the historical average. Empty state when
+            nothing changed gets a neutral colour; otherwise warn-coloured
+            and clickable as a quick filter. */}
+        <button
+          type="button"
+          onClick={() => priceUpCount > 0 && setOnlyPriceUp((v) => !v)}
+          className={`card card-pad text-left transition-colors ${
+            priceUpCount > 0 ? "hover:border-warn cursor-pointer" : "cursor-default"
+          } ${onlyPriceUp ? "border-warn ring-1 ring-warn/30" : ""}`}
+          disabled={priceUpCount === 0}
+        >
+          <div className="label mb-1">Подорожали</div>
+          <div
+            className={`stat-num ${priceUpCount > 0 ? "text-warn" : "text-muted"}`}
+          >
+            {priceUpCount}
+          </div>
+          <div className="text-xs text-muted mt-1">
+            {priceUpCount > 0
+              ? "клик — показать только их"
+              : "за всю историю"}
+          </div>
+        </button>
       </div>
+
+      {/* Cadence filter — three mutually-exclusive pills + "Все". Hidden
+          when nothing has been detected yet (the empty-state card
+          handles that case). */}
+      {allCandidates.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted mr-1">Период:</span>
+          {(["all", "monthly", "weekly", "quarterly"] as const).map((c) => {
+            const label = c === "all" ? "Все" : CADENCE_LABEL[c];
+            const count =
+              c === "all"
+                ? allCandidates.length
+                : allCandidates.filter((x) => x.cadence === c).length;
+            const active = cadenceFilter === c;
+            return (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCadenceFilter(c)}
+                className={`px-3 py-1 rounded-full border transition-colors ${
+                  active
+                    ? "bg-accent/10 border-accent/40 text-accent"
+                    : "border-border text-muted hover:text-text"
+                }`}
+              >
+                {label}
+                <span className="ml-1.5 opacity-60">{count}</span>
+              </button>
+            );
+          })}
+          {onlyPriceUp && (
+            <button
+              type="button"
+              onClick={() => setOnlyPriceUp(false)}
+              className="px-3 py-1 rounded-full border border-warn/40 bg-warn/10 text-warn"
+            >
+              Только подорожавшие ×
+            </button>
+          )}
+        </div>
+      )}
 
       {candidates.length === 0 && (
         <div className="card card-pad text-center py-12">
@@ -158,6 +243,40 @@ export function RecurringPage() {
                       {formatMoney(c.avgAmount, c.currency, { compact: true })}
                     </span>
                   ),
+                },
+                {
+                  // Price-trend column — shows a small arrow + the %
+                  // change of the *last* charge vs. the historical
+                  // average. Empty cell for "flat" so the column stays
+                  // visually quiet on the (majority) stable subscriptions.
+                  key: "priceTrend",
+                  label: "Изменение",
+                  align: "right",
+                  sortValue: (c) => c.priceTrend.changePct,
+                  render: (c) => {
+                    const { priceFlag, changePct } = c.priceTrend;
+                    if (priceFlag === "flat") {
+                      return <span className="text-muted">—</span>;
+                    }
+                    const pct = (changePct * 100).toFixed(0);
+                    const Icon = priceFlag === "up" ? TrendingUp : TrendingDown;
+                    return (
+                      <span
+                        className={`inline-flex items-center gap-1 tabular-nums ${
+                          priceFlag === "up" ? "text-warn" : "text-income"
+                        }`}
+                        title={
+                          priceFlag === "up"
+                            ? "Последний платёж дороже исторического среднего"
+                            : "Последний платёж дешевле исторического среднего"
+                        }
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {priceFlag === "up" ? "+" : ""}
+                        {pct}%
+                      </span>
+                    );
+                  },
                 },
                 {
                   key: "avgInterval",

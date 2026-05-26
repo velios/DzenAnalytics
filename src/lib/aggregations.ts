@@ -1156,6 +1156,23 @@ export interface RecurringCandidate {
   nextExpected: string;
   totalSpent: number;
   txIds: string[];
+  /**
+   * Coarse interval category — derived from `avgIntervalDays`. Lets
+   * the UI offer "show only monthly / weekly / yearly subscriptions"
+   * pills without re-deriving from the day count.
+   */
+  cadence: "weekly" | "monthly" | "quarterly";
+  /**
+   * Price-change signal: compare the *last* observed amount vs. the
+   * mean of all *earlier* occurrences. Positive `changePct` = the
+   * subscription got more expensive on its most recent charge.
+   * Threshold for "noteworthy" is ±10% (see `priceFlag`).
+   *
+   *   • `priceFlag: "up"`   — last charge > avg × 1.10
+   *   • `priceFlag: "down"` — last charge < avg × 0.90
+   *   • `priceFlag: "flat"` — within ±10%
+   */
+  priceTrend: { changePct: number; priceFlag: "up" | "down" | "flat" };
 }
 
 export function detectRecurring(txs: Transaction[], minOccurrences = 3): RecurringCandidate[] {
@@ -1214,6 +1231,33 @@ export function detectRecurring(txs: Transaction[], minOccurrences = 3): Recurri
     const dominantCategory =
       Object.entries(cats).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
 
+    // Cadence bucket — derived once so the UI doesn't re-classify.
+    // Boundaries match the user's mental model: ~weekly = 5-9 days,
+    // ~monthly = 10-45 days, anything longer reads as "quarterly".
+    // (`detectRecurring` itself rejects intervals >95 days, so the
+    // tail of the distribution is bounded.)
+    const cadence: RecurringCandidate["cadence"] =
+      meanInterval < 10 ? "weekly" : meanInterval < 46 ? "monthly" : "quarterly";
+
+    // Price-change signal — compare the last observed amount with the
+    // mean of all *earlier* occurrences. Catches subscription price
+    // hikes ("Netflix went from 800 → 1100") and rare downward
+    // re-pricings. Need at least 2 earlier points to draw a baseline
+    // we can trust; otherwise flag as "flat".
+    let priceFlag: "up" | "down" | "flat" = "flat";
+    let changePct = 0;
+    if (list.length >= 3) {
+      const earlier = list.slice(0, -1);
+      const earlierMean =
+        earlier.reduce((s, t) => s + t.amount, 0) / earlier.length;
+      const lastAmt = list[list.length - 1].amount;
+      if (earlierMean > 0) {
+        changePct = (lastAmt - earlierMean) / earlierMean;
+        if (changePct > 0.1) priceFlag = "up";
+        else if (changePct < -0.1) priceFlag = "down";
+      }
+    }
+
     out.push({
       payee: list[0].payee,
       category: dominantCategory,
@@ -1227,6 +1271,8 @@ export function detectRecurring(txs: Transaction[], minOccurrences = 3): Recurri
       nextExpected: nextDate.toISOString().slice(0, 10),
       totalSpent,
       txIds: list.map((t) => t.id),
+      cadence,
+      priceTrend: { changePct, priceFlag },
     });
   }
 
