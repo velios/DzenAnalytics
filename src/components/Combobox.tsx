@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
+/**
+ * Optional grouped variant of the dropdown — items split into named
+ * sections with sticky-style headers. When `groups` is provided it
+ * takes precedence over `options`. Use for combo lists that mix
+ * meaningfully different sources (e.g. curated brand catalogue vs.
+ * historical payee strings) so the user can tell at a glance which
+ * bucket a given suggestion comes from.
+ */
+export interface ComboboxGroup {
+  label: string;
+  items: string[];
+}
+
 export interface ComboboxProps {
   value: string;
   options: string[];
+  /** Grouped variant — when present, supersedes `options`. */
+  groups?: ComboboxGroup[];
   onChange: (v: string) => void;
   placeholder?: string;
   /** Max popup height in CSS — defaults to "min(50vh, 320px)". */
@@ -24,6 +39,7 @@ export interface ComboboxProps {
 export function Combobox({
   value,
   options,
+  groups,
   onChange,
   placeholder,
   maxHeight = "min(50vh, 320px)",
@@ -58,6 +74,24 @@ export function Combobox({
     if (!q) return options;
     return options.filter((o) => o.toLowerCase().includes(q));
   }, [filtering, query, options]);
+
+  // Grouped variant: filter each group's items individually, then drop
+  // empty groups so the header doesn't render for sections with no
+  // matches. The total result is what we use for the empty-state check.
+  const filteredGroups = useMemo(() => {
+    if (!groups) return null;
+    const q = filtering ? query.trim().toLowerCase() : "";
+    return groups
+      .map((g) => ({
+        label: g.label,
+        items: q ? g.items.filter((i) => i.toLowerCase().includes(q)) : g.items,
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [groups, filtering, query]);
+
+  const popupHasItems = filteredGroups
+    ? filteredGroups.length > 0
+    : filtered.length > 0;
 
   function commit(next: string) {
     setQuery(next);
@@ -106,26 +140,54 @@ export function Combobox({
           />
         </button>
       </div>
-      {open && filtered.length > 0 && (
+      {open && popupHasItems && (
         <div
           className="absolute z-10 mt-1 w-full bg-panel border border-border rounded-lg shadow-lg overflow-y-auto"
           style={{ maxHeight }}
         >
-          {filtered.map((opt) => {
-            const isCurrent = opt === value;
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => commit(opt)}
-                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-panel2 ${
-                  isCurrent ? "bg-panel2/60 text-accent" : ""
-                }`}
-              >
-                {opt}
-              </button>
-            );
-          })}
+          {filteredGroups
+            ? filteredGroups.map((g) => (
+                <div key={g.label}>
+                  {/* Sticky-ish group header — distinct from list items
+                      so the user can tell at a glance "this section is
+                      brands from Дзен" vs "this section is what you've
+                      typed before". */}
+                  <div className="sticky top-0 px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-muted bg-panel border-b border-border/40">
+                    {g.label}
+                    <span className="ml-1.5 opacity-60">{g.items.length}</span>
+                  </div>
+                  {g.items.map((opt) => {
+                    const isCurrent = opt === value;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => commit(opt)}
+                        className={`w-full text-left px-3 py-1.5 text-sm hover:bg-panel2 ${
+                          isCurrent ? "bg-panel2/60 text-accent" : ""
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            : filtered.map((opt) => {
+                const isCurrent = opt === value;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => commit(opt)}
+                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-panel2 ${
+                      isCurrent ? "bg-panel2/60 text-accent" : ""
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
         </div>
       )}
     </div>

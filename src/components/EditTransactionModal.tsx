@@ -83,15 +83,17 @@ export function EditTransactionModal({ tx, onClose }: Props) {
     };
   }, [allTransactions, kind, categoryMeta]);
 
-  // Combined "Получатель" suggestions — Zenmoney calls these
-  // "merchants" / "Бренды" in their UI but in the API there's no
-  // distinction between curated brands and user-created entries, so
-  // we treat them as one flat list. Source priority:
-  //   1) Full merchant dictionary from the Zenmoney cache (async).
-  //   2) `brand` values seen in the user's transactions (fallback for
-  //      CSV-only users + a safety net in case the cache lookup races).
-  //   3) Historical `payee` values — what the bank ever printed.
-  // Deduped, sorted alphabetically.
+  // "Получатель" suggestions, served as two distinct groups so the
+  // user can tell at a glance which bucket a suggestion comes from:
+  //   1) "Получатели Дзен-мани" — everything that's been through
+  //      Zenmoney's merchant dictionary. Includes both global-catalog
+  //      brands (Wildberries, Магнит) AND user-created entries
+  //      ("Сосед Сёма"). The API gives no flag to distinguish the two,
+  //      so we don't try. The label says "получатели", not "бренды",
+  //      to avoid implying the list is the global brand catalog only.
+  //   2) "Из выписок банка" — raw payee strings that *don't* have a
+  //      merchant assigned. The bank's printout as-is, never touched
+  //      by Zenmoney's normalization.
   const [cachedBrands, setCachedBrands] = useState<string[] | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -102,17 +104,40 @@ export function EditTransactionModal({ tx, onClose }: Props) {
       cancelled = true;
     };
   }, []);
-  const payeeOptions = useMemo(() => {
-    const set = new Set<string>();
-    if (cachedBrands) for (const b of cachedBrands) set.add(b);
+  const payeeGroups = useMemo(() => {
+    const brandSet = new Set<string>();
+    if (cachedBrands) for (const b of cachedBrands) brandSet.add(b);
     for (const t of allTransactions) {
       const b = t.brand?.trim();
-      if (b) set.add(b);
-      const p = t.payee?.trim();
-      if (p) set.add(p);
+      if (b) brandSet.add(b);
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+    const payeeSet = new Set<string>();
+    for (const t of allTransactions) {
+      const p = t.payee?.trim();
+      if (p && !brandSet.has(p)) payeeSet.add(p);
+    }
+    const cmp = (a: string, b: string) => a.localeCompare(b, "ru");
+    const groups = [];
+    if (brandSet.size > 0) {
+      groups.push({
+        label: "Получатели Дзен-мани",
+        items: Array.from(brandSet).sort(cmp),
+      });
+    }
+    if (payeeSet.size > 0) {
+      groups.push({
+        label: "Из выписок банка",
+        items: Array.from(payeeSet).sort(cmp),
+      });
+    }
+    return groups;
   }, [cachedBrands, allTransactions]);
+  // Flat fallback — used by Combobox only when `groups` is empty
+  // (rare: no cache and no transactions yet).
+  const payeeOptions = useMemo(
+    () => payeeGroups.flatMap((g) => g.items),
+    [payeeGroups]
+  );
 
   // All account names ever used in the dataset (debit / cash / credit /
   // debt — anything that's appeared either as `account`, `outcomeAccount`
@@ -353,6 +378,7 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               <Combobox
                 value={payee}
                 options={payeeOptions}
+                groups={payeeGroups}
                 onChange={setPayee}
                 placeholder="Введите или выберите из списка"
                 maxHeight={DROPDOWN_MAX}
