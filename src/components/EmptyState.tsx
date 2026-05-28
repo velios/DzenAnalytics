@@ -11,7 +11,7 @@ export function EmptyState() {
           Загрузите CSV-выгрузку из Дзен-мани, чтобы увидеть аналитику
         </div>
       </div>
-      <Link to="/import" className="btn-primary">
+      <Link to="/settings" className="btn-primary">
         Загрузить CSV
       </Link>
     </div>

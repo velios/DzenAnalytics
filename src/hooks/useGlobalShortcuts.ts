@@ -55,7 +55,7 @@ export function useGlobalShortcuts(onOpenPalette: () => void) {
           r: "/recurring",
           s: "/search",
           h: "/help",
-          i: "/import",
+          i: "/settings",
           o: "/transactions",
         };
         if (map[k]) {

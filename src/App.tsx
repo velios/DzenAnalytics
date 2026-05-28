@@ -204,7 +204,10 @@ function App() {
         <Routes>
           <Route element={<PlainLayout />}>
             <Route path="/" element={<DashboardPage />} />
-            <Route path="/import" element={<ImportPage />} />
+            <Route path="/settings" element={<ImportPage />} />
+            {/* Backwards-compat: the settings page used to live at
+                /import. Redirect old bookmarks / shortcuts. */}
+            <Route path="/import" element={<Navigate to="/settings" replace />} />
             <Route path="/recurring" element={<RecurringPage />} />
             <Route path="/compare" element={<ComparePage />} />
             <Route path="/budgets" element={<BudgetsPage />} />

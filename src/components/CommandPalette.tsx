@@ -74,7 +74,12 @@ const PAGE_ITEMS: { path: string; title: string; icon: React.ComponentType<{ cla
   { path: "/search", title: "Поиск", icon: SearchPageIcon, aliases: ["search", "поиск"] },
   { path: "/rules", title: "Правила", icon: Wand2, aliases: ["rules"] },
   { path: "/help", title: "Справка", icon: HelpCircle, aliases: ["help", "docs"] },
-  { path: "/import", title: "Импорт", icon: Upload, aliases: ["import"] },
+  {
+    path: "/settings",
+    title: "Настройки",
+    icon: Upload,
+    aliases: ["settings", "настройки", "импорт", "import", "токен", "бэкап", "синхронизация"],
+  },
 ];
 
 function score(query: string, text: string, aliases: string[] = []): number {

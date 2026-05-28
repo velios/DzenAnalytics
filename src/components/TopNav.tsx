@@ -187,7 +187,7 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         {/* Settings — gear icon. Active style matches PRIMARY nav (bg-accent/10
             text-accent) so the whole header speaks one design language. */}
         <NavLink
-          to="/import"
+          to="/settings"
           title="Настройки"
           className={({ isActive }) =>
             clsx(
