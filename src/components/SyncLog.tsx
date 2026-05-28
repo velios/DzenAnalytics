@@ -145,7 +145,7 @@ export function SyncLog() {
                   <th className="font-medium px-2 py-2 w-6" />
                   <th className="font-medium px-2 py-2">Тип</th>
                   <th className="font-medium px-2 py-2">Дата-время</th>
-                  <th className="font-medium px-2 py-2">
+                  <th className="font-medium px-2 py-2 hidden md:table-cell">
                     <HeaderWithHint
                       label="Новых транзакций"
                       hint={
@@ -157,7 +157,7 @@ export function SyncLog() {
                       }
                     />
                   </th>
-                  <th className="font-medium px-2 py-2">
+                  <th className="font-medium px-2 py-2 hidden md:table-cell">
                     <HeaderWithHint
                       label="Всего транзакций"
                       hint={
@@ -167,7 +167,7 @@ export function SyncLog() {
                       }
                     />
                   </th>
-                  <th className="font-medium px-2 py-2">Длительность</th>
+                  <th className="font-medium px-2 py-2 hidden md:table-cell">Длительность</th>
                   <th className="font-medium px-2 py-2">Статус</th>
                 </tr>
               </thead>
@@ -275,13 +275,13 @@ function LogTableRow({
         <td className="px-2 py-2 align-top text-muted text-xs tabular-nums whitespace-nowrap">
           {new Date(entry.ts).toLocaleString("ru-RU")}
         </td>
-        <td className="px-2 py-2 align-top tabular-nums">
+        <td className="px-2 py-2 align-top tabular-nums hidden md:table-cell">
           {newCount !== undefined ? formatN(newCount) : "—"}
         </td>
-        <td className="px-2 py-2 align-top tabular-nums">
+        <td className="px-2 py-2 align-top tabular-nums hidden md:table-cell">
           {totalCount !== undefined ? formatN(totalCount) : "—"}
         </td>
-        <td className="px-2 py-2 align-top tabular-nums text-muted text-xs whitespace-nowrap">
+        <td className="px-2 py-2 align-top tabular-nums text-muted text-xs whitespace-nowrap hidden md:table-cell">
           {typeof entry.durationMs === "number"
             ? formatDuration(entry.durationMs)
             : "—"}

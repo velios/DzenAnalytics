@@ -49,11 +49,20 @@ export function ConfirmDialog() {
   }, [isOpen, close]);
 
   // Autofocus the confirm button when the dialog opens so Enter just
-  // works. Slight delay so React has actually mounted the button.
+  // works. On close, return focus to whatever was focused before the
+  // dialog opened (e.g. the delete button in a table row) — important
+  // for keyboard + screen-reader users who'd otherwise lose their place.
   useEffect(() => {
     if (!isOpen) return;
+    const prevFocused = document.activeElement as HTMLElement | null;
     const t = setTimeout(() => confirmBtnRef.current?.focus(), 30);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      // Only restore if the element is still in the DOM and focusable.
+      if (prevFocused && document.contains(prevFocused)) {
+        prevFocused.focus();
+      }
+    };
   }, [isOpen]);
 
   if (!isOpen || !options) return null;
@@ -78,6 +87,8 @@ export function ConfirmDialog() {
       onClick={() => close(false)}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={options.title ? "confirm-dialog-title" : undefined}
+      aria-describedby="confirm-dialog-message"
     >
       <div
         // Stop propagation so clicks inside the panel don't bubble
@@ -108,13 +119,19 @@ export function ConfirmDialog() {
           </div>
           <div className="flex-1 min-w-0">
             {options.title && (
-              <div className="font-semibold text-text mb-1 break-words">
+              <div
+                id="confirm-dialog-title"
+                className="font-semibold text-text mb-1 break-words"
+              >
                 {options.title}
               </div>
             )}
             {/* Render each \n-separated paragraph as its own line so
                 longer prompts stay readable. */}
-            <div className="text-sm text-muted whitespace-pre-line break-words">
+            <div
+              id="confirm-dialog-message"
+              className="text-sm text-muted whitespace-pre-line break-words"
+            >
               {options.message}
             </div>
           </div>

@@ -370,6 +370,7 @@ export function TransactionsDrawer() {
                         onClick={() => setEditing(t)}
                         className="p-1 text-muted/50 hover:text-text transition-colors"
                         title="Редактировать"
+                        aria-label="Редактировать операцию"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
@@ -377,6 +378,7 @@ export function TransactionsDrawer() {
                         onClick={() => handleDelete(t)}
                         className="p-1 text-muted/50 hover:text-expense transition-colors"
                         title="Удалить"
+                        aria-label="Удалить операцию"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
