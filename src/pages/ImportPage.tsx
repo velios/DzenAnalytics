@@ -52,6 +52,7 @@ import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
 import { formatNum, formatDate } from "../lib/format";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
+import { parseAndValidateBackup } from "../lib/backup";
 import * as db from "../lib/db";
 
 type Mode = "replace" | "merge";
@@ -418,11 +419,12 @@ export function ImportPage() {
     setBackupMsg(null);
     try {
       const text = await file.text();
-      const dump = JSON.parse(text);
-      if (!dump.version) throw new Error("Не похоже на бэкап DzenAnalytics");
-      if (dump.transactions) await db.saveTransactions(dump.transactions);
-      if (dump.rates) await db.saveRates(dump.rates);
-      if (dump.importMeta) await db.saveImportMeta(dump.importMeta);
+      // Validate + sanitize (type checks, prototype-pollution stripping,
+      // size/depth bounds) before anything touches IndexedDB.
+      const dump = parseAndValidateBackup(text) as unknown as Record<string, unknown>;
+      if (dump.transactions) await db.saveTransactions(dump.transactions as never);
+      if (dump.rates) await db.saveRates(dump.rates as never);
+      if (dump.importMeta) await db.saveImportMeta(dump.importMeta as never);
       const keys = ["budgets", "goals", "calibration", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping", "payeeAliases", "reportPeriod"];
       for (const k of keys) {
         if (dump[k] !== undefined) await db.saveJSON(k, dump[k]);
@@ -439,7 +441,10 @@ export function ImportPage() {
         aliasesHydrate(),
         reportPeriodHydrate(),
       ]);
-      setBackupMsg(`Восстановлено: ${formatNum((dump.transactions || []).length)} операций`);
+      const restoredCount = Array.isArray(dump.transactions)
+        ? dump.transactions.length
+        : 0;
+      setBackupMsg(`Восстановлено: ${formatNum(restoredCount)} операций`);
     } catch (e) {
       setBackupMsg(e instanceof Error ? `Ошибка: ${e.message}` : "Ошибка импорта backup'а");
     } finally {

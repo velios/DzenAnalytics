@@ -20,6 +20,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { groupByCategory } from "../lib/aggregations";
 import { formatNum } from "../lib/format";
+import { safeCompileRegex, safeTest } from "../lib/safeRegex";
 import { EmptyState } from "../components/EmptyState";
 
 const FIELDS: { value: RuleField; label: string }[] = [
@@ -90,6 +91,12 @@ export function RulesPage() {
   }
 
   function preview(rule: CategoryRule) {
+    // Pre-compile the regex once (ReDoS-guarded). Unsafe/invalid →
+    // null → no matches.
+    const re =
+      rule.op === "regex"
+        ? safeCompileRegex(rule.value, rule.caseInsensitive ? "iu" : "u")
+        : null;
     const matches = transactions.filter((t) => {
       let hay = "";
       switch (rule.field) {
@@ -102,6 +109,9 @@ export function RulesPage() {
         case "category":
           hay = t.categoryFullOriginal || t.categoryFull || "";
           break;
+      }
+      if (rule.op === "regex") {
+        return re ? safeTest(re, hay) : false;
       }
       let needle = rule.value;
       let h = hay;
@@ -116,23 +126,21 @@ export function RulesPage() {
           return h === needle;
         case "starts_with":
           return h.startsWith(needle);
-        case "regex":
-          try {
-            return new RegExp(rule.value, rule.caseInsensitive ? "iu" : "u").test(hay);
-          } catch {
-            return false;
-          }
       }
+      return false;
     });
     showDrill(`Совпадений: ${matches.length}`, matches, `Правило → ${rule.category}`);
   }
 
   if (transactions.length === 0) return <EmptyState />;
 
+  // Plain derived values (not useMemo) — they live after the early
+  // `return <EmptyState />` above, so hooks here would violate
+  // rules-of-hooks. Both are cheap O(n) passes.
   const enabledCount = rules.filter((r) => r.enabled).length;
-  const totalAffected = useMemo(() => {
-    return transactions.filter((t) => t.categoryFullOriginal && t.categoryFullOriginal !== t.categoryFull).length;
-  }, [transactions]);
+  const totalAffected = transactions.filter(
+    (t) => t.categoryFullOriginal && t.categoryFullOriginal !== t.categoryFull
+  ).length;
 
   return (
     <div className="space-y-6">
