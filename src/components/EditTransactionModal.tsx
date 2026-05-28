@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, RotateCcw, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2 } from "lucide-react";
+import { Pencil, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
-import { getBrandTitlesFromCache } from "../store/useZenmoneyStore";
+import { getBrandTitlesFromCache, useZenmoneyStore } from "../store/useZenmoneyStore";
+import { confirm } from "../store/useConfirmStore";
 import { Combobox } from "./Combobox";
 import type { Transaction, TxKind } from "../types";
 
@@ -22,9 +23,23 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   const allTransactions = useDataStore((s) => s.transactions);
   const reapply = useDataStore((s) => s.reapplyRules);
   const setEdit = useEditsStore((s) => s.setEdit);
-  const clearEdit = useEditsStore((s) => s.clearEdit);
-  const existing = useEditsStore((s) => s.edits[tx.id]);
-  const hasEdit = !!existing;
+  const deleteTransaction = useDataStore((s) => s.deleteTransaction);
+
+  async function handleDelete() {
+    const pushMode = useZenmoneyStore.getState().pushMode;
+    const ok = await confirm({
+      title: "Удалить операцию?",
+      message:
+        pushMode !== "off"
+          ? "Операция скроется из всех расчётов и списков. Так как включён Push, при следующей отправке она будет удалена и в облаке Дзен-мани — это необратимо в облаке."
+          : "Операция скроется из всех расчётов и списков. В облаке Дзен-мани она не тронется.",
+      confirmLabel: "Удалить",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await deleteTransaction(tx.id);
+    onClose();
+  }
 
   const [kind, setKind] = useState<TxKind>(tx.kind);
   const categoryMeta = useCategoryMetaStore((s) => s.meta);
@@ -194,60 +209,90 @@ export function EditTransactionModal({ tx, onClose }: Props) {
         Number.isFinite(amtNum) && amtNum >= 0 ? amtNum : tx.amount;
       const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : tx.date;
 
-      // Build the patch differently depending on the (possibly new) kind.
-      // For transfers we have to keep both legs consistent: `account`
-      // shadows the source (matches the original mapper convention),
-      // `outcomeAccount` + `incomeAccount` carry the actual pair.
-      // The single "Получатель" UI field is the displayed counterparty
-      // name — saved into `brand`. The raw `payee` (bank-statement
-      // text) is preserved untouched as historical source-of-truth.
-      // Empty input → brand = null → display falls back to raw payee.
-      const payeeTrimmed = payee.trim();
-      const patch: Record<string, unknown> = {
-        date: safeDate,
-        category: category.trim() || tx.category,
-        subcategory: subcategory.trim() || null,
-        brand: payeeTrimmed ? payeeTrimmed : null,
-        comment: comment.trim(),
-        amount: safeAmount,
-        currency: currency.trim() || tx.currency,
-        kind,
-      };
+      // Build a MINIMAL patch — only fields whose new value actually
+      // differs from the original transaction. This matters for the
+      // push pipeline: `buildPushItems` checks `edit.<field> !== undefined`
+      // to decide whether the user touched a field, so stashing every
+      // value here (even unchanged ones) would make a payee-only edit
+      // look like a type-or-account change and get rejected by Phase 1
+      // validation.
+      const patch: Record<string, unknown> = {};
+
+      // Helpers: trim both sides before comparing so a whitespace-only
+      // delta still registers as "no change", but a real edit always
+      // lands in the patch. Treating null/undefined as "" makes the
+      // comparison total.
+      const norm = (v: string | null | undefined) => (v ?? "").trim();
+      const changed = (next: string, before: string | null | undefined) =>
+        norm(next) !== norm(before);
+
+      if (safeDate !== tx.date) patch.date = safeDate;
+
+      const nextCategory = category.trim() || tx.category;
+      if (changed(nextCategory, tx.category)) patch.category = nextCategory;
+
+      const nextSubRaw = subcategory.trim();
+      const nextSub = nextSubRaw || null;
+      if (changed(nextSubRaw, tx.subcategory ?? "")) patch.subcategory = nextSub;
+
+      // Brand — single "Получатель" UI field maps to the brand field
+      // on the data model. Empty → null so display falls back to raw
+      // payee. The raw `payee` (bank-statement text) is preserved
+      // untouched as historical source-of-truth and never written here.
+      const nextBrand = payee.trim() || null;
+      if (norm(payee) !== norm(tx.brand ?? "")) patch.brand = nextBrand;
+
+      const nextComment = comment.trim();
+      if (changed(nextComment, tx.comment)) patch.comment = nextComment;
+
+      if (safeAmount !== tx.amount) patch.amount = safeAmount;
+
+      const nextCurrency = currency.trim() || tx.currency;
+      if (changed(nextCurrency, tx.currency)) patch.currency = nextCurrency;
+
+      if (kind !== tx.kind) patch.kind = kind;
+
       if (kind === "transfer") {
+        // For transfers we need both legs in sync. Whether or not the
+        // user actually changed any account, write all three so the
+        // pipeline never sees half-stale data. The push transformer
+        // will compare against the original to decide if it's a real
+        // change worth refusing.
         const src = outAcc.trim() || tx.outcomeAccount || tx.account;
         const dst = inAcc.trim() || tx.incomeAccount || "";
-        patch.outcomeAccount = src;
-        patch.incomeAccount = dst;
-        patch.account = src; // mapper convention: transfer rows live under source
+        if (
+          changed(src, tx.outcomeAccount) ||
+          changed(dst, tx.incomeAccount) ||
+          changed(src, tx.account)
+        ) {
+          patch.outcomeAccount = src;
+          patch.incomeAccount = dst;
+          patch.account = src; // mapper convention: transfer rows live under source
+        }
       } else {
-        patch.account = account.trim() || tx.account;
-        // Keep outcome/income aligned with the selected kind so charts
-        // that look at those fields directly don't see stale data.
-        // Refund is an income-side flow too — the merchant returned
-        // money TO the account — so the same convention as `income`
-        // applies for which leg gets the account id.
-        if (kind === "income" || kind === "refund") {
-          patch.incomeAccount = account.trim() || tx.account;
-          patch.outcomeAccount = "";
-        } else {
-          patch.outcomeAccount = account.trim() || tx.account;
-          patch.incomeAccount = "";
+        const nextAccount = account.trim() || tx.account;
+        if (changed(nextAccount, tx.account)) {
+          patch.account = nextAccount;
+          // Refund is an income-side flow too — the merchant returned
+          // money TO the account — so the same convention as `income`
+          // applies for which leg gets the account id.
+          if (kind === "income" || kind === "refund") {
+            patch.incomeAccount = nextAccount;
+            patch.outcomeAccount = "";
+          } else {
+            patch.outcomeAccount = nextAccount;
+            patch.incomeAccount = "";
+          }
         }
       }
 
-      await setEdit(tx.id, patch);
-      await reapply();
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  }
+      // Nothing changed — bail without writing an empty overlay entry.
+      if (Object.keys(patch).length === 0) {
+        onClose();
+        return;
+      }
 
-  async function reset() {
-    if (!hasEdit) return;
-    setSaving(true);
-    try {
-      await clearEdit(tx.id);
+      await setEdit(tx.id, patch);
       await reapply();
       onClose();
     } finally {
@@ -341,10 +386,16 @@ export function EditTransactionModal({ tx, onClose }: Props) {
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">
+            {/* Category / Subcategory — picker-only. Free-form text
+                is blocked (`allowCustom={false}`) so we can never end
+                up with a value that doesn't exist in Zenmoney's tag
+                dictionary — that'd just get rejected by the push
+                transformer with a "tag not found" error anyway. */}
             <Field label="Категория">
               <Combobox
                 value={category}
                 options={categoryOptions}
+                allowCustom={false}
                 maxHeight={DROPDOWN_MAX}
                 onChange={(next) => {
                   setCategory(next);
@@ -363,73 +414,17 @@ export function EditTransactionModal({ tx, onClose }: Props) {
                 options={Array.from(subcatByCategory.get(category) || []).sort(
                   (a, b) => a.localeCompare(b, "ru")
                 )}
+                allowCustom={false}
+                clearable
                 onChange={setSubcategory}
                 placeholder="—"
                 maxHeight={DROPDOWN_MAX}
               />
             </Field>
           </div>
-          {/* Single "Получатель" field — autocompletes from the
-              Zenmoney merchant dictionary plus historical raw-payee
-              strings. Hidden for transfers (counterparty there is the
-              income account, surfaced below in its own field). */}
-          {kind !== "transfer" && (
-            <Field label="Получатель">
-              <Combobox
-                value={payee}
-                options={payeeOptions}
-                groups={payeeGroups}
-                onChange={setPayee}
-                placeholder="Введите или выберите из списка"
-                maxHeight={DROPDOWN_MAX}
-              />
-              {tx.payeeRaw && tx.payeeRaw !== payee && (
-                // Honest "as printed by the bank" hint — uses the
-                // immutable `payeeRaw` (originalPayee from the API),
-                // not the possibly-edited `payee`. Helps the user
-                // figure out where a weird counterparty name came
-                // from. Hidden when raw equals current value.
-                <div
-                  className="text-[10px] text-muted/80 mt-1 truncate"
-                  title={tx.payeeRaw}
-                >
-                  В выписке: {tx.payeeRaw}
-                </div>
-              )}
-            </Field>
-          )}
-          <Field label="Комментарий">
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              rows={2}
-              className="input text-sm w-full resize-y"
-            />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Сумма">
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                inputMode="decimal"
-                className="input text-sm w-full font-mono tabular-nums"
-              />
-            </Field>
-            <Field label="Валюта">
-              <select
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-                className="input text-sm w-full"
-              >
-                {currencyOptions.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          {/* Account(s): one field for income/expense, two for transfer. */}
+          {/* Account(s): one field for income/expense, two for transfer.
+              Placed right under category — it's the second-most
+              identifying attribute of a transaction after the category. */}
           {kind === "transfer" ? (
             <div className="grid grid-cols-2 gap-3">
               <Field label="Со счёта">
@@ -462,25 +457,85 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               />
             </Field>
           )}
-          <p className="text-[11px] text-muted">
-            Правки сохраняются локально как overlay поверх данных. Следующая
-            синхронизация с API их не затрёт.
-          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Сумма">
+              <input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                inputMode="decimal"
+                className="input text-sm w-full font-mono tabular-nums"
+              />
+            </Field>
+            <Field label="Валюта">
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="input text-sm w-full"
+              >
+                {currencyOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          {/* Single "Получатель" field — autocompletes from the
+              Zenmoney merchant dictionary plus historical raw-payee
+              strings. Hidden for transfers (counterparty there is the
+              income account, surfaced above in its own field). */}
+          {kind !== "transfer" && (
+            <Field label="Получатель">
+              <Combobox
+                value={payee}
+                options={payeeOptions}
+                groups={payeeGroups}
+                onChange={setPayee}
+                placeholder="Введите или выберите из списка"
+                maxHeight={DROPDOWN_MAX}
+              />
+              {/* Tells the user how the current value will be pushed.
+                  Matching the dictionary by case-insensitive equality
+                  mirrors the lookup in zenmoneyPush.ts so the hint
+                  doesn't lie about what actually happens. */}
+              <PayeeKindHint value={payee} cachedBrands={cachedBrands} />
+              {tx.payeeRaw && tx.payeeRaw !== payee && (
+                // Honest "as printed by the bank" hint — uses the
+                // immutable `payeeRaw` (originalPayee from the API),
+                // not the possibly-edited `payee`. Helps the user
+                // figure out where a weird counterparty name came
+                // from. Hidden when raw equals current value.
+                <div
+                  className="text-[10px] text-muted/80 mt-1 pl-0 truncate"
+                  title={tx.payeeRaw}
+                >
+                  В выписке: {tx.payeeRaw}
+                </div>
+              )}
+            </Field>
+          )}
+          <Field label="Комментарий">
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              rows={1}
+              // Single row by default; user can drag taller. min-h
+              // matches one line + the input's vertical padding so it
+              // can never shrink below a single readable row.
+              className="input text-sm w-full resize-y min-h-[2.5rem]"
+            />
+          </Field>
         </div>
         <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
-          {hasEdit ? (
-            <button
-              onClick={reset}
-              disabled={saving}
-              className="btn-ghost text-xs text-muted"
-              title="Откатить к исходному значению"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Сбросить правку
-            </button>
-          ) : (
-            <span />
-          )}
+          <button
+            onClick={handleDelete}
+            disabled={saving}
+            className="btn-danger text-sm"
+            title="Удалить операцию"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Удалить
+          </button>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="btn-ghost text-sm">
               Отмена
@@ -511,6 +566,43 @@ function Field({
     <div>
       <label className="label block mb-1">{label}</label>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Tiny indicator below the "Получатель" combobox. Tells the user
+ * whether the currently-entered value will be pushed as a known
+ * brand (merchant dictionary entry) or as free-text payee.
+ *
+ * Empty / whitespace-only input → render nothing (no noise on a
+ * blank field). The dictionary lookup is case-insensitive to match
+ * the equivalent lookup in `zenmoneyPush.ts`.
+ */
+function PayeeKindHint({
+  value,
+  cachedBrands,
+}: {
+  value: string;
+  cachedBrands: string[] | null;
+}) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  // While the merchant dictionary is still being hydrated from cache
+  // we don't know yet — stay silent rather than mislead.
+  if (cachedBrands === null) return null;
+  const lower = trimmed.toLowerCase();
+  const matches = cachedBrands.some((b) => b.toLowerCase() === lower);
+  if (matches) {
+    return (
+      <div className="text-[10px] text-income/90 mt-1 pl-0">
+        Бренд из списка Дзен-мани ✓
+      </div>
+    );
+  }
+  return (
+    <div className="text-[10px] text-muted mt-1 pl-0">
+      Получатель не из списка Брендов ✗
     </div>
   );
 }

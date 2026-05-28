@@ -3,6 +3,7 @@ import { Tag, AlertCircle, Sparkles, Wand2, CheckCircle2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCategoryRulesStore } from "../store/useCategoryRulesStore";
+import { confirm } from "../store/useConfirmStore";
 import {
   detectUncategorized,
   suggestCategoriesForUncategorized,
@@ -65,7 +66,12 @@ export function UncategorizedPage() {
       (s) => s.confidence >= 0.7 && s.payee && !appliedIds.has(s.txId)
     );
     if (confident.length === 0) return;
-    if (!confirm(`Создать ${confident.length} правил автоматически?`)) return;
+    const ok = await confirm({
+      title: "Создать правила автоматически?",
+      message: `Будет создано ${confident.length} правил на основе высокоуверенных подсказок.`,
+      confirmLabel: "Создать",
+    });
+    if (!ok) return;
     setBusy(true);
     await addManyRules(
       confident.map((s) => ({

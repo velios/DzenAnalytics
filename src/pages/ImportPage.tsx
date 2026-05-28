@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Upload,
-  FileText,
   CheckCircle2,
   AlertTriangle,
   Trash2,
@@ -25,8 +24,15 @@ import {
   Clock,
   CalendarRange,
   Settings,
+  History,
+  CloudDownload,
+  CloudUpload,
+  Info,
+  ChevronDown,
+  HardDrive,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
+import { SyncLog } from "../components/SyncLog";
 import { useDataStore } from "../store/useDataStore";
 import { useGoalsStore } from "../store/useGoalsStore";
 import { useBudgetsStore } from "../store/useBudgetsStore";
@@ -36,12 +42,14 @@ import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
+import { useEditsStore } from "../store/useEditsStore";
+import { confirm } from "../store/useConfirmStore";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
-import { SectionHeading } from "../components/SectionHeading";
 import { formatNum, formatDate } from "../lib/format";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import * as db from "../lib/db";
@@ -80,14 +88,116 @@ export function ImportPage() {
   const zenValidateAndSave = useZenmoneyStore((s) => s.validateAndSaveToken);
   const zenSync = useZenmoneyStore((s) => s.sync);
   const zenRemoveToken = useZenmoneyStore((s) => s.removeToken);
+  const autoSyncEnabled = useZenmoneyStore((s) => s.autoSyncEnabled);
+  const autoSyncValue = useZenmoneyStore((s) => s.autoSyncValue);
+  const autoSyncUnit = useZenmoneyStore((s) => s.autoSyncUnit);
+  const setAutoSync = useZenmoneyStore((s) => s.setAutoSync);
+
+  // Push (Phase 1) — opt-in two-way sync state from useZenmoneyStore.
+  const pushMode = useZenmoneyStore((s) => s.pushMode);
+  const pushStatus = useZenmoneyStore((s) => s.pushStatus);
+  const pushError = useZenmoneyStore((s) => s.pushError);
+  const lastPushAt = useZenmoneyStore((s) => s.lastPushAt);
+  const lastPushResult = useZenmoneyStore((s) => s.lastPushResult);
+  const setPushMode = useZenmoneyStore((s) => s.setPushMode);
+  const pushPendingEdits = useZenmoneyStore((s) => s.pushPendingEdits);
+  const snapshotPolicy = useZenmoneyStore((s) => s.snapshotPolicy);
+  const setSnapshotPolicy = useZenmoneyStore((s) => s.setSnapshotPolicy);
+  // Pending-edit count drives the push button label / disabled state.
+  const editsMap = useEditsStore((s) => s.edits);
+  const editsLoaded = useEditsStore((s) => s.loaded);
+  const editsHydrate = useEditsStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!editsLoaded) editsHydrate();
+  }, [editsLoaded, editsHydrate]);
+  const pendingEditCount = Object.keys(editsMap).length;
 
   useEffect(() => {
     if (!zenLoaded) zenHydrate();
   }, [zenLoaded, zenHydrate]);
 
+  // Cloud snapshots — safety net for future push-to-cloud work.
+  // Available only in API mode (no point taking a snapshot of nothing).
+  const cloudSnapshots = useCloudSnapshotStore((s) => s.snapshots);
+  const cloudSnapshotsLoaded = useCloudSnapshotStore((s) => s.loaded);
+  const cloudSnapshotsBusy = useCloudSnapshotStore((s) => s.busy);
+  const cloudSnapshotsError = useCloudSnapshotStore((s) => s.error);
+  const hydrateCloudSnapshots = useCloudSnapshotStore((s) => s.hydrate);
+  const takeCloudSnapshot = useCloudSnapshotStore((s) => s.takeSnapshot);
+  const deleteCloudSnapshot = useCloudSnapshotStore((s) => s.deleteSnapshot);
+  const downloadCloudSnapshot = useCloudSnapshotStore((s) => s.download);
+  const importCloudSnapshot = useCloudSnapshotStore((s) => s.importFromFile);
+  const restoreCloudSnapshot = useCloudSnapshotStore((s) => s.restore);
+  const lastRestoreResult = useCloudSnapshotStore((s) => s.lastRestoreResult);
+  const restoreProgress = useCloudSnapshotStore((s) => s.restoreProgress);
+  const snapshotImportRef = useRef<HTMLInputElement>(null);
+  // Current Zenmoney user id — read from the local cache. Lets us
+  // filter the snapshot list to "snapshots for the currently
+  // connected account only", so switching accounts doesn't surface
+  // foreign data. Null when there's no cache yet (CSV-only mode).
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    import("../lib/zenmoneyCache").then(({ loadZenCache }) => {
+      loadZenCache().then((cache) => {
+        if (!cancelled) setCurrentUserId(cache?.user?.[0]?.id ?? null);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `cloudSnapshots` is in the deps so we refresh the lookup when
+    // a sync or restore alters the cache user record.
+  }, [cloudSnapshots, zenLastSyncAt]);
+  // Visible snapshots: belong to the currently connected account
+  // (matching userId) plus legacy snapshots without a userId (so we
+  // don't silently hide pre-feature backups). Snapshots from other
+  // accounts are surfaced as a count below the list.
+  const visibleSnapshots = useMemo(() => {
+    if (currentUserId == null) return cloudSnapshots;
+    return cloudSnapshots.filter(
+      (s) => s.userId == null || s.userId === currentUserId
+    );
+  }, [cloudSnapshots, currentUserId]);
+  const otherAccountSnapshotCount =
+    cloudSnapshots.length - visibleSnapshots.length;
+  useEffect(() => {
+    if (!cloudSnapshotsLoaded) hydrateCloudSnapshots();
+  }, [cloudSnapshotsLoaded, hydrateCloudSnapshots]);
+
   const [tokenDraft, setTokenDraft] = useState("");
   const [tokenVisible, setTokenVisible] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+
+  // Top-level horizontal tab on the Settings page. Groups the five
+  // long sections (data source, currency, data-processing,
+  // reporting period, backups) into four logical buckets so the
+  // page stops being a 2000-line scroll.
+  type SettingsTab = "source" | "currency" | "processing" | "backups";
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("source");
+
+  // Inner tab inside the Бэкапы section — local files vs cloud
+  // snapshots. Mirrors the Источник данных card pattern.
+  type BackupTab = "local" | "cloud";
+  const [backupTab, setBackupTab] = useState<BackupTab>("local");
+
+  // "Show all rates" toggle for the currency-rates grid in CSV
+  // mode. By default only the 4 most-common currencies are shown
+  // (RUB / USD / EUR / GBP) — the rest live behind an expand
+  // button so this section doesn't dominate the page on first open.
+  const [showAllRates, setShowAllRates] = useState(false);
+
+  // Active tab in the unified "data source" card. Defaults to
+  // whichever source the user is most likely interested in:
+  //   • API tab — if the token is connected (online sync is in use)
+  //   • CSV tab — if there's CSV-imported data and no token
+  //   • API tab — for fresh installs (most users connect via API)
+  type SourceTab = "api" | "csv";
+  const [sourceTab, setSourceTab] = useState<SourceTab>(() => {
+    if (zenToken) return "api";
+    if (meta?.source === "csv" && transactions.length > 0) return "csv";
+    return "api";
+  });
 
   function formatSyncResult(r: {
     count: number;
@@ -110,9 +220,12 @@ export function ImportPage() {
     setSyncSuccess(null);
     // Guard: existing CSV data will be replaced by API sync.
     if (meta?.source === "csv" && transactions.length > 0) {
-      const ok = confirm(
-        `У вас сейчас ${formatNum(transactions.length)} операций, загруженных из CSV (${meta.fileName}). API-синк заменит их данными из Дзен-мани. Бюджеты, цели, аннотации и правила сохранятся.\n\nПродолжить?`
-      );
+      const ok = await confirm({
+        title: "Заменить CSV-данные на API?",
+        message: `У вас сейчас ${formatNum(transactions.length)} операций из CSV (${meta.fileName}). API-синк заменит их данными из Дзен-мани. Бюджеты, цели, аннотации и правила сохранятся.`,
+        confirmLabel: "Заменить",
+        tone: "warning",
+      });
       if (!ok) return;
       await clearAll();
     }
@@ -140,12 +253,14 @@ export function ImportPage() {
 
   async function runFullSync() {
     setSyncSuccess(null);
-    if (
-      !confirm(
-        "Полный синк сбросит локальный кэш и заново скачает все данные. Используйте, если данные не сходятся или после массовых переименований категорий в Дзен-мани. Продолжить?"
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Полная синхронизация?",
+      message:
+        "Сбросит локальный кэш и заново скачает все данные. Используйте, если данные не сходятся или после массовых переименований категорий в Дзен-мани.",
+      confirmLabel: "Полная синхронизация",
+      tone: "warning",
+    });
+    if (!ok) return;
     try {
       const r = await zenSync({ force: true });
       setSyncSuccess(formatSyncResult(r));
@@ -155,7 +270,13 @@ export function ImportPage() {
   }
 
   async function disconnectToken() {
-    if (!confirm("Отключить токен Дзен-мани? Данные останутся, но автосинк станет недоступен.")) return;
+    const ok = await confirm({
+      title: "Отключить токен Дзен-мани?",
+      message: "Данные останутся, но автосинк станет недоступен.",
+      confirmLabel: "Отключить",
+      tone: "danger",
+    });
+    if (!ok) return;
     await zenRemoveToken();
     setSyncSuccess(null);
   }
@@ -286,7 +407,13 @@ export function ImportPage() {
   }
 
   async function importBackup(file: File) {
-    if (!confirm("Восстановить из бэкапа? Текущие данные будут заменены.")) return;
+    const ok = await confirm({
+      title: "Восстановить из бэкапа?",
+      message: "Текущие данные будут заменены.",
+      confirmLabel: "Восстановить",
+      tone: "warning",
+    });
+    if (!ok) return;
     setBackupBusy(true);
     setBackupMsg(null);
     try {
@@ -325,9 +452,13 @@ export function ImportPage() {
     setSuccess(null);
     // Guard: API token connected → confirm before mixing.
     if (zenToken) {
-      const ok = confirm(
-        "У вас подключён API Дзен-мани. CSV-импорт может затереть синхронизированные данные. Продолжить?\n\nЕсли импорт нужен, советуем сначала отключить API на этой странице, чтобы избежать путаницы."
-      );
+      const ok = await confirm({
+        title: "Импорт CSV поверх API?",
+        message:
+          "У вас подключён API Дзен-мани. CSV-импорт может затереть синхронизированные данные. Если импорт нужен, советуем сначала отключить API на этой странице, чтобы избежать путаницы.",
+        confirmLabel: "Продолжить",
+        tone: "warning",
+      });
       if (!ok) return;
     }
     setBusy(true);
@@ -384,33 +515,116 @@ export function ImportPage() {
         hint="Источник данных, валюты, обработка и бэкапы."
       />
 
-      <SectionHeading>Источник данных</SectionHeading>
-
-      {/* Zenmoney API integration */}
-      <div className="card card-pad border-accent/30 bg-accent/[0.03]">
-        <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
-          <div>
-            <div className="font-semibold flex items-center gap-2">
-              <Cloud className="w-4 h-4 text-accent" />
-              Дзен-мани API (онлайн-синхронизация)
-            </div>
-            <p className="text-xs text-muted mt-1 max-w-prose">
-              Качает данные напрямую из вашего аккаунта Дзен-мани. Кроме операций
-              получим также курсы валют, баланс счетов, регулярные платежи и
-              иерархию категорий — без выгрузки CSV.
-            </p>
-          </div>
-          {zenToken && zenStatus !== "syncing" && (
+      {/* Horizontal tab bar — top-level grouping for the long
+          Settings page. Each tab shows one logical bucket of
+          sections; sub-headings inside each tab keep their own
+          structure (e.g. "Резервные копии" → "Облачный снимок" +
+          "Push в облако"). */}
+      <div className="border-b border-border flex items-center gap-1 -mt-2 overflow-x-auto overflow-y-hidden">
+        {([
+          { id: "source", label: "Данные", icon: Database },
+          { id: "currency", label: "Валюты", icon: Coins },
+          { id: "processing", label: "Обработка", icon: Replace },
+          { id: "backups", label: "Бэкапы", icon: History },
+        ] as const).map((t) => {
+          const active = settingsTab === t.id;
+          const Icon = t.icon;
+          return (
             <button
-              onClick={disconnectToken}
-              className="btn-ghost text-xs text-muted"
-              title="Удалить токен из браузера"
+              key={t.id}
+              onClick={() => setSettingsTab(t.id)}
+              className={[
+                "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium",
+                "border-b-2 -mb-px transition-colors whitespace-nowrap",
+                active
+                  ? "border-accent text-text"
+                  : "border-transparent text-muted hover:text-text",
+              ].join(" ")}
             >
-              <Unlink className="w-3.5 h-3.5" />
-              Отключить
+              <Icon className="w-4 h-4" />
+              {t.label}
             </button>
-          )}
+          );
+        })}
+      </div>
+
+      {settingsTab === "source" && (<>
+      {/* Unified data-source card. Replaces what used to be three
+          separate islands (API status, CSV import, current database
+          summary) — they all answered "where's your data coming
+          from and what state is it in?". Now: source tabs at the
+          top, panel for the active source, current-data footer at
+          the bottom. */}
+      <section className="card card-pad space-y-5">
+        {/* Source tabs. A small green dot on the tab whose source
+            is actually populated lets the user tell at a glance
+            which mode they're in even if the active tab is the
+            other one (e.g. browsing CSV settings while connected
+            via API). */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <Database className="w-5 h-5 text-accent2" />
+            <span className="font-medium text-text">Источник данных</span>
+          </div>
+          <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setSourceTab("api")}
+              className={`px-3 py-1.5 text-sm rounded-md inline-flex items-center gap-1.5 transition-colors ${
+                sourceTab === "api"
+                  ? "bg-accent/10 text-accent"
+                  : "text-muted hover:text-text"
+              }`}
+              title="Онлайн-синхронизация с Дзен-мани через токен API"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              Дзен-мани API
+              {zenToken && (
+                <span
+                  className="ml-1 w-1.5 h-1.5 rounded-full bg-income"
+                  title="Источник активен"
+                />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSourceTab("csv")}
+              className={`px-3 py-1.5 text-sm rounded-md inline-flex items-center gap-1.5 transition-colors ${
+                sourceTab === "csv"
+                  ? "bg-accent/10 text-accent"
+                  : "text-muted hover:text-text"
+              }`}
+              title="Офлайн-импорт CSV-выгрузки из мобильного приложения"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              CSV-файл
+              {meta?.source === "csv" && transactions.length > 0 && (
+                <span
+                  className="ml-1 w-1.5 h-1.5 rounded-full bg-income"
+                  title="Источник активен"
+                />
+              )}
+            </button>
+          </div>
         </div>
+
+        {/* ── API panel ────────────────────────────────────────── */}
+        {sourceTab === "api" && (
+          <div className="rounded-lg border border-border bg-panel2/30 p-4">
+            <div className="mb-3">
+              <div className="font-medium text-sm flex items-center gap-2">
+                <Cloud className="w-4 h-4 text-accent" />
+                Дзен-мани API{" "}
+                <span className="text-muted text-xs font-normal">
+                  (онлайн-синхронизация)
+                </span>
+              </div>
+              <p className="text-xs text-muted mt-1">
+                Качает данные напрямую из вашего аккаунта Дзен-мани. Кроме
+                операций получим также курсы валют, баланс счетов, регулярные
+                платежи и иерархию категорий — без выгрузки CSV.
+              </p>
+            </div>
 
         {!zenToken ? (
           <div className="space-y-3">
@@ -429,7 +643,7 @@ export function ImportPage() {
               браузере — никуда не отправляется.
             </div>
             <div className="flex items-center gap-2">
-              <div className="relative flex-1">
+              <div className="relative flex-1 min-w-0">
                 <input
                   type={tokenVisible ? "text" : "password"}
                   value={tokenDraft}
@@ -478,25 +692,30 @@ export function ImportPage() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 text-sm">
-              <CheckCircle2 className="w-4 h-4 text-income" />
-              <span className="text-text">Подключено</span>
-              {zenLastSyncAt && (
-                <span className="text-xs text-muted">
-                  · последний синк {new Date(zenLastSyncAt).toLocaleString("ru-RU")}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                onClick={runFullSync}
-                disabled={zenStatus === "syncing"}
-                className="btn-ghost text-xs text-muted"
-                title="Сбросить локальный кэш и скачать всё заново"
-              >
-                Полный синк
-              </button>
+          <div className="space-y-3">
+            {/* Row 1: token field (read-only) + action buttons. */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[220px]">
+                <input
+                  type={tokenVisible ? "text" : "password"}
+                  value={zenToken}
+                  readOnly
+                  aria-label="Текущий токен Дзен-мани"
+                  className="input text-sm pr-9 w-full font-mono opacity-70 cursor-default"
+                />
+                <button
+                  type="button"
+                  onClick={() => setTokenVisible((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                  title={tokenVisible ? "Скрыть" : "Показать"}
+                >
+                  {tokenVisible ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
               <button
                 onClick={runSync}
                 disabled={zenStatus === "syncing"}
@@ -509,6 +728,76 @@ export function ImportPage() {
                 )}
                 {zenStatus === "syncing" ? "Синхронизирую..." : "Синхронизировать"}
               </button>
+              <button
+                onClick={runFullSync}
+                disabled={zenStatus === "syncing"}
+                className="btn-ghost text-sm text-muted"
+                title="Сбросить локальный кэш и скачать всё заново"
+              >
+                <CloudDownload className="w-3.5 h-3.5" />
+                Полная синхронизация
+              </button>
+              <button
+                onClick={disconnectToken}
+                disabled={zenStatus === "syncing"}
+                className="btn-danger text-sm"
+                title="Удалить токен из браузера"
+              >
+                <Unlink className="w-3.5 h-3.5" />
+                Отключить
+              </button>
+            </div>
+
+            {/* Row 2: status info + auto-sync schedule. */}
+            <div className="flex items-center gap-3 text-sm min-w-0 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 className="w-4 h-4 text-income shrink-0" />
+                <span className="text-text">Подключено</span>
+              </div>
+
+              {/* Schedule control. Lives in the same row as status so
+                  the user reads "Подключено · автосинк каждые 30 мин"
+                  at a glance. Lays out as: checkbox + number input +
+                  unit select, all inline. */}
+              <label className="flex items-center gap-2 text-xs text-muted cursor-pointer ml-auto">
+                <input
+                  type="checkbox"
+                  checked={autoSyncEnabled}
+                  onChange={(e) =>
+                    setAutoSync(e.target.checked, autoSyncValue, autoSyncUnit)
+                  }
+                  className="accent-accent w-3.5 h-3.5"
+                />
+                <span>Авто-синхронизация каждые</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={autoSyncValue}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n) && n > 0) {
+                      setAutoSync(autoSyncEnabled, n, autoSyncUnit);
+                    }
+                  }}
+                  className="input text-xs !py-1 !px-2 w-16 tabular-nums"
+                />
+                <select
+                  value={autoSyncUnit}
+                  onChange={(e) =>
+                    setAutoSync(
+                      autoSyncEnabled,
+                      autoSyncValue,
+                      e.target.value as typeof autoSyncUnit
+                    )
+                  }
+                  className="input text-xs !py-1 !px-2 !w-auto"
+                >
+                  <option value="min">мин</option>
+                  <option value="hour">час</option>
+                  <option value="day">день</option>
+                </select>
+              </label>
             </div>
           </div>
         )}
@@ -519,26 +808,36 @@ export function ImportPage() {
             <span>{zenError}</span>
           </div>
         )}
-        {syncSuccess && (
+        {syncSuccess && !syncSuccess.startsWith("Полный синк") && (
           <div className="mt-3 text-xs text-income flex items-start gap-2">
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <span>{syncSuccess}</span>
           </div>
         )}
-      </div>
+          </div>
+        )}
 
-      {/* CSV import — alternative source */}
-      <div className="card card-pad">
-        <div className="font-medium mb-3 flex items-center gap-2">
-          <Upload className="w-4 h-4 text-accent" />
-          Импорт CSV-выгрузки{" "}
-          <span className="text-muted text-xs font-normal">(офлайн-синхронизация)</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
-          {/* Left: mode toggle + status */}
-          <div className="flex flex-col justify-center gap-3">
+        {/* ── CSV panel ────────────────────────────────────────── */}
+        {sourceTab === "csv" && (
+          <div className="rounded-lg border border-border bg-panel2/30 p-4 space-y-4">
+            {/* Header + description, full width. */}
+            <div>
+              <div className="font-medium text-sm flex items-center gap-2">
+                <Upload className="w-4 h-4 text-accent" />
+                Импорт CSV-выгрузки{" "}
+                <span className="text-muted text-xs font-normal">
+                  (офлайн-синхронизация)
+                </span>
+              </div>
+              <p className="text-xs text-muted mt-1">
+                Загрузите CSV из мобильного приложения Дзен-мани. Файл
+                обрабатывается локально в браузере — никуда не отправляется.
+              </p>
+            </div>
+
+            {/* REGIME (only when there's existing data to merge with). */}
             {transactions.length > 0 ? (
-              <>
+              <div className="space-y-2">
                 <div>
                   <div className="label mb-1.5">Режим</div>
                   <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
@@ -575,147 +874,154 @@ export function ImportPage() {
                     ? "Новый файл добавит свежие операции, дубликаты по id будут отброшены."
                     : "Новый файл полностью заменит текущие данные."}
                 </div>
-              </>
+              </div>
             ) : (
               <div className="text-xs text-muted">
-                Файл обрабатывается локально, в браузере — никуда не отправляется. Подходит любая
-                CSV-выгрузка из Дзен-мани (формат:{" "}
+                Поддерживается любая CSV-выгрузка из Дзен-мани (формат:{" "}
                 <code className="pill">date;categoryName;…</code>).
               </div>
             )}
-          </div>
-          {/* Right: dropzone */}
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={onDrop}
-            onClick={() => fileRef.current?.click()}
-            // No `min-h-…`: grid `items-stretch` auto-sizes both columns to
-            // the same height, so the dropzone's bottom edge naturally aligns
-            // with the bottom of the descriptive text on the left.
-            className={`cursor-pointer transition-all border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center px-4 py-4 gap-1.5 ${
-              dragOver
-                ? "border-accent bg-accent/5"
-                : "border-border hover:border-accent/50 hover:bg-panel2/30"
-            }`}
-          >
-            <Upload className="w-7 h-7 text-accent" />
-            <div className="text-sm font-medium">
-              {busy ? "Обрабатываю..." : "Перетащите CSV или кликните"}
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFile(file);
+
+            {/* Dropzone — full-width bar styled like the API token
+                input. Click anywhere on the bar opens the file picker;
+                drag-and-drop still works on the whole surface. The
+                dashed border keeps the drop-target affordance. */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
               }}
-            />
-          </div>
-        </div>
-      </div>
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              onClick={() => fileRef.current?.click()}
+              className={`cursor-pointer transition-colors w-full flex items-center justify-center gap-2 px-3 py-3 rounded-lg border-2 border-dashed text-sm ${
+                dragOver
+                  ? "border-accent bg-accent/5 text-accent"
+                  : "border-border hover:border-accent/50 hover:bg-panel2/40 text-muted"
+              }`}
+            >
+              <Upload className="w-4 h-4" />
+              <span className="font-medium">
+                {busy ? "Обрабатываю..." : "Перетащите CSV или кликните"}
+              </span>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFile(file);
+                }}
+              />
+            </div>
 
-      {error && (
-        <div className="card card-pad border-expense/40 bg-expense/10">
-          <div className="flex items-center gap-2 text-expense">
-            <AlertTriangle className="w-5 h-5" />
-            {error}
-          </div>
-        </div>
-      )}
-
-      {success && (
-        <div className="card card-pad border-income/40 bg-income/10">
-          <div className="flex items-center gap-2 text-income">
-            <CheckCircle2 className="w-5 h-5" />
-            {success}
-          </div>
-        </div>
-      )}
-
-      {meta && (
-        <div className="card card-pad">
-          <div className="flex items-center gap-2 mb-3">
-            <CheckCircle2 className="w-5 h-5 text-income" />
-            <span className="font-medium">Текущая база</span>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <div className="label mb-1">Последний файл</div>
-              <div className="flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-muted" />
-                <span className="truncate" title={meta.fileName}>
-                  {meta.fileName}
-                </span>
+            {/* CSV-specific status messages. Lifted into the CSV
+                panel so they stay contextual to the action that
+                produced them. */}
+            {error && (
+              <div className="mt-3 text-xs text-expense flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{error}</span>
               </div>
-            </div>
-            <div>
-              <div className="label mb-1">Импортировано</div>
-              <div>{formatDate(meta.importedAt)}</div>
-            </div>
-            <div>
-              <div className="label mb-1">Всего операций</div>
-              <div className="font-semibold">{formatNum(transactions.length)}</div>
-            </div>
-            <div>
-              <div className="label mb-1">Период</div>
-              <div className="text-xs">
-                {transactions.length > 0 && (
-                  <>
-                    {formatDate(
-                      transactions.reduce(
-                        (m, t) => (t.date < m ? t.date : m),
-                        transactions[0].date
-                      )
-                    )}
-                    {" — "}
-                    {formatDate(
-                      transactions.reduce(
-                        (m, t) => (t.date > m ? t.date : m),
-                        transactions[0].date
-                      )
-                    )}
-                  </>
-                )}
+            )}
+            {success && (
+              <div className="mt-3 text-xs text-income flex items-start gap-2">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{success}</span>
               </div>
-            </div>
+            )}
           </div>
-          <div className="mt-4 pt-4 border-t border-border flex items-center justify-between flex-wrap gap-3">
-            <div>
+        )}
+
+        {/* ── Current data footer ─────────────────────────────────
+            Shows what's already in the local IndexedDB plus the
+            primary actions (open the dashboard / clear local data).
+            Replaces the standalone "Текущая база" card. */}
+        {meta && transactions.length > 0 ? (
+          <div className="border-t border-border pt-4">
+            <div className="flex items-start justify-between flex-wrap gap-x-8 gap-y-3 text-sm">
+              <div>
+                <div className="label mb-1">Источник данных</div>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {meta.source === "api" ? (
+                    <>
+                      <Cloud className="w-3.5 h-3.5 text-accent shrink-0" />
+                      <span>Дзен-мани API</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-3.5 h-3.5 text-accent shrink-0" />
+                      <span>CSV-файл</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="label mb-1">Импортировано</div>
+                <div>
+                  {meta.source === "csv" ? formatDate(meta.importedAt) : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="label mb-1">Последняя синхронизация</div>
+                <div>
+                  {meta.source === "api" && zenLastSyncAt
+                    ? new Date(zenLastSyncAt).toLocaleString("ru-RU")
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="label mb-1">Всего операций</div>
+                <div>{formatNum(transactions.length)}</div>
+              </div>
+              <div>
+                <div className="label mb-1">Период</div>
+                <div>
+                  {formatDate(
+                    transactions.reduce(
+                      (m, t) => (t.date < m ? t.date : m),
+                      transactions[0].date
+                    )
+                  )}
+                  {" — "}
+                  {formatDate(
+                    transactions.reduce(
+                      (m, t) => (t.date > m ? t.date : m),
+                      transactions[0].date
+                    )
+                  )}
+                </div>
+              </div>
               <button
                 onClick={async () => {
-                  if (
-                    confirm(
-                      "Удалить все локально сохранённые транзакции из этого браузера?\n\nДанные в Дзен-мани НЕ пострадают — мы вообще ничего туда не пишем."
-                    )
-                  ) {
-                    await clearAll();
-                  }
+                  const ok = await confirm({
+                    title: "Очистить локальные данные?",
+                    message:
+                      "Удалить все локально сохранённые данные из этого браузера. Данные в облаке Дзен-мани НЕ пострадают.",
+                    confirmLabel: "Очистить",
+                    tone: "danger",
+                  });
+                  if (ok) await clearAll();
                 }}
-                className="btn-danger text-xs"
+                className="btn-danger text-sm ml-auto self-center"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Очистить локальные данные
               </button>
-              <div className="text-[11px] text-muted mt-2 max-w-prose">
-                Удалит только локальную копию операций в этом браузере.{" "}
-                <strong className="text-text">Данные в облаке Дзен-мани не трогаем</strong>
-                {" "}— приложение работает в режиме «только чтение» из API и ничего туда не пишет.
-              </div>
             </div>
-            <button onClick={() => nav("/")} className="btn-primary text-sm">
-              Открыть аналитику →
-            </button>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="border-t border-border pt-4 text-xs text-muted">
+            База пуста — подключите Дзен-мани или загрузите CSV выше, чтобы
+            увидеть аналитику.
+          </div>
+        )}
+      </section>
 
-      <SectionHeading>Валюты и инфляция</SectionHeading>
+      </>)}
+
+      {settingsTab === "currency" && (<>
 
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
@@ -748,26 +1054,66 @@ export function ImportPage() {
             </span>
           </div>
         </div>
-        {!zenToken && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {Object.entries(rates.rates).map(([cur, val]) => (
-              <div key={cur}>
-                <label className="label block mb-1">1 {cur} =</label>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={val}
-                    onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
-                    disabled={cur === rates.base}
-                    className="input text-sm"
-                  />
-                  <span className="text-xs text-muted">{rates.base}</span>
-                </div>
+        {!zenToken && (() => {
+          // Priority currencies show up first; everything else stays
+          // hidden behind a "Показать ещё N" button so the section
+          // doesn't sprawl with rarely-used currencies on first open.
+          const priority = ["RUB", "USD", "EUR", "GBP"];
+          const allEntries = Object.entries(rates.rates).sort(([a], [b]) => {
+            const pa = priority.indexOf(a);
+            const pb = priority.indexOf(b);
+            if (pa !== -1 && pb !== -1) return pa - pb;
+            if (pa !== -1) return -1;
+            if (pb !== -1) return 1;
+            return a.localeCompare(b);
+          });
+          const visible = showAllRates ? allEntries : allEntries.slice(0, 4);
+          const hiddenCount = allEntries.length - visible.length;
+          return (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {visible.map(([cur, val]) => (
+                  <div key={cur}>
+                    <label className="label block mb-1">1 {cur} =</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={val}
+                        onChange={(e) => setRate(cur, Number(e.target.value) || 0)}
+                        disabled={cur === rates.base}
+                        className="input text-sm"
+                      />
+                      <span className="text-xs text-muted">{rates.base}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+              {(hiddenCount > 0 || showAllRates) && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllRates((v) => !v)}
+                  className="mt-3 inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                >
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform ${
+                      showAllRates ? "rotate-180" : ""
+                    }`}
+                  />
+                  {showAllRates
+                    ? "Свернуть"
+                    : `Показать ещё ${hiddenCount} ${
+                        hiddenCount === 1
+                          ? "валюту"
+                          : hiddenCount < 5
+                            ? "валюты"
+                            : "валют"
+                      }`}
+                </button>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <div className="card card-pad">
@@ -826,148 +1172,12 @@ export function ImportPage() {
         </div>
       </div>
 
-      {transactions.length > 0 && <SectionHeading>Обработка данных</SectionHeading>}
-      {transactions.length > 0 && (
-        <div className="card card-pad">
-          <div className="flex items-center gap-2 mb-3">
-            <Users className="w-5 h-5 text-accent2" />
-            <span className="font-medium">Группировка похожих получателей</span>
-          </div>
-          <p className="text-xs text-muted mb-3">
-            Объединяет варианты одного и того же получателя через нормализацию (удаление номеров,
-            пробелов, форм. суффиксов, лидирующих банков). Например, «Магнит #1234» и «MAGNIT-MOSCOW»
-            → один payee.
-          </p>
-          <label className="flex items-center gap-3 p-3 bg-panel2 rounded-lg border border-border cursor-pointer">
-            <input
-              type="checkbox"
-              checked={payeeGrouping}
-              onChange={(e) => setPayeeGrouping(e.target.checked)}
-              className="accent-accent w-4 h-4"
-            />
-            <div className="flex-1">
-              <div className="font-medium text-sm">
-                {payeeGrouping ? "Группировка включена" : "Группировка выключена"}
-              </div>
-              <div className="text-xs text-muted">
-                {aliasPreview && aliasPreview.size > 0
-                  ? `Найдено вариантов: ${aliasPreview.size}. Toggle обратимый — можно вернуть оригинальные имена.`
-                  : "Похожих получателей не найдено в текущих данных."}
-              </div>
-            </div>
-          </label>
-          {payeeGrouping && aliasPreview && aliasPreview.size > 0 && (
-            <details className="mt-3">
-              <summary className="text-xs text-accent cursor-pointer hover:underline">
-                Показать применённые объединения ({aliasPreview.size})
-              </summary>
-              <div className="mt-2 max-h-60 overflow-y-auto text-xs space-y-1">
-                {Array.from(aliasPreview.entries()).slice(0, 50).map(([from, to]) => (
-                  <div key={from} className="flex items-center gap-2 text-muted">
-                    <span className="truncate flex-1" title={from}>{from}</span>
-                    <span>→</span>
-                    <span className="text-text truncate flex-1" title={to}>{to}</span>
-                  </div>
-                ))}
-                {aliasPreview.size > 50 && (
-                  <div className="text-muted">…и ещё {aliasPreview.size - 50}</div>
-                )}
-              </div>
-            </details>
-          )}
-        </div>
-      )}
+      </>)}
 
-      {transactions.length > 0 && (
-        <div className="card card-pad">
-          <div className="flex items-center gap-2 mb-3">
-            <Users className="w-5 h-5 text-accent2" />
-            <span className="font-medium">Ручные объединения получателей</span>
-          </div>
-          <p className="text-xs text-muted mb-3">
-            Если авто-группировка что-то пропустила или, наоборот, объединила
-            не то — добавьте явное правило «откуда → куда». Ручные правила
-            применяются <em>поверх</em> авто-группировки и работают независимо
-            от её переключателя.
-          </p>
-
-          {/* Add new alias */}
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] items-center gap-2 mb-3">
-            <input
-              list="payee-options"
-              value={aliasFrom}
-              onChange={(e) => setAliasFrom(e.target.value)}
-              placeholder="Откуда (как сейчас называется)"
-              className="input text-sm"
-            />
-            <span className="text-muted hidden md:inline">→</span>
-            <input
-              list="payee-options"
-              value={aliasTo}
-              onChange={(e) => setAliasTo(e.target.value)}
-              placeholder="Куда (как должно стать)"
-              className="input text-sm"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitAlias();
-              }}
-            />
-            <button
-              onClick={submitAlias}
-              disabled={
-                !aliasFrom.trim() ||
-                !aliasTo.trim() ||
-                aliasFrom.trim() === aliasTo.trim()
-              }
-              className="btn-primary text-sm whitespace-nowrap"
-            >
-              Добавить
-            </button>
-            <datalist id="payee-options">
-              {allPayeeOptions.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-          </div>
-
-          {/* Existing aliases */}
-          {manualAliases.length === 0 ? (
-            <div className="text-xs text-muted">
-              Пока нет ручных правил. Используйте поля выше, чтобы добавить
-              первое — например, <code className="pill">Pyaterochka</code> →{" "}
-              <code className="pill">Пятёрочка</code>.
-            </div>
-          ) : (
-            <div className="max-h-60 overflow-y-auto text-xs space-y-1 -mx-1 px-1">
-              {manualAliases.map((a) => (
-                <div
-                  key={a.from}
-                  className="flex items-center gap-2 py-1 border-b border-border/40 last:border-b-0"
-                >
-                  <span className="truncate flex-1 text-text" title={a.from}>
-                    {a.from}
-                  </span>
-                  <span className="text-muted">→</span>
-                  <span
-                    className="truncate flex-1 text-text font-medium"
-                    title={a.to}
-                  >
-                    {a.to}
-                  </span>
-                  <button
-                    onClick={() => dropAlias(a.from)}
-                    className="text-muted hover:text-expense p-1"
-                    title="Удалить правило"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <SectionHeading>Отчётный период</SectionHeading>
+      {settingsTab === "processing" && (<>
+      {/* Отчётный период — поднят наверх, потому что это базовая
+          настройка, которая влияет на все KPI и графики. Дальше
+          идёт уже более точечная работа с получателями. */}
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
           <CalendarRange className="w-5 h-5 text-accent2" />
@@ -1008,12 +1218,194 @@ export function ImportPage() {
         </p>
       </div>
 
-      <SectionHeading>Резервные копии</SectionHeading>
-      <div className="card card-pad">
-        <div className="flex items-center gap-2 mb-3">
-          <Database className="w-5 h-5 text-accent" />
-          <span className="font-medium">Бэкап всех данных</span>
+      {/* Группировка получателей — единый блок: авто-нормализация +
+          ручные правила. Раньше были две отдельные карточки, теперь
+          объединены, потому что обе работают с одним и тем же
+          концептом (один и тот же payee, несколько написаний). */}
+      {transactions.length > 0 && (
+        <div className="card card-pad">
+          <div className="flex items-center gap-2 mb-3">
+            <Users className="w-5 h-5 text-accent2" />
+            <span className="font-medium">Группировка получателей</span>
+          </div>
+          <p className="text-xs text-muted mb-4">
+            Объединяет варианты одного и того же получателя.
+            Авто-нормализация работает по умолчанию (удаление номеров,
+            пробелов, форм. суффиксов, лидирующих банков — «Магнит #1234»
+            и «MAGNIT-MOSCOW» → один payee). Ручные правила применяются
+            <em> поверх</em> авто-группировки и работают независимо от
+            её переключателя.
+          </p>
+
+          {/* — Auto grouping toggle — */}
+          <label className="flex items-center gap-3 p-3 bg-panel2 rounded-lg border border-border cursor-pointer">
+            <input
+              type="checkbox"
+              checked={payeeGrouping}
+              onChange={(e) => setPayeeGrouping(e.target.checked)}
+              className="accent-accent w-4 h-4"
+            />
+            <div className="flex-1">
+              <div className="font-medium text-sm">
+                {payeeGrouping
+                  ? "Авто-группировка включена"
+                  : "Авто-группировка выключена"}
+              </div>
+              <div className="text-xs text-muted">
+                {aliasPreview && aliasPreview.size > 0
+                  ? `Найдено вариантов: ${aliasPreview.size}. Toggle обратимый — можно вернуть оригинальные имена.`
+                  : "Похожих получателей не найдено в текущих данных."}
+              </div>
+            </div>
+          </label>
+          {payeeGrouping && aliasPreview && aliasPreview.size > 0 && (
+            <details className="mt-3">
+              <summary className="text-xs text-accent cursor-pointer hover:underline">
+                Показать применённые объединения ({aliasPreview.size})
+              </summary>
+              <div className="mt-2 max-h-60 overflow-y-auto text-xs space-y-1">
+                {Array.from(aliasPreview.entries()).slice(0, 50).map(([from, to]) => (
+                  <div key={from} className="flex items-center gap-2 text-muted">
+                    <span className="truncate flex-1" title={from}>{from}</span>
+                    <span>→</span>
+                    <span className="text-text truncate flex-1" title={to}>{to}</span>
+                  </div>
+                ))}
+                {aliasPreview.size > 50 && (
+                  <div className="text-muted">…и ещё {aliasPreview.size - 50}</div>
+                )}
+              </div>
+            </details>
+          )}
+
+          {/* — Manual aliases — */}
+          <div className="mt-5 pt-5 border-t border-border">
+            <div className="text-sm font-medium mb-3">Ручные правила</div>
+
+            {/* Add new alias */}
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] items-center gap-2 mb-3">
+              <input
+                list="payee-options"
+                value={aliasFrom}
+                onChange={(e) => setAliasFrom(e.target.value)}
+                placeholder="Откуда (как сейчас называется)"
+                className="input text-sm"
+              />
+              <span className="text-muted hidden md:inline">→</span>
+              <input
+                list="payee-options"
+                value={aliasTo}
+                onChange={(e) => setAliasTo(e.target.value)}
+                placeholder="Куда (как должно стать)"
+                className="input text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitAlias();
+                }}
+              />
+              <button
+                onClick={submitAlias}
+                disabled={
+                  !aliasFrom.trim() ||
+                  !aliasTo.trim() ||
+                  aliasFrom.trim() === aliasTo.trim()
+                }
+                className="btn-primary text-sm whitespace-nowrap"
+              >
+                Добавить
+              </button>
+              <datalist id="payee-options">
+                {allPayeeOptions.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            </div>
+
+            {/* Existing aliases */}
+            {manualAliases.length === 0 ? (
+              <div className="text-xs text-muted">
+                Пока нет ручных правил. Используйте поля выше, чтобы добавить
+                первое — например, <code className="pill">Pyaterochka</code> →{" "}
+                <code className="pill">Пятёрочка</code>.
+              </div>
+            ) : (
+              <div className="max-h-60 overflow-y-auto text-xs space-y-1 -mx-1 px-1">
+                {manualAliases.map((a) => (
+                  <div
+                    key={a.from}
+                    className="flex items-center gap-2 py-1 border-b border-border/40 last:border-b-0"
+                  >
+                    <span className="truncate flex-1 text-text" title={a.from}>
+                      {a.from}
+                    </span>
+                    <span className="text-muted">→</span>
+                    <span
+                      className="truncate flex-1 text-text font-medium"
+                      title={a.to}
+                    >
+                      {a.to}
+                    </span>
+                    <button
+                      onClick={() => dropAlias(a.from)}
+                      className="text-muted hover:text-expense p-1"
+                      title="Удалить правило"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      </>)}
+
+      {settingsTab === "backups" && (
+      <section className="card card-pad space-y-5">
+        {/* Header + Локальные/Облачные tab selector. Mirrors the
+            Источник данных card structure. */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <History className="w-5 h-5 text-accent2" />
+            <span className="font-medium text-text">Резервные копии</span>
+          </div>
+          <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setBackupTab("local")}
+              className={`px-3 py-1.5 text-sm rounded-md inline-flex items-center gap-1.5 transition-colors ${
+                backupTab === "local"
+                  ? "bg-accent/10 text-accent"
+                  : "text-muted hover:text-text"
+              }`}
+              title="Скачивание JSON-бэкапов на ваше устройство"
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              Локальные
+            </button>
+            <button
+              type="button"
+              onClick={() => setBackupTab("cloud")}
+              className={`px-3 py-1.5 text-sm rounded-md inline-flex items-center gap-1.5 transition-colors ${
+                backupTab === "cloud"
+                  ? "bg-accent/10 text-accent"
+                  : "text-muted hover:text-text"
+              }`}
+              title="Снимки облачного состояния Дзен-мани"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              Облачные
+            </button>
+          </div>
+        </div>
+
+        {backupTab === "local" && (<>
+        <div className="rounded-lg border border-border bg-panel2/30 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Database className="w-5 h-5 text-accent" />
+            <span className="font-medium">Бэкап всех данных</span>
+          </div>
         <p className="text-xs text-muted mb-3">
           Экспортирует JSON со всеми транзакциями, бюджетами, целями, калибровкой, видами,
           аннотациями, тегами категорий, инфляцией и настройкой группировки. Импорт восстанавливает
@@ -1054,7 +1446,7 @@ export function ImportPage() {
       </div>
 
       {/* Scheduled backup */}
-      <div className="card card-pad">
+      <div className="rounded-lg border border-border bg-panel2/30 p-4">
         <div className="flex items-center gap-2 mb-3">
           <Clock className="w-5 h-5 text-accent" />
           <span className="font-medium">Бэкап по расписанию</span>
@@ -1108,7 +1500,634 @@ export function ImportPage() {
           {scheduledMsg && <span className="text-income">{scheduledMsg}</span>}
         </div>
       </div>
+        </>)}
 
+        {/* Cloud snapshot — Phase 0 of two-way sync. Only available with
+            an API token connected (there's nothing to snapshot in CSV
+            mode). Stores up to 5 raw responses of POST /v8/diff/ so we
+            can fall back to a known-good cloud state if a future push
+            operation goes wrong. */}
+        {backupTab === "cloud" && (zenToken ? (
+          <div className="rounded-lg border border-border bg-panel2/30 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <History className="w-5 h-5 text-accent2" />
+              <span className="font-medium">Снимки данных из Дзен-мани</span>
+            </div>
+            <p className="text-xs text-muted mb-3">
+              Полный «слепок» того, что сейчас лежит в облаке Дзена. Сохраняется
+              локально в браузере и доступен для скачивания. Страховка на случай
+              сбоев двусторонней синхронизации — если что-то пойдёт не так,
+              всегда можно восстановить состояние из снимка. Хранятся последние{" "}
+              <strong>5 снимков</strong> — старые автоматически вытесняются.
+            </p>
+            <p className="text-xs text-muted mb-3">
+              Эти снимки особенно важны при включённой{" "}
+              <button
+                type="button"
+                onClick={() => setSettingsTab("source")}
+                className="text-accent hover:underline"
+              >
+                двусторонней синхронизации
+              </button>{" "}
+              — каждый Push автоматически создаёт снимок по выбранной политике.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 mb-3">
+              <button
+                onClick={() => takeCloudSnapshot()}
+                disabled={cloudSnapshotsBusy}
+                className="btn-primary text-sm inline-flex items-center gap-2"
+              >
+                {cloudSnapshotsBusy ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CloudDownload className="w-3.5 h-3.5" />
+                )}
+                {cloudSnapshotsBusy ? "Делаю снимок…" : "Сделать снимок сейчас"}
+              </button>
+              {/* Import snapshot from a JSON file — file you previously
+                  downloaded via the per-row Download button, or copied
+                  from another machine. Goes into the same rolling
+                  5-slot index as fresh snapshots. */}
+              <button
+                onClick={() => snapshotImportRef.current?.click()}
+                disabled={cloudSnapshotsBusy}
+                className="btn-ghost text-sm inline-flex items-center gap-2"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Загрузить из файла
+              </button>
+              <input
+                ref={snapshotImportRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) importCloudSnapshot(f);
+                  e.target.value = "";
+                }}
+              />
+              <span className="text-xs text-muted">
+                {cloudSnapshots.length === 0
+                  ? "Снимков ещё не было"
+                  : `${visibleSnapshots.length}${
+                      otherAccountSnapshotCount > 0
+                        ? ` (+${otherAccountSnapshotCount} с других аккаунтов)`
+                        : ""
+                    } из 5 слотов занято`}
+              </span>
+            </div>
+
+            {/* Live restore-progress bar — only visible while a
+                restore is in flight. Shows current phase + counter so
+                the user knows the operation is moving and where it is. */}
+            {restoreProgress && (
+              <div className="text-xs mb-3 p-3 rounded-lg bg-accent2/10 border border-accent2/30">
+                <div className="flex items-center gap-2 mb-1.5 text-accent2 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Восстановление:{" "}
+                  {restoreProgress.phase === "accounts"
+                    ? "Счета"
+                    : restoreProgress.phase === "tags"
+                      ? "Теги"
+                      : restoreProgress.phase === "merchants"
+                        ? "Мерчанты"
+                        : restoreProgress.phase === "transactions"
+                          ? "Транзакции"
+                          : "Готово"}
+                  {restoreProgress.total > 0 && (
+                    <span className="text-muted tabular-nums">
+                      {restoreProgress.current} / {restoreProgress.total}
+                    </span>
+                  )}
+                </div>
+                {restoreProgress.total > 0 && (
+                  <div className="h-1 bg-panel2 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-accent2 transition-all"
+                      style={{
+                        width: `${Math.min(100, Math.round((restoreProgress.current / restoreProgress.total) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {cloudSnapshotsError && (
+              <div className="text-xs text-expense flex items-start gap-2 mb-3">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{cloudSnapshotsError}</span>
+              </div>
+            )}
+
+            {visibleSnapshots.length > 0 && (
+              <div className="text-xs space-y-1 -mx-1 px-1 max-h-72 overflow-y-auto">
+                {visibleSnapshots.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-3 py-2 border-b border-border/40 last:border-b-0"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium">
+                        {new Date(s.createdAt).toLocaleString("ru-RU")}
+                      </div>
+                      <div className="text-[11px] text-muted tabular-nums truncate">
+                        {formatNum(s.counts.transactions)} оп. ·{" "}
+                        {s.counts.accounts} счёт. · {s.counts.tags} тег. ·{" "}
+                        {s.counts.instruments} вал. ·{" "}
+                        {Math.round(s.approxBytes / 1024)} КБ
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => downloadCloudSnapshot(s.id)}
+                      className="btn-ghost !px-2 !py-1 text-xs"
+                      title="Скачать как JSON-файл"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                    {/* Restore — pushes the snapshot's contents back
+                        into Zenmoney via /v8/diff/. Destructive
+                        (overwrites cloud state by `changed` timestamp),
+                        gated behind a clear confirm dialog. */}
+                    <button
+                      onClick={async () => {
+                        const confirmed = await confirm({
+                          title: `Восстановить облако из снимка от ${new Date(s.createdAt).toLocaleString("ru-RU")}?`,
+                          message:
+                            `В Дзен-мани (на текущий токен) уйдут:\n` +
+                            `• ${formatNum(s.counts.transactions)} транзакций\n` +
+                            `• ${s.counts.accounts} счетов\n` +
+                            `• ${s.counts.tags} тегов\n` +
+                            `• ${s.counts.merchants} мерчантов/брендов\n\n` +
+                            `Каждая сущность будет «обновлена» в облаке: победит та версия, у которой свежее поле changed. Операции, созданные в облаке ПОСЛЕ снимка, останутся на месте (это не полный откат, а upsert).\n\n` +
+                            `⚠️ Если снимок сделан с другого аккаунта — операция может провалиться или привести к смешению данных. Перед действием убедитесь, что подключён нужный токен.`,
+                          confirmLabel: "Восстановить",
+                          tone: "warning",
+                        });
+                        if (!confirmed) return;
+                        try {
+                          await restoreCloudSnapshot(s.id);
+                        } catch {
+                          /* error already in store */
+                        }
+                      }}
+                      className="text-muted hover:text-warn p-1"
+                      title="Восстановить в облако (загрузить содержимое снимка обратно в Дзен-мани)"
+                      disabled={cloudSnapshotsBusy || !zenToken}
+                    >
+                      <CloudUpload className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Удалить снимок?",
+                          message: `Снимок от ${new Date(s.createdAt).toLocaleString("ru-RU")} будет удалён из локальной базы.`,
+                          confirmLabel: "Удалить",
+                          tone: "danger",
+                        });
+                        if (ok) deleteCloudSnapshot(s.id);
+                      }}
+                      className="text-muted hover:text-expense p-1"
+                      title="Удалить снимок"
+                      disabled={cloudSnapshotsBusy}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Restore result — shown after a successful restore call.
+                Counts of accepted entities + cross-user warning if the
+                snapshot was for a different account than the current
+                token. */}
+            {lastRestoreResult && (
+              <div className="text-xs mt-3 space-y-2">
+                <div
+                  className={`flex items-start gap-2 ${
+                    lastRestoreResult.crossUser ? "text-warn" : "text-income"
+                  }`}
+                >
+                  {lastRestoreResult.crossUser ? (
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  )}
+                  <span>
+                    {lastRestoreResult.crossUser ? (
+                      <>
+                        Восстановление выполнено в <strong>другой</strong>{" "}
+                        Дзен-аккаунт. Сущностям сгенерированы новые ID,
+                        ссылки на системные банки и валюты сброшены.
+                        Облако приняло:
+                      </>
+                    ) : (
+                      <>Восстановление прошло. Облако приняло:</>
+                    )}{" "}
+                    <strong>
+                      {lastRestoreResult.accepted.transactions.visible +
+                        lastRestoreResult.accepted.transactions.hidden}
+                    </strong>{" "}
+                    транзакций (
+                    {lastRestoreResult.accepted.transactions.visible} видимых в
+                    приложении
+                    {lastRestoreResult.accepted.transactions.hidden > 0 && (
+                      <>
+                        {" + "}
+                        {lastRestoreResult.accepted.transactions.hidden}{" "}
+                        удалённых / без суммы
+                      </>
+                    )}
+                    ) ·{" "}
+                    <strong>
+                      {lastRestoreResult.accepted.accounts.active +
+                        lastRestoreResult.accepted.accounts.archived}
+                    </strong>{" "}
+                    счетов (
+                    {lastRestoreResult.accepted.accounts.active} активных
+                    {lastRestoreResult.accepted.accounts.archived > 0 && (
+                      <>
+                        {" + "}
+                        {lastRestoreResult.accepted.accounts.archived}{" "}
+                        архивных
+                      </>
+                    )}
+                    ) ·{" "}
+                    <strong>
+                      {lastRestoreResult.accepted.tags.active +
+                        lastRestoreResult.accepted.tags.archived}
+                    </strong>{" "}
+                    тегов (
+                    {lastRestoreResult.accepted.tags.active} активных
+                    {lastRestoreResult.accepted.tags.archived > 0 && (
+                      <>
+                        {" + "}
+                        {lastRestoreResult.accepted.tags.archived}{" "}
+                        архивных
+                      </>
+                    )}
+                    ) ·{" "}
+                    <strong>{lastRestoreResult.accepted.merchants}</strong>{" "}
+                    мерчантов.
+                  </span>
+                </div>
+
+                {/* Per-category "что не зашло" — only render when we
+                    actually skipped something, otherwise the result
+                    looks needlessly busy. */}
+                {(lastRestoreResult.skipped.transactions > 0 ||
+                  lastRestoreResult.skipped.debtAccount > 0) && (
+                  <div className="flex items-start gap-2 text-muted">
+                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Пропущено:{" "}
+                      {(() => {
+                        const parts: ReactNode[] = [];
+                        if (lastRestoreResult.skipped.transactions > 0) {
+                          parts.push(
+                            <>
+                              <strong>{lastRestoreResult.skipped.transactions}</strong>{" "}
+                              транзакций с битыми ссылками на счёт / тег /
+                              мерчант
+                            </>
+                          );
+                        }
+                        if (lastRestoreResult.skipped.debtAccount > 0) {
+                          parts.push(
+                            <>
+                              <strong>1</strong> системный счёт «Долг» сведён с
+                              локальным
+                            </>
+                          );
+                        }
+                        return parts.map((p, i) => (
+                          <span key={i}>
+                            {i > 0 && " · "}
+                            {p}
+                          </span>
+                        ));
+                      })()}
+                      .
+                    </span>
+                  </div>
+                )}
+
+                {lastRestoreResult.droppedTxReasons.length > 0 && (
+                  <details className="text-muted">
+                    <summary className="cursor-pointer hover:text-text">
+                      Примеры пропущенных транзакций (
+                      {lastRestoreResult.droppedTxReasons.length})
+                    </summary>
+                    <div className="mt-1 max-h-32 overflow-y-auto space-y-0.5 -mx-1 px-1">
+                      {lastRestoreResult.droppedTxReasons.map((r) => (
+                        <div key={r.id} className="py-0.5">
+                          <span className="font-mono text-[10px]">{r.id}</span>
+                          {" · "}
+                          {r.reason}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
+                <div className="text-muted">
+                  После восстановления сделайте полную синхронизацию (⤓ в
+                  шапке), чтобы локальный кэш подтянул свежие `changed`-метки.
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-panel2/30 p-4 text-sm text-muted">
+            Облачные снимки доступны только при подключённом Дзен-мани API.
+            Подключите токен на вкладке «Данные».
+          </div>
+        ))}
+      </section>
+      )}
+
+      {/* Push в облако — Phase 1, opt-in via the toggle below.
+          Only visible when an API token is connected; the safety-net
+          snapshot (in the Бэкапы tab) is the prerequisite. */}
+      {settingsTab === "source" && zenToken && (
+        <div className="card card-pad border-warn/30 bg-warn/[0.03]">
+            <div className="flex items-center gap-2 mb-3">
+              <CloudUpload className="w-5 h-5 text-warn" />
+              <span className="font-medium">
+                Двусторонняя синхронизация с Дзен-мани
+              </span>
+            </div>
+            <p className="text-xs text-muted mb-3">
+              По умолчанию приложение работает в режиме чтения: все локальные
+              правки операций (категории, получатели, бренды, комментарии,
+              суммы) остаются только в этом браузере и в облако Дзен-мани не
+              уходят. Включите переключатель ниже, чтобы отправлять правки
+              обратно в облако.
+            </p>
+            <p className="text-xs text-muted mb-3">
+              <strong>Что отправляется:</strong> дата, получатель, бренд,
+              комментарий, сумма, валюта, категория и подкатегория. Смена типа
+              операции (Расход / Доход / Перевод / Возврат) и смена счёта пока
+              не передаются — для них используйте мобильное приложение
+              Дзен-мани.
+            </p>
+            <p className="text-xs text-muted mb-3">
+              <strong>Безопасность:</strong> перед каждым Push'ем автоматически
+              делается снимок облачного состояния (safety net). Если что-то
+              пойдёт не так — снимок появится в{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsTab("backups");
+                  setBackupTab("cloud");
+                }}
+                className="text-accent hover:underline"
+              >
+                списке облачных бэкапов
+              </button>
+              , его можно скачать или восстановить. Политику автоснимка можно
+              настроить ниже.
+            </p>
+
+            {/* Auto-snapshot policy — lives in this block so the user
+                can configure safety behaviour in the same place where
+                they enable two-way sync. */}
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <span className="text-xs text-muted">Автоснимок перед Push:</span>
+              <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
+                {(
+                  [
+                    ["always", "Каждый раз", "Безопаснее, медленнее. Для отладки."],
+                    ["daily", "Раз в день", "Если в последние 24ч уже был — пропускаем."],
+                    ["never", "Никогда", "Только вручную, кнопкой во вкладке «Бэкапы»."],
+                  ] as const
+                ).map(([value, label, hint]) => {
+                  const active = snapshotPolicy === value;
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => setSnapshotPolicy(value)}
+                      title={hint}
+                      className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                        active
+                          ? "bg-accent text-accent-fg"
+                          : "text-muted hover:text-text"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Push mode selector — 4 mutually-exclusive radio cards.
+                Each card has a title + short description so the user
+                doesn't have to memorize what each mode does. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+              {(
+                [
+                  {
+                    value: "off",
+                    title: "Выключено",
+                    desc: "Локальные правки никуда не уходят. Безопасный режим по умолчанию.",
+                  },
+                  {
+                    value: "manual",
+                    title: "Вручную",
+                    desc: "Правки отправляются кнопкой «Отправить» ниже. Полный контроль.",
+                  },
+                  {
+                    value: "auto",
+                    title: "Авто после правки",
+                    desc: "Push срабатывает через 2 секунды после последнего изменения.",
+                  },
+                  {
+                    value: "on-sync",
+                    title: "При синхронизации",
+                    desc: "Push прицепляется к каждому Pull — ручному и по расписанию.",
+                  },
+                ] as const
+              ).map((opt) => {
+                const active = pushMode === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPushMode(opt.value)}
+                    className={`text-left p-3 rounded-lg border transition-colors ${
+                      active
+                        ? "bg-accent/10 border-accent text-text"
+                        : "bg-panel2 border-border hover:border-accent/50 text-muted"
+                    }`}
+                  >
+                    <div
+                      className={`font-medium text-sm ${
+                        active ? "text-accent" : "text-text"
+                      }`}
+                    >
+                      {opt.title}
+                    </div>
+                    <div className="text-xs text-muted mt-0.5">
+                      {opt.desc}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {pushMode === "manual" && (
+              <>
+                <div className="flex flex-wrap items-center gap-3 mb-3">
+                  <button
+                    onClick={async () => {
+                      if (pendingEditCount === 0) return;
+                      const confirmed = await confirm({
+                        title: `Отправить ${pendingEditCount} правок в Дзен-мани?`,
+                        message:
+                          "Перед отправкой автоматически сделается снимок облачного состояния (safety net). Правки, которые не поддерживаются (смена типа, счёта), будут пропущены — вы увидите их список после операции.",
+                        confirmLabel: "Отправить",
+                        tone: "warning",
+                      });
+                      if (!confirmed) return;
+                      try {
+                        await pushPendingEdits();
+                      } catch {
+                        /* error already in store */
+                      }
+                    }}
+                    disabled={
+                      pushStatus === "syncing" ||
+                      pendingEditCount === 0 ||
+                      !zenToken
+                    }
+                    className="btn-primary text-sm inline-flex items-center gap-2"
+                  >
+                    {pushStatus === "syncing" ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CloudUpload className="w-3.5 h-3.5" />
+                    )}
+                    {pushStatus === "syncing"
+                      ? "Отправляю…"
+                      : pendingEditCount === 0
+                        ? "Нет правок для отправки"
+                        : `Отправить ${pendingEditCount} правок в облако`}
+                  </button>
+                  {lastPushAt && (
+                    <span className="text-xs text-muted">
+                      Последний Push: {new Date(lastPushAt).toLocaleString("ru-RU")}
+                    </span>
+                  )}
+                </div>
+
+                {pushError && (
+                  <div className="text-xs text-expense flex items-start gap-2 mb-3">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>{pushError}</span>
+                  </div>
+                )}
+
+                {pushStatus === "ok" && lastPushResult && (
+                  <div className="text-xs mb-3">
+                    <div className="flex items-start gap-2 text-income">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        Отправлено: <strong>{lastPushResult.pushed}</strong>
+                        {lastPushResult.skipped.length > 0 && (
+                          <>
+                            {" · "}пропущено: {lastPushResult.skipped.length}
+                          </>
+                        )}
+                        {lastPushResult.snapshotId && (
+                          <span className="text-muted">
+                            {" · "}safety snapshot ✓
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    {lastPushResult.skipped.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="text-accent cursor-pointer hover:underline">
+                          Почему пропущены ({lastPushResult.skipped.length})
+                        </summary>
+                        <div className="mt-1 max-h-40 overflow-y-auto space-y-1 text-muted -mx-1 px-1">
+                          {lastPushResult.skipped.map((s) => (
+                            <div
+                              key={s.id}
+                              className="py-1 border-b border-border/40 last:border-b-0"
+                            >
+                              <div className="font-mono text-[10px] truncate">
+                                {s.id}
+                              </div>
+                              <div>{s.reason}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Status row for the non-manual modes — no button, but
+                still useful to surface "last push" + pending count +
+                inline errors so the user knows the background sync
+                is alive. */}
+            {(pushMode === "auto" || pushMode === "on-sync") && (
+              <div className="flex flex-wrap items-center gap-3 mb-3 text-xs">
+                <span className="text-muted">
+                  В очереди: <strong className="text-text tabular-nums">
+                    {pendingEditCount}
+                  </strong>
+                  {" "}
+                  {pendingEditCount === 1
+                    ? "правка"
+                    : pendingEditCount < 5
+                      ? "правки"
+                      : "правок"}
+                </span>
+                {pushStatus === "syncing" && (
+                  <span className="text-muted inline-flex items-center gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Отправка…
+                  </span>
+                )}
+                {lastPushAt && (
+                  <span className="text-muted">
+                    Последний Push: {new Date(lastPushAt).toLocaleString("ru-RU")}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Inline error for auto/on-sync — manual mode shows its
+                own inline error inside its block above. */}
+            {(pushMode === "auto" || pushMode === "on-sync") && pushError && (
+              <div className="text-xs text-expense flex items-start gap-2 mb-3">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{pushError}</span>
+              </div>
+            )}
+
+            <p className="text-[11px] text-muted mt-3">
+              <strong>Конфликты:</strong> сервер Дзен-мани разрешает их по
+              правилу «последний выиграл» (по полю <code>changed</code>) — если
+              кто-то изменил ту же операцию в облаке позже вашего
+              synced-состояния, ваш Push для этой операции может проиграть.
+              На этот случай и существует safety-снимок.
+            </p>
+          </div>
+      )}
+
+      {/* Sync log — lives at the bottom of the Данные tab so the
+          two-way-sync block above can deep-link errors into a
+          specific row. Hidden on tabs other than "Данные" so it
+          doesn't compete with Бэкапы / Обработка content. */}
+      {settingsTab === "source" && <SyncLog />}
     </div>
   );
 }

@@ -90,14 +90,18 @@ export function applyDiff(
   diff: ZenDiffResponse
 ): ZenCache {
   if (!prev) {
+    // Empty / very-new accounts can come back from the API with whole
+    // sections missing (the field is just absent rather than `[]`).
+    // Default each to an empty array so downstream code can always
+    // iterate without an `is not iterable` runtime error.
     return {
       serverTimestamp: diff.serverTimestamp,
-      instruments: diff.instrument,
-      accounts: diff.account,
-      tags: diff.tag,
-      merchants: diff.merchant,
-      transactions: diff.transaction,
-      user: diff.user,
+      instruments: diff.instrument || [],
+      accounts: diff.account || [],
+      tags: diff.tag || [],
+      merchants: diff.merchant || [],
+      transactions: diff.transaction || [],
+      user: diff.user || [],
     };
   }
   const deletions = diff.deletion || [];

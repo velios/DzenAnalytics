@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw, CloudDownload, Check, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import { useZenmoneyStore, type SyncResult } from "../store/useZenmoneyStore";
+import { confirm } from "../store/useConfirmStore";
 import { formatNum } from "../lib/format";
 
 /**
@@ -98,12 +99,14 @@ export function HeaderSyncActions() {
 
   async function runFull() {
     if (busy) return;
-    if (
-      !confirm(
-        "Полный синк сбросит локальный кэш и заново скачает все данные. Используйте, если данные не сходятся или после массовых переименований категорий в Дзен-мани. Продолжить?"
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Полная синхронизация?",
+      message:
+        "Сбросит локальный кэш и заново скачает все данные. Используйте, если данные не сходятся или после массовых переименований категорий в Дзен-мани.",
+      confirmLabel: "Полный синк",
+      tone: "warning",
+    });
+    if (!ok) return;
     setFlash(null);
     try {
       const r = await sync({ force: true });
@@ -144,10 +147,7 @@ export function HeaderSyncActions() {
           className={clsx(innerBtn, "rounded-l-lg")}
         >
           <RefreshCw
-            className={clsx(
-              "w-4 h-4 transition-transform duration-500 ease-out",
-              busy ? "animate-spin" : "group-hover:rotate-180"
-            )}
+            className={clsx("w-4 h-4", busy && "animate-spin")}
           />
         </button>
         {/* 1-pixel divider between the two buttons — matches the
@@ -161,7 +161,7 @@ export function HeaderSyncActions() {
           title="Полная синхронизация (сбросить кэш и заново скачать всё)"
           className={clsx(innerBtn, "rounded-r-lg")}
         >
-          <CloudDownload className="w-4 h-4 transition-transform duration-300 ease-out group-hover:scale-110" />
+          <CloudDownload className="w-4 h-4" />
         </button>
       </div>
 

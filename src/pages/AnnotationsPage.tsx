@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Bookmark, Plus, Trash2 } from "lucide-react";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
+import { confirm } from "../store/useConfirmStore";
 import { useDataStore } from "../store/useDataStore";
 import { formatDate } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
@@ -124,8 +125,14 @@ export function AnnotationsPage() {
                   {a.body && <div className="text-sm text-muted">{a.body}</div>}
                 </div>
                 <button
-                  onClick={() => {
-                    if (confirm(`Удалить «${a.title}»?`)) remove(a.id);
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Удалить аннотацию?",
+                      message: `«${a.title}» будет удалена.`,
+                      confirmLabel: "Удалить",
+                      tone: "danger",
+                    });
+                    if (ok) remove(a.id);
                   }}
                   className="btn-ghost !p-2 text-muted hover:text-expense shrink-0"
                 >

@@ -8,10 +8,13 @@ import {
   Tag,
   User,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import { useDrillStore } from "../store/useDrillStore";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { confirm } from "../store/useConfirmStore";
 import { CategoryDot } from "./CategoryDot";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { formatMoney, formatDate, displayPayee, secondaryPayee } from "../lib/format";
@@ -43,6 +46,21 @@ export function TransactionsDrawer() {
   const { open, title, subtitle, transactions, close, show } = useDrillStore();
   const base = useDataStore((s) => s.rates.base);
   const allTransactions = useDataStore((s) => s.transactions);
+  const deleteTransaction = useDataStore((s) => s.deleteTransaction);
+
+  async function handleDelete(tx: Transaction) {
+    const pushMode = useZenmoneyStore.getState().pushMode;
+    const ok = await confirm({
+      title: "Удалить операцию?",
+      message:
+        pushMode !== "off"
+          ? "Операция скроется из всех расчётов и списков. Так как включён Push, при следующей отправке она будет удалена и в облаке Дзен-мани — это необратимо в облаке."
+          : "Операция скроется из всех расчётов и списков. В облаке Дзен-мани она не тронется.",
+      confirmLabel: "Удалить",
+      tone: "danger",
+    });
+    if (ok) await deleteTransaction(tx.id);
+  }
 
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date");
@@ -274,7 +292,7 @@ export function TransactionsDrawer() {
                   <th className="table-th">Комментарий</th>
                   <th className="table-th">Счёт</th>
                   <SortHead label="Сумма" k="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
-                  <th className="table-th w-8"></th>
+                  <th className="table-th text-right whitespace-nowrap">Операции</th>
                 </tr>
               </thead>
               <tbody>
@@ -302,7 +320,10 @@ export function TransactionsDrawer() {
                         )}
                       </div>
                       {t.subcategory && (
-                        <div className="text-xs text-muted truncate" title={t.subcategory}>
+                        // pl-7 aligns the subcategory under the category
+                        // *text* (icon w-5 + gap-2 = 28px), matching the
+                        // operations feed layout.
+                        <div className="text-xs text-muted truncate pl-7" title={t.subcategory}>
                           {t.subcategory}
                         </div>
                       )}
@@ -344,13 +365,20 @@ export function TransactionsDrawer() {
                       <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
                       {formatMoney(t.amount, t.currency)}
                     </td>
-                    <td className="table-td w-8 text-right">
+                    <td className="table-td w-14 text-right whitespace-nowrap">
                       <button
                         onClick={() => setEditing(t)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted hover:text-text"
+                        className="p-1 text-muted/50 hover:text-text transition-colors"
                         title="Редактировать"
                       >
                         <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(t)}
+                        className="p-1 text-muted/50 hover:text-expense transition-colors"
+                        title="Удалить"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
                   </tr>

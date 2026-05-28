@@ -15,6 +15,7 @@ import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, type DatePreset } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
+import { confirm } from "../store/useConfirmStore";
 import { monthLabel } from "../lib/format";
 
 const PRESETS: { value: DatePreset; label: string }[] = [
@@ -240,9 +241,15 @@ export function GlobalFilters() {
                       {v.name}
                     </button>
                     <button
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        if (confirm(`Удалить вид «${v.name}»?`)) removeView(v.id);
+                        const ok = await confirm({
+                          title: "Удалить сохранённый вид?",
+                          message: `«${v.name}» будет удалён из списка.`,
+                          confirmLabel: "Удалить",
+                          tone: "danger",
+                        });
+                        if (ok) removeView(v.id);
                       }}
                       className="opacity-0 group-hover:opacity-100 p-1.5 text-muted hover:text-expense"
                     >

@@ -25,6 +25,7 @@ import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
+import { confirm } from "../store/useConfirmStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import {
   balancesByAccount,
@@ -288,8 +289,15 @@ export function AccountsPage() {
               </button>
               {calibration && (
                 <button
-                  onClick={() => {
-                    if (confirm("Сбросить калибровку?")) clearCalibration();
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Сбросить калибровку?",
+                      message:
+                        "Текущая балансовая привязка будет удалена. Можно будет настроить заново.",
+                      confirmLabel: "Сбросить",
+                      tone: "danger",
+                    });
+                    if (ok) clearCalibration();
                   }}
                   className="btn-danger text-sm"
                   title="Сбросить"

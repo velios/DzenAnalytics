@@ -6,6 +6,7 @@ import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import { applyCategoryRules, type CategoryRule } from "./useCategoryRulesStore";
 import { applyEdits } from "../lib/applyEdits";
 import { useEditsStore } from "./useEditsStore";
+import { useDeletedStore, loadDeletedSet } from "./useDeletedStore";
 import { aliasesToMap, type PayeeAlias } from "./usePayeeAliasStore";
 
 // Rough cross-rates relative to RUB — purely a starting point so the rates UI
@@ -78,10 +79,32 @@ interface DataState {
   setBase: (newBase: string) => Promise<void>;
   setPayeeGrouping: (enabled: boolean) => Promise<void>;
   reapplyRules: () => Promise<void>;
+  /** Hide a transaction locally (soft-delete) and recompute the
+   *  visible list. Cloud-side deletion (when push is on) is handled
+   *  separately by the Zenmoney store's push path. */
+  deleteTransaction: (id: string) => Promise<void>;
+  /** Un-hide a previously deleted transaction. */
+  restoreTransaction: (id: string) => Promise<void>;
 }
 
 function recalcBase(txs: Transaction[], rates: CurrencyRates): Transaction[] {
   return txs.map((t) => ({ ...t, amountBase: toBase(t.amount, t.currency, rates) }));
+}
+
+/**
+ * The last step of the transactions pipeline: apply the user's edit
+ * overlay, then drop any locally-deleted (hidden) rows. Everything that
+ * sets `transactions` goes through here so the deletion filter is
+ * impossible to forget at a call site.
+ */
+async function finalize(
+  raw: Transaction[],
+  rates: CurrencyRates
+): Promise<Transaction[]> {
+  const withEdits = applyEdits(raw, await loadEditsFromStore(), rates);
+  const deleted = await loadDeletedSet();
+  if (deleted.size === 0) return withEdits;
+  return withEdits.filter((t) => !deleted.has(t.id));
 }
 
 async function loadRules(): Promise<CategoryRule[]> {
@@ -173,7 +196,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     let raw = recalcBase(txs, rates);
     raw = applyPayeeGrouping(raw, grouping || false, manualAliases);
     raw = applyCategoryRules(raw, rules);
-    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    const final = await finalize(raw, rates);
     set({
       transactions: final,
       transactionsRaw: raw,
@@ -195,7 +218,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     await db.saveImportMeta(meta);
-    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    const final = await finalize(raw, rates);
     set({ transactions: final, transactionsRaw: raw, rates, importMeta: meta });
   },
 
@@ -218,7 +241,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       totalRows: meta.totalRows,
     };
     await db.saveImportMeta(mergedMeta);
-    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    const final = await finalize(raw, rates);
     set({
       transactions: final,
       transactionsRaw: raw,
@@ -230,6 +253,7 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   clearAll: async () => {
     await db.clearTransactions();
+    await useDeletedStore.getState().clearAll();
     set({ transactions: [], transactionsRaw: [], importMeta: null });
   },
 
@@ -245,7 +269,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
-    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    const final = await finalize(raw, rates);
     set({ rates, transactions: final, transactionsRaw: raw });
   },
 
@@ -274,7 +298,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
-    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    const final = await finalize(raw, rates);
     set({ rates, transactions: final, transactionsRaw: raw });
   },
 
@@ -287,7 +311,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     raw = applyPayeeGrouping(raw, enabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
-    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    const final = await finalize(raw, rates);
     set({ payeeGroupingEnabled: enabled, transactions: final, transactionsRaw: raw });
   },
 
@@ -299,7 +323,23 @@ export const useDataStore = create<DataState>((set, get) => ({
     raw = applyPayeeGrouping(raw, payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
-    const final = applyEdits(raw, await loadEditsFromStore(), rates);
+    const final = await finalize(raw, rates);
     set({ transactions: final, transactionsRaw: raw });
+  },
+
+  deleteTransaction: async (id) => {
+    await useDeletedStore.getState().remove(id);
+    // Recompute visible list from the unchanged raw set — the row is
+    // still in `transactionsRaw` (and IDB) so a restore brings it back.
+    const { transactionsRaw: raw, rates } = get();
+    const final = await finalize(raw, rates);
+    set({ transactions: final });
+  },
+
+  restoreTransaction: async (id) => {
+    await useDeletedStore.getState().restore(id);
+    const { transactionsRaw: raw, rates } = get();
+    const final = await finalize(raw, rates);
+    set({ transactions: final });
   },
 }));

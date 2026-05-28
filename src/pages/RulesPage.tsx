@@ -15,6 +15,7 @@ import {
   type RuleField,
   type RuleOp,
 } from "../store/useCategoryRulesStore";
+import { confirm } from "../store/useConfirmStore";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { groupByCategory } from "../lib/aggregations";
@@ -325,8 +326,14 @@ export function RulesPage() {
                   <Eye className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => {
-                    if (confirm(`Удалить правило?`)) remove(rule.id).then(reapplyRules);
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Удалить правило?",
+                      message: "Правило будет удалено, категория переустановится по умолчанию.",
+                      confirmLabel: "Удалить",
+                      tone: "danger",
+                    });
+                    if (ok) await remove(rule.id).then(reapplyRules);
                   }}
                   className="btn-ghost !p-1.5 text-muted hover:text-expense"
                 >

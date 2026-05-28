@@ -3,6 +3,7 @@ import { Plus, Trash2, Target, AlertTriangle, CheckCircle2, TrendingUp } from "l
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useBudgetsStore } from "../store/useBudgetsStore";
+import { confirm } from "../store/useConfirmStore";
 import { groupByCategory } from "../lib/aggregations";
 import { formatMoney } from "../lib/format";
 import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
@@ -242,8 +243,14 @@ export function BudgetsPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => {
-                        if (confirm(`Удалить бюджет на «${cat}»?`)) removeBudget(cat);
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Удалить бюджет?",
+                          message: `Бюджет на категорию «${cat}» будет удалён.`,
+                          confirmLabel: "Удалить",
+                          tone: "danger",
+                        });
+                        if (ok) removeBudget(cat);
                       }}
                       className="btn-ghost !p-2 text-muted hover:text-expense"
                       title="Удалить бюджет"

@@ -1,12 +1,65 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { viteSingleFile } from "vite-plugin-singlefile";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
 
 // STANDALONE=1 → single self-contained index.html for "double-click to run" releases.
 // Default build remains the regular multi-file output for hosting.
 const standalone = process.env.STANDALONE === "1";
+
+/**
+ * Dev-only sink for app logs. Mounts `POST /_devlog` on the Vite dev
+ * server: the browser sends JSON `{ scope, level, message }` entries
+ * to it, the plugin appends one line per entry to `dev-logs/app.log`
+ * on disk (gitignored). Makes it possible to grep/tail the log from
+ * outside the browser — handy for debugging server-side push errors
+ * that don't have a fixed point of failure.
+ *
+ * Production build never runs this plugin — it's gated to `apply:
+ * "serve"`.
+ */
+function devLogSink(): Plugin {
+  return {
+    name: "dev-log-sink",
+    apply: "serve",
+    configureServer(server) {
+      const logPath = resolve(server.config.root, "dev-logs", "app.log");
+      mkdirSync(dirname(logPath), { recursive: true });
+      server.middlewares.use("/_devlog", (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          return res.end();
+        }
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString("utf8");
+        });
+        req.on("end", () => {
+          try {
+            const entries = JSON.parse(body) as
+              | { scope?: string; level?: string; message?: string }
+              | { scope?: string; level?: string; message?: string }[];
+            const arr = Array.isArray(entries) ? entries : [entries];
+            const now = new Date().toISOString();
+            const lines = arr
+              .map(
+                (e) =>
+                  `${now} [${e.level || "info"}] ${e.scope || "app"}: ${e.message || ""}`
+              )
+              .join("\n");
+            appendFileSync(logPath, lines + "\n", "utf8");
+            res.statusCode = 204;
+            res.end();
+          } catch {
+            res.statusCode = 400;
+            res.end("bad json");
+          }
+        });
+      });
+    },
+  };
+}
 
 // For standalone builds: inline all favicon/icon references as data URIs so the
 // browser tab shows the app icon when index.html is opened directly via file://
@@ -49,6 +102,7 @@ export default defineConfig({
   base: standalone ? "./" : "/",
   plugins: [
     react(),
+    devLogSink(),
     ...(standalone ? [inlineStandaloneAssets(), viteSingleFile()] : []),
   ],
   build: standalone

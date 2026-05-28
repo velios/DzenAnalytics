@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { TopNav } from "./components/TopNav";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { DashboardPage } from "./pages/DashboardPage";
 import { CashflowPage } from "./pages/CashflowPage";
@@ -34,6 +35,9 @@ import { DigestPage } from "./pages/DigestPage";
 import { useDataStore } from "./store/useDataStore";
 import { useThemeStore } from "./store/useThemeStore";
 import { useBackupStore } from "./store/useBackupStore";
+import { useZenmoneyStore } from "./store/useZenmoneyStore";
+import { useEditsStore } from "./store/useEditsStore";
+import { useDeletedStore } from "./store/useDeletedStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
 import { useFiltersStore } from "./store/useFiltersStore";
 
@@ -63,6 +67,11 @@ function App() {
   useGlobalShortcuts(() => setPaletteOpen(true));
 
   useEffect(() => {
+    // Hydrate the deleted-ids set first so the data store's pipeline
+    // filters hidden rows from the very first render. (loadDeletedSet
+    // falls back to disk anyway, but this populates the in-memory copy
+    // that the UI + auto-push subscription read.)
+    useDeletedStore.getState().hydrate();
     hydrate();
     backupHydrate();
     reportPeriodHydrate();
@@ -89,6 +98,96 @@ function App() {
     const id = setInterval(() => backupRunIfDue(), 10 * 60 * 1000);
     return () => clearInterval(id);
   }, [backupLoaded, loaded, backupRunIfDue]);
+
+  // Auto-push debouncer. When pushMode === "auto", we observe the
+  // overlay edit count: each change kicks a 2-second timer; if no new
+  // edits arrive in that window, we flush the pending edits to Zenmoney.
+  //
+  // Why 2 s: long enough that filling a modal (date → amount → category
+  // → save) coalesces into ONE push, short enough that the user feels
+  // the sync is "instant" by the time they look at another screen.
+  //
+  // Errors don't propagate — pushPendingEdits writes them to the sync
+  // log + sets pushError; the UI surfaces them from there.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Shared debounce: any change to either the edit overlay OR the
+    // deleted-ids set (re)starts the 2 s countdown and ultimately
+    // flushes both via pushPendingEdits (which bundles edits +
+    // deletions into one request).
+    const schedule = () => {
+      const zen = useZenmoneyStore.getState();
+      if (zen.pushMode !== "auto" || !zen.token) return;
+      const hasEdits =
+        Object.keys(useEditsStore.getState().edits).length > 0;
+      const hasDeletions =
+        useDeletedStore.getState().deletedIds.length > 0;
+      if (!hasEdits && !hasDeletions) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        const live = useZenmoneyStore.getState();
+        // Re-check at fire-time: user may have toggled mode off while
+        // the debounce was pending.
+        if (live.pushMode !== "auto") return;
+        if (live.pushStatus === "syncing") return;
+        void useZenmoneyStore.getState().pushPendingEdits().catch(() => {
+          /* surfaced via pushError + sync log */
+        });
+      }, 2000);
+    };
+    // Only schedule on changes that ADD pending work — otherwise the
+    // post-push cleanup (clearing an edit from the overlay) would
+    // re-trigger and, because the deleted-id set is monotonic, produce
+    // spurious "nothing to send" no-op pushes.
+    const unsubEdits = useEditsStore.subscribe((s, p) => {
+      if (s.edits === p.edits) return;
+      // Fire only when there's actually an edit pending right now.
+      if (Object.keys(s.edits).length === 0) return;
+      schedule();
+    });
+    const unsubDeleted = useDeletedStore.subscribe((s, p) => {
+      if (s.deletedIds === p.deletedIds) return;
+      // Fire only when a NEW id was hidden (length grew) — not on
+      // restore/clear, and not just because the set is non-empty.
+      if (s.deletedIds.length <= p.deletedIds.length) return;
+      schedule();
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubEdits();
+      unsubDeleted();
+    };
+  }, []);
+
+  // Auto-sync poller. We tick every 30 s and ask the Zenmoney store
+  // whether a sync is due (it knows the interval setting + last
+  // sync timestamp). 30 s is a compromise — fine-grained enough for
+  // 1-minute intervals to feel responsive, sparse enough that a
+  // suspended tab doesn't burn battery.
+  //
+  // Pause when the tab is hidden: `runAutoSyncIfDue` is a no-op
+  // anyway when status === "syncing", but skipping the call avoids
+  // racing with throttled timers in background tabs.
+  useEffect(() => {
+    let cancelled = false;
+    const zen = useZenmoneyStore.getState();
+    // Eager hydrate so the very first tick has the persisted
+    // interval/enabled values instead of defaults.
+    if (!zen.loaded) zen.hydrate();
+    const tick = () => {
+      if (cancelled) return;
+      if (document.visibilityState !== "visible") return;
+      void useZenmoneyStore.getState().runAutoSyncIfDue();
+    };
+    // Run once on mount and then every 30 s.
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   if (!loaded) {
     return (
@@ -140,6 +239,7 @@ function App() {
       </main>
       <TransactionsDrawer />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ConfirmDialog />
     </div>
   );
 }

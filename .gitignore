@@ -49,3 +49,9 @@ zen_*.csv
 .claude/skills/
 skills-lock.json
 
+# Dev-only logging sink — Vite middleware writes JSON request logs
+# here when the app calls `devLog()`. Useful for debugging server-side
+# Zenmoney push errors without staring at DevTools. Gitignored — no
+# production data ever lands here.
+dev-logs/
+

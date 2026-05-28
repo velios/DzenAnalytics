@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Settings2, CheckCircle2, X, Sparkles, Pencil, Trash2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
+import { confirm } from "../store/useConfirmStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import {
   detectBalanceAnchors,
@@ -102,8 +103,15 @@ export function QuickCalibration() {
               Изменить
             </button>
             <button
-              onClick={() => {
-                if (confirm("Сбросить калибровку?")) clearCalibration();
+              onClick={async () => {
+                const ok = await confirm({
+                  title: "Сбросить калибровку?",
+                  message:
+                    "Текущая балансовая привязка будет удалена. Можно будет настроить заново.",
+                  confirmLabel: "Сбросить",
+                  tone: "danger",
+                });
+                if (ok) clearCalibration();
               }}
               className="btn-ghost text-xs text-muted hover:text-expense"
               title="Сбросить"

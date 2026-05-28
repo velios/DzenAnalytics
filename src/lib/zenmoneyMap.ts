@@ -84,22 +84,33 @@ function buildCategory(
 }
 
 export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
+  // Defensive defaults — the API can omit whole sections (e.g. on a
+  // brand-new account with no transactions yet, `transaction` simply
+  // isn't in the response). Falling back to `[]` keeps the mapper
+  // iterable instead of crashing with "X is not iterable".
+  const txList = diff.transaction || [];
+  const accountList = diff.account || [];
+  const tagList = diff.tag || [];
+  const instrumentList = diff.instrument || [];
+  const merchantList = diff.merchant || [];
+  const userList = diff.user || [];
+
   const accountsById = new Map<string, ZenAccount>(
-    diff.account.map((a) => [a.id, a])
+    accountList.map((a) => [a.id, a])
   );
-  const tagsById = new Map<string, ZenTag>(diff.tag.map((t) => [t.id, t]));
+  const tagsById = new Map<string, ZenTag>(tagList.map((t) => [t.id, t]));
   const instrumentsById = new Map<number, ZenInstrument>(
-    diff.instrument.map((i) => [i.id, i])
+    instrumentList.map((i) => [i.id, i])
   );
   // Merchant dictionary — Zenmoney's curated brand catalogue. Each
   // transaction can carry a `merchant` id pointing into this; we
   // resolve to the brand title and store it on `Transaction.brand`.
   const merchantsById = new Map<string, string>(
-    (diff.merchant || []).map((m) => [m.id, m.title])
+    merchantList.map((m) => [m.id, m.title])
   );
 
   // Base currency comes from the user record (instrument id of their default).
-  const userCurrencyId = diff.user[0]?.currency;
+  const userCurrencyId = userList[0]?.currency;
   const userInstrument = userCurrencyId
     ? instrumentsById.get(userCurrencyId)
     : null;
@@ -109,7 +120,7 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
   // so we first normalise everything against RUB, then re-anchor to the user's base
   // if it isn't RUB.
   const ratesVsRub: Record<string, number> = {};
-  for (const instr of diff.instrument) {
+  for (const instr of instrumentList) {
     ratesVsRub[instr.shortTitle] = instr.rate;
   }
   const baseToRub = ratesVsRub[baseCurrency] || 1;
@@ -130,7 +141,7 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
   };
 
   const txs: Transaction[] = [];
-  for (const zt of diff.transaction) {
+  for (const zt of txList) {
     if (zt.deleted) continue;
 
     const outcome = zt.outcome || 0;
@@ -261,7 +272,7 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
   );
 
   // Active accounts = !archive && inBalance (those a user would think of as "their money")
-  const activeAccounts = diff.account.filter((a) => !a.archive && a.inBalance);
+  const activeAccounts = accountList.filter((a) => !a.archive && a.inBalance);
   const startBalanceTotal = activeAccounts.reduce((s, a) => {
     const instr = instrumentsById.get(a.instrument);
     const cur = instr?.shortTitle || baseCurrency;
@@ -277,7 +288,7 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
   // Multiple sub-tags can share a parent title — we'd rather have at least
   // one colour set than none, so the first non-null wins.
   const categoryMeta: Record<string, CategoryMeta> = {};
-  for (const tag of diff.tag) {
+  for (const tag of tagList) {
     if (tag.archive) continue;
     const cur = categoryMeta[tag.title];
     const color = colorIntToCss(tag.color);
@@ -312,9 +323,9 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
   return {
     transactions: txs,
     rates,
-    accountsTotal: diff.account.length,
+    accountsTotal: accountList.length,
     accountsActive: activeAccounts.length,
-    tagsTotal: diff.tag.length,
+    tagsTotal: tagList.length,
     baseCurrency,
     startBalanceTotal,
     currentBalanceTotal,

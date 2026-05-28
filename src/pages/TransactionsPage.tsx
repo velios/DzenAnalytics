@@ -3,6 +3,7 @@ import {
   Search,
   Download,
   Pencil,
+  Trash2,
   TrendingUp,
   TrendingDown,
   Wallet,
@@ -14,6 +15,8 @@ import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { confirm } from "../store/useConfirmStore";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { CategoryDot } from "../components/CategoryDot";
 import { EmptyState } from "../components/EmptyState";
@@ -52,9 +55,9 @@ function transferCounterparty(t: Transaction): string | null {
  *   NODATE: (используется внутри group-by-day) то же самое без date
  */
 const GRID_COLS_FULL =
-  "84px minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 36px";
+  "84px minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
 const GRID_COLS_NODATE =
-  "minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 36px";
+  "minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
 
 const PAGE_SIZE = 100;
 
@@ -66,8 +69,23 @@ const PAGE_SIZE = 100;
 export function TransactionsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const deleteTransaction = useDataStore((s) => s.deleteTransaction);
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+
+  async function handleDelete(tx: Transaction) {
+    const pushMode = useZenmoneyStore.getState().pushMode;
+    const ok = await confirm({
+      title: "Удалить операцию?",
+      message:
+        pushMode !== "off"
+          ? "Операция скроется из всех расчётов и списков. Так как включён Push, при следующей отправке она будет удалена и в облаке Дзен-мани — это необратимо в облаке."
+          : "Операция скроется из всех расчётов и списков. В облаке Дзен-мани она не тронется.",
+      confirmLabel: "Удалить",
+      tone: "danger",
+    });
+    if (ok) await deleteTransaction(tx.id);
+  }
 
   const edits = useEditsStore((s) => s.edits);
   const editsLoaded = useEditsStore((s) => s.loaded);
@@ -284,6 +302,7 @@ export function TransactionsPage() {
                 base={base}
                 edits={edits}
                 onEdit={setEditing}
+                onDelete={handleDelete}
               />
             ))}
           </div>
@@ -296,6 +315,7 @@ export function TransactionsPage() {
                 tx={t}
                 edited={!!edits[t.id]}
                 onEdit={() => setEditing(t)}
+                onDelete={() => handleDelete(t)}
               />
             ))}
           </div>
@@ -335,7 +355,7 @@ function HeaderRow({ grouped }: { grouped: boolean }) {
       <div>Комментарий</div>
       <div>Счёт</div>
       <div className="text-right">Сумма</div>
-      <div />
+      <div className="text-right">Операции</div>
     </div>
   );
 }
@@ -346,12 +366,14 @@ function DayGroup({
   base,
   edits,
   onEdit,
+  onDelete,
 }: {
   ymd: string;
   txs: Transaction[];
   base: string;
   edits: Record<string, unknown>;
   onEdit: (t: Transaction) => void;
+  onDelete: (t: Transaction) => void;
 }) {
   const { label, weekday } = useMemo(() => formatDayHeader(ymd), [ymd]);
   const totals = useMemo(() => {
@@ -399,6 +421,7 @@ function DayGroup({
           tx={t}
           edited={!!edits[t.id]}
           onEdit={() => onEdit(t)}
+          onDelete={() => onDelete(t)}
           hideDate
         />
       ))}
@@ -410,11 +433,13 @@ function Row({
   tx,
   edited,
   onEdit,
+  onDelete,
   hideDate = false,
 }: {
   tx: Transaction;
   edited: boolean;
   onEdit: () => void;
+  onDelete: () => void;
   hideDate?: boolean;
 }) {
   const template = hideDate ? GRID_COLS_NODATE : GRID_COLS_FULL;
@@ -486,13 +511,26 @@ function Row({
         <span className={amountSignClass}>{amountSign}</span>
         {formatMoney(tx.amount, tx.currency)}
       </div>
-      <div className="text-right">
+      <div className="flex items-center justify-end gap-0.5">
         <button
-          onClick={onEdit}
-          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted hover:text-text"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          className="p-1 text-muted/50 hover:text-text transition-colors"
           title="Редактировать"
         >
           <Pencil className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="p-1 text-muted/50 hover:text-expense transition-colors"
+          title="Удалить"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Target, Plus, Trash2, Flame, Calendar, TrendingUp } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useGoalsStore } from "../store/useGoalsStore";
+import { confirm } from "../store/useConfirmStore";
 import { groupByMonth } from "../lib/aggregations";
 import { formatMoney, formatDate } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
@@ -256,8 +257,14 @@ export function GoalsPage() {
                       className="input text-sm w-32"
                     />
                     <button
-                      onClick={() => {
-                        if (confirm(`Удалить цель «${g.name}»?`)) removeGoal(g.id);
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Удалить цель?",
+                          message: `«${g.name}» будет удалена.`,
+                          confirmLabel: "Удалить",
+                          tone: "danger",
+                        });
+                        if (ok) removeGoal(g.id);
                       }}
                       className="btn-ghost !p-2 text-muted hover:text-expense"
                     >

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 
 /**
  * Optional grouped variant of the dropdown — items split into named
@@ -25,6 +25,14 @@ export interface ComboboxProps {
   maxHeight?: string;
   /** If false, free-form typing is disabled (only listed options allowed). */
   allowCustom?: boolean;
+  /**
+   * When true, an X button appears next to the chevron whenever a
+   * non-empty value is set; clicking it clears the field via
+   * `onChange("")`. Useful for picker-only Comboboxes that need to
+   * support an optional/empty state (e.g. subcategory) without
+   * letting the user type a free-form clear.
+   */
+  clearable?: boolean;
 }
 
 /**
@@ -44,6 +52,7 @@ export function Combobox({
   placeholder,
   maxHeight = "min(50vh, 320px)",
   allowCustom = true,
+  clearable = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
@@ -122,8 +131,28 @@ export function Combobox({
             setOpen(true);
           }}
           placeholder={placeholder}
-          className={`input text-sm w-full pr-7 ${!allowCustom ? "cursor-pointer" : ""}`}
+          // Extra right-padding when the clear-X is showing, otherwise
+          // the typed value collides with two stacked icons.
+          className={`input text-sm w-full ${clearable && value ? "pr-12" : "pr-7"} ${!allowCustom ? "cursor-pointer" : ""}`}
         />
+        {clearable && value && (
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              // mouseDown so the click wins over input blur.
+              e.preventDefault();
+              setQuery("");
+              setFiltering(false);
+              setOpen(false);
+              onChange("");
+            }}
+            title="Очистить"
+            className="absolute right-7 top-1/2 -translate-y-1/2 text-muted hover:text-expense"
+            tabIndex={-1}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onMouseDown={(e) => {

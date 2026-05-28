@@ -132,6 +132,19 @@ interface DiffRequest {
   currentClientTimestamp: number;
   serverTimestamp: number;
   // forceFetch?: string[]; // optional, e.g. ["transaction"] to bypass diff caching
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Optional PUSH sections. Included in the body when the client wants the
+  // server to also mutate state in addition to fetching the delta.
+  // Zenmoney handles each section as an upsert by `id` with last-write-wins
+  // on `changed` timestamp; the response echoes back the saved entities.
+  // ──────────────────────────────────────────────────────────────────────
+  transaction?: ZenTransaction[];
+  account?: ZenAccount[];
+  tag?: ZenTag[];
+  merchant?: ZenMerchant[];
+  /** Soft-delete: `{ id, object, stamp, user }` per item. */
+  deletion?: ZenDeletion[];
 }
 
 /**
@@ -166,6 +179,144 @@ export async function fetchDiff(
       if (j.error?.code) code = j.error.code;
     } catch {
       // ignore parse errors — keep the HTTP-status fallback
+    }
+    throw new ZenApiError(msg, res.status, code);
+  }
+  return (await res.json()) as ZenDiffResponse;
+}
+
+/**
+ * PUSH-aware variant of `/v8/diff/`. Same endpoint, same response shape —
+ * but the request body carries entities the server should upsert (and
+ * optionally a `deletion` list).
+ *
+ * Zenmoney's response includes the saved entities so the caller can merge
+ * them straight back into the local cache via the usual `applyDiff` path.
+ * The server's `changed` stamp on each returned entity is canonical and
+ * MUST replace whatever the client sent (Zenmoney sometimes bumps it on
+ * conflict resolution).
+ */
+export interface PushPayload {
+  transaction?: ZenTransaction[];
+  account?: ZenAccount[];
+  tag?: ZenTag[];
+  merchant?: ZenMerchant[];
+  deletion?: ZenDeletion[];
+}
+
+export async function pushDiff(
+  token: string,
+  serverTimestamp: number,
+  payload: PushPayload,
+  signal?: AbortSignal
+): Promise<ZenDiffResponse> {
+  const body: DiffRequest = {
+    currentClientTimestamp: Math.floor(Date.now() / 1000),
+    serverTimestamp,
+    ...payload,
+  };
+  const requestBodyJson = JSON.stringify(body);
+  const res = await fetch(`${API_BASE}/v8/diff/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: requestBodyJson,
+    signal,
+  });
+  if (!res.ok) {
+    // Read the raw body once — we use it both for the structured error
+    // parse and (in dev) for diagnostics. `res.text()` doesn't consume
+    // a second-time-readable copy, so we save it first.
+    let rawText = "";
+    try {
+      rawText = await res.text();
+    } catch {
+      /* network already closed — fall through */
+    }
+    let msg = `HTTP ${res.status}`;
+    let code: string | null = null;
+    try {
+      const j = JSON.parse(rawText) as {
+        error?: { message?: string; code?: string };
+      };
+      if (j.error?.message) msg = j.error.message;
+      if (j.error?.code) code = j.error.code;
+    } catch {
+      // ignore parse errors — keep the HTTP-status fallback
+    }
+    // In dev, surface the full failure context to DevTools so we can
+    // diagnose Zen-side errors (which are usually very terse). Logs:
+    //   • outgoing request size + section counts
+    //   • full server response body (not just the parsed `error.message`)
+    //   • a tiny sample of the first/last transaction we sent, in case
+    //     the failure is on a specific shape we sent.
+    // Same context goes to `dev-logs/app.log` via `devLog` so it can
+    // be inspected outside the browser.
+    if (!import.meta.env.PROD) {
+      const sections = {
+        transaction: payload.transaction?.length ?? 0,
+        account: payload.account?.length ?? 0,
+        tag: payload.tag?.length ?? 0,
+        merchant: payload.merchant?.length ?? 0,
+        deletion: payload.deletion?.length ?? 0,
+      };
+      // eslint-disable-next-line no-console
+      console.groupCollapsed(
+        `[Zenmoney API error] HTTP ${res.status} — ${msg}`
+      );
+      // eslint-disable-next-line no-console
+      console.log("request body size:", requestBodyJson.length, "bytes");
+      // eslint-disable-next-line no-console
+      console.log("sections:", sections);
+      // eslint-disable-next-line no-console
+      console.log("server response body:", rawText || "(empty)");
+      if (payload.transaction && payload.transaction.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log("first tx sample:", payload.transaction[0]);
+        // eslint-disable-next-line no-console
+        console.log(
+          "last tx sample:",
+          payload.transaction[payload.transaction.length - 1]
+        );
+      }
+      // eslint-disable-next-line no-console
+      console.groupEnd();
+
+      // Mirror to dev-logs/app.log for outside-browser inspection.
+      // Lazy import keeps prod bundle clean of this code path.
+      void (async () => {
+        const { devLog } = await import("./devLog");
+        devLog(
+          "zen-api",
+          `HTTP ${res.status} ${msg} — body size ${requestBodyJson.length}b, ` +
+            `sections=${JSON.stringify(sections)}, ` +
+            `server-response=${rawText.slice(0, 1000) || "(empty)"}`,
+          "error"
+        );
+        // Dump the EXACT outgoing request body so we can verify what
+        // actually went over the wire — useful when investigating
+        // "did we add a field we shouldn't have" suspicions. Cap at
+        // 4 KB so the log file stays manageable.
+        devLog(
+          "zen-api",
+          `outgoing body (first 4KB): ${requestBodyJson.slice(0, 4000)}`,
+          "debug"
+        );
+        if (payload.transaction && payload.transaction.length > 0) {
+          devLog(
+            "zen-api",
+            `first tx: ${JSON.stringify(payload.transaction[0]).slice(0, 800)}`,
+            "debug"
+          );
+          devLog(
+            "zen-api",
+            `last tx: ${JSON.stringify(payload.transaction[payload.transaction.length - 1]).slice(0, 800)}`,
+            "debug"
+          );
+        }
+      })();
     }
     throw new ZenApiError(msg, res.status, code);
   }
