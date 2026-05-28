@@ -334,6 +334,11 @@ export function DashboardPage() {
   // ergonomic switches matching the toggles the user sees in Zenmoney itself.
   const [hideZero, setHideZero] = useState(true);
   const [hideArchived, setHideArchived] = useState(true);
+  // PNG-export state. Declared here (with the other hooks) rather than
+  // lower down — they must run before the early `return <EmptyState />`
+  // so hook order stays stable across renders (rules-of-hooks).
+  const exportRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
   const accountRows = useMemo(() => {
     if (liveAccounts && liveAccounts.length > 0) {
       // Convert to base currency and sort by |balance| desc.
@@ -436,9 +441,6 @@ export function DashboardPage() {
     (s, c) => s + (c.avgIntervalDays > 0 ? (c.avgAmount * 30) / c.avgIntervalDays : 0),
     0
   );
-
-  const exportRef = useRef<HTMLDivElement>(null);
-  const [exporting, setExporting] = useState(false);
 
   async function exportPng() {
     if (!exportRef.current) return;

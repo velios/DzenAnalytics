@@ -102,7 +102,11 @@ export function CashflowPage() {
   }, [transactions]);
   const [yoyYear, setYoyYear] = useState(allYears[allYears.length - 1] || new Date().getFullYear());
   const [yoyKind, setYoyKind] = useState<"expense" | "income">("expense");
+  // Clamp the selected year-over-year year if the available list
+  // changes (e.g. after a data reload) and the current pick falls out
+  // of range. Keeps the <select> showing a valid value.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (allYears.length && !allYears.includes(yoyYear)) setYoyYear(allYears[allYears.length - 1]);
   }, [allYears, yoyYear]);
   const yoyData = useMemo(
@@ -145,10 +149,13 @@ export function CashflowPage() {
     isForecast: p.isForecast,
   }));
 
-  const annotationsInRange = useMemo(() => {
-    const set = new Set(chartData.map((d) => d.ym));
-    return annotations.filter((a) => set.has(a.date.slice(0, 7)));
-  }, [annotations, chartData]);
+  // Plain derived value (not useMemo) — it lives after the early
+  // `return <EmptyState />` above, so a hook here would violate
+  // rules-of-hooks. The filter is cheap, so memoizing isn't worth it.
+  const chartYms = new Set(chartData.map((d) => d.ym));
+  const annotationsInRange = annotations.filter((a) =>
+    chartYms.has(a.date.slice(0, 7))
+  );
 
   const monthsCount = months.length || 1;
   const avgMonthlyExpense = kpi.expense / monthsCount;

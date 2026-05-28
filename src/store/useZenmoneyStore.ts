@@ -549,7 +549,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
           // Snapshot failure shouldn't strand the user — log to console
           // but proceed with the push. The risk is bounded: Phase 1 only
           // updates existing transactions and we have the recent cache.
-          // eslint-disable-next-line no-console
           console.warn("Pre-push snapshot failed:", e);
         }
       }

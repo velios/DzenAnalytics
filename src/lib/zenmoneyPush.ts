@@ -420,12 +420,10 @@ export async function sendPush(
   // verify which fields actually landed in the request body. Disabled
   // automatically in production (Vite sets `import.meta.env.PROD`).
   if (!import.meta.env.PROD) {
-    // eslint-disable-next-line no-console
     console.groupCollapsed(
       `[Zenmoney push] sending ${items.length} transaction(s)`
     );
     for (const item of items) {
-      // eslint-disable-next-line no-console
       console.log(item.id, {
         payee: item.zen.payee,
         merchant: item.zen.merchant,
@@ -437,7 +435,6 @@ export async function sendPush(
         changed: item.zen.changed,
       });
     }
-    // eslint-disable-next-line no-console
     console.groupEnd();
   }
   return pushDiff(token, serverTimestamp, payload);

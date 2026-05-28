@@ -62,8 +62,12 @@ export function Combobox({
   const [filtering, setFiltering] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Sync input when value updates externally.
+  // Sync the editable input text when the controlled `value` changes
+  // externally. This is the canonical "mirror a prop into local input
+  // state" pattern — the input must stay editable, so it can't be a
+  // pure derived value. The extra render is intentional and harmless.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setQuery(value);
   }, [value]);
 

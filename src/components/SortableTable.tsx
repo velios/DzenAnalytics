@@ -73,7 +73,7 @@ export function SortableTable<T>({
       if (naN && nbN) return 0;
       if (naN) return 1;
       if (nbN) return -1;
-      let r = 0;
+      let r: number;
       if (typeof va === "number" && typeof vb === "number") r = va - vb;
       else r = String(va).localeCompare(String(vb), "ru");
       return sortDir === "asc" ? r : -r;

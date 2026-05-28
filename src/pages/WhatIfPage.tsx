@@ -60,10 +60,13 @@ export function WhatIfPage() {
     startingCapital: Math.max(0, Math.round(currentNetWorth)),
   }));
 
-  // Sync starting capital when calibration changes (but only if user hasn't touched it).
+  // Sync starting capital when calibration changes — but only until the
+  // user edits it (capitalTouched). This is a deliberate "seed an
+  // editable field from external data" effect, not derivable in render.
   const [capitalTouched, setCapitalTouched] = useState(false);
   useEffect(() => {
     if (!capitalTouched) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInputs((prev) => ({
         ...prev,
         startingCapital: Math.max(0, Math.round(currentNetWorth)),

@@ -40,7 +40,10 @@ export function YearReviewPage() {
   const years = useMemo(() => availableYears(transactions), [transactions]);
   const [year, setYear] = useState<number>(() => years[0] || new Date().getFullYear());
 
+  // Clamp the selected year to the available list when it changes
+  // (e.g. after a data reload). Keeps the <select> on a valid value.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (years.length && !years.includes(year)) setYear(years[0]);
   }, [years, year]);
 

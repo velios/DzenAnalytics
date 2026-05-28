@@ -262,26 +262,19 @@ export async function pushDiff(
         merchant: payload.merchant?.length ?? 0,
         deletion: payload.deletion?.length ?? 0,
       };
-      // eslint-disable-next-line no-console
       console.groupCollapsed(
         `[Zenmoney API error] HTTP ${res.status} — ${msg}`
       );
-      // eslint-disable-next-line no-console
       console.log("request body size:", requestBodyJson.length, "bytes");
-      // eslint-disable-next-line no-console
       console.log("sections:", sections);
-      // eslint-disable-next-line no-console
       console.log("server response body:", rawText || "(empty)");
       if (payload.transaction && payload.transaction.length > 0) {
-        // eslint-disable-next-line no-console
         console.log("first tx sample:", payload.transaction[0]);
-        // eslint-disable-next-line no-console
         console.log(
           "last tx sample:",
           payload.transaction[payload.transaction.length - 1]
         );
       }
-      // eslint-disable-next-line no-console
       console.groupEnd();
 
       // Mirror to dev-logs/app.log for outside-browser inspection.

@@ -93,10 +93,15 @@ export function AccountsPage() {
     calibration ? String(calibration.amount) : ""
   );
 
+  // Re-seed the editable calibration form when the stored calibration
+  // changes (e.g. after hydrate or a reset elsewhere). Form inputs must
+  // stay editable, so this mirror-into-local-state effect is correct.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setCalibDate(calibration?.date || "");
     setCalibAmount(calibration ? String(calibration.amount) : "");
   }, [calibration]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const baseTxs = scope === "all" ? transactions : filtered;

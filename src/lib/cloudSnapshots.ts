@@ -530,7 +530,6 @@ export async function restoreSnapshotToCloud(
     };
     const subMsg = `phase A.${label}: ${JSON.stringify(sectionSizes)}`;
     if (!import.meta.env.PROD) {
-      // eslint-disable-next-line no-console
       console.info(`[Zen restore] ${subMsg}`);
     }
     devLog("zen-restore", subMsg);
@@ -542,7 +541,6 @@ export async function restoreSnapshotToCloud(
     } catch (e) {
       const errMsg = `phase A.${label} FAILED: ${e instanceof Error ? e.message : String(e)}`;
       if (!import.meta.env.PROD) {
-        // eslint-disable-next-line no-console
         console.error(`[Zen restore] ${errMsg}`);
       }
       devLog("zen-restore", errMsg, "error");
@@ -687,7 +685,6 @@ export async function restoreSnapshotToCloud(
       `phase B chunk ${chunkCount}: sending ${chunkTxs.length} tx(s) ` +
       `(~${Math.round(chunkSize / 1024)} KB)`;
     if (!import.meta.env.PROD) {
-      // eslint-disable-next-line no-console
       console.info(`[Zen restore] ${chunkMsg}`);
     }
     devLog("zen-restore", chunkMsg);
@@ -707,7 +704,6 @@ export async function restoreSnapshotToCloud(
         `Already pushed: ${totalPushed} tx (dict OK). ` +
         `Reason: ${e instanceof Error ? e.message : String(e)}`;
       if (!import.meta.env.PROD) {
-        // eslint-disable-next-line no-console
         console.error(`[Zen restore] ${errMsg}`);
       }
       devLog("zen-restore", errMsg, "error");
@@ -739,7 +735,6 @@ export async function restoreSnapshotToCloud(
     `sent ${accepted.transactions.visible}+${accepted.transactions.hidden} ` +
     `txs (visible+hidden) in ${chunkCount} request(s)`;
   if (!import.meta.env.PROD) {
-    // eslint-disable-next-line no-console
     console.info(`[Zen restore] ${summaryMsg}`);
   }
   devLog("zen-restore", summaryMsg);
@@ -782,7 +777,8 @@ export async function importSnapshotFromJson(
   } catch (e) {
     throw new Error(
       "Не удалось разобрать JSON: " +
-        (e instanceof Error ? e.message : String(e))
+        (e instanceof Error ? e.message : String(e)),
+      { cause: e }
     );
   }
   if (!parsed || typeof parsed !== "object") {

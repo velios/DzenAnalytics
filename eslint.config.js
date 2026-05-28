@@ -18,5 +18,26 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Underscore-prefixed args/vars are an intentional "unused on
+      // purpose" signal (e.g. kept for signature parity). Don't flag them.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
+  {
+    // Test files + fixtures: vitest globals aren't needed (we import
+    // describe/it/expect explicitly), but exclude them from the
+    // react-refresh component-export rule which doesn't apply here.
+    files: ['**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])

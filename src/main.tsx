@@ -5,9 +5,12 @@ import "./index.css";
 import App from "./App";
 
 // HashRouter when opened from file:// (standalone single-file release),
-// BrowserRouter when served over http(s).
+// BrowserRouter when served over http(s). This is the app entry file,
+// not a hot-reloadable component module, so the fast-refresh rule
+// doesn't apply to the `Router` const here.
 const isFileProtocol =
   typeof window !== "undefined" && window.location.protocol === "file:";
+// eslint-disable-next-line react-refresh/only-export-components
 const Router = isFileProtocol ? HashRouter : BrowserRouter;
 
 createRoot(document.getElementById("root")!).render(
