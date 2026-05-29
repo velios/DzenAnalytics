@@ -164,10 +164,18 @@ function applyPayeeGrouping(
   }
 
   // Step 3 — manual aliases (curated by the user), always applied.
+  // Match by the current (post-auto) payee first — that's a "rename the
+  // whole group" rule. Fall back to the ORIGINAL payee so a manual
+  // override of a single auto-grouped name works too (the auto-grouping
+  // table lets the user retarget one original without touching the rest
+  // of its group). Post-auto match wins so existing group-level rules
+  // keep their meaning.
   if (manualAliases.length > 0) {
     const manual = aliasesToMap(manualAliases);
     out = out.map((t) => {
-      const next = manual.get(t.payee);
+      const next =
+        manual.get(t.payee) ??
+        (t.payeeOriginal ? manual.get(t.payeeOriginal) : undefined);
       return next ? { ...t, payee: next } : t;
     });
   }

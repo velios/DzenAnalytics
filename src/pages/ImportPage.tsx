@@ -30,6 +30,7 @@ import {
   Info,
   ChevronDown,
   HardDrive,
+  RotateCcw,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { SyncLog } from "../components/SyncLog";
@@ -56,6 +57,82 @@ import { parseAndValidateBackup } from "../lib/backup";
 import * as db from "../lib/db";
 
 type Mode = "replace" | "merge";
+
+/**
+ * One row of the auto-grouping table. Shows `from → effectiveTo` where
+ * the target is inline-editable. Editing commits a manual alias
+ * (override) keyed by the original `from`; resetting removes it so the
+ * fuzzy auto target applies again. Local input state keeps typing
+ * snappy across hundreds of rows.
+ */
+function AutoGroupRow({
+  from,
+  autoTo,
+  overridden,
+  effectiveTo,
+  onCommit,
+  onReset,
+}: {
+  from: string;
+  autoTo: string;
+  overridden: boolean;
+  effectiveTo: string;
+  onCommit: (from: string, to: string) => void;
+  onReset: (from: string) => void;
+}) {
+  const [val, setVal] = useState(effectiveTo);
+  // Re-seed when the effective target changes externally (e.g. reset
+  // elsewhere, or a re-grouping pass).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVal(effectiveTo);
+  }, [effectiveTo]);
+
+  function commit() {
+    const next = val.trim();
+    if (!next || next === effectiveTo) {
+      setVal(effectiveTo);
+      return;
+    }
+    if (next === autoTo) {
+      // Back to the fuzzy default → drop any manual override.
+      if (overridden) onReset(from);
+    } else {
+      onCommit(from, next);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 py-1 border-b border-border/40 last:border-b-0">
+      <span className="truncate flex-1 min-w-0 text-muted" title={from}>
+        {from}
+      </span>
+      <span className="text-muted shrink-0">→</span>
+      <input
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") setVal(effectiveTo);
+        }}
+        className={`input text-xs !py-1 flex-1 min-w-0 ${
+          overridden ? "border-accent/50 text-text" : "text-text"
+        }`}
+        title={overridden ? "Изменено вручную" : "Авто-группировка"}
+      />
+      {overridden && (
+        <button
+          onClick={() => onReset(from)}
+          className="text-muted hover:text-text shrink-0 p-1"
+          title="Сбросить к авто-группировке"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function ImportPage() {
   const nav = useNavigate();
@@ -307,6 +384,14 @@ export function ImportPage() {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
   }, [transactions]);
+
+  // Manual aliases as a from→to lookup, for marking which auto-grouping
+  // rows the user has overridden.
+  const manualAliasMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of manualAliases) m.set(a.from, a.to);
+    return m;
+  }, [manualAliases]);
 
   async function submitAlias() {
     const f = aliasFrom.trim();
@@ -1268,17 +1353,33 @@ export function ImportPage() {
               <summary className="text-xs text-accent cursor-pointer hover:underline">
                 Показать применённые объединения ({aliasPreview.size})
               </summary>
-              <div className="mt-2 max-h-60 overflow-y-auto text-xs space-y-1">
-                {Array.from(aliasPreview.entries()).slice(0, 50).map(([from, to]) => (
-                  <div key={from} className="flex items-center gap-2 text-muted">
-                    <span className="truncate flex-1" title={from}>{from}</span>
-                    <span>→</span>
-                    <span className="text-text truncate flex-1" title={to}>{to}</span>
-                  </div>
-                ))}
-                {aliasPreview.size > 50 && (
-                  <div className="text-muted">…и ещё {aliasPreview.size - 50}</div>
-                )}
+              <p className="text-[11px] text-muted mt-2">
+                Цель объединения можно изменить прямо здесь — впишите своё
+                название. Правка сохранится как ручное правило (помечено
+                рамкой); кнопка ↺ вернёт авто-значение.
+              </p>
+              <div className="mt-2 max-h-72 overflow-y-auto pr-1">
+                {Array.from(aliasPreview.entries())
+                  .sort((a, b) => a[0].localeCompare(b[0], "ru"))
+                  .map(([from, autoTo]) => {
+                    const manualTo = manualAliasMap.get(from);
+                    const overridden = manualTo !== undefined;
+                    return (
+                      <AutoGroupRow
+                        key={from}
+                        from={from}
+                        autoTo={autoTo}
+                        overridden={overridden}
+                        effectiveTo={manualTo ?? autoTo}
+                        onCommit={(f, to) => {
+                          addAlias(f, to).then(reapplyRules);
+                        }}
+                        onReset={(f) => {
+                          removeAlias(f).then(reapplyRules);
+                        }}
+                      />
+                    );
+                  })}
               </div>
             </details>
           )}
@@ -1287,25 +1388,24 @@ export function ImportPage() {
           <div className="mt-5 pt-5 border-t border-border">
             <div className="text-sm font-medium mb-3">Ручные правила</div>
 
-            {/* Add new alias */}
+            {/* Add new alias. Combobox (not a native <input list>) so the
+                suggestions dropdown is width- and height-bounded — the
+                native datalist popup spilled across the whole viewport. */}
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto] items-center gap-2 mb-3">
-              <input
-                list="payee-options"
+              <Combobox
                 value={aliasFrom}
-                onChange={(e) => setAliasFrom(e.target.value)}
+                options={allPayeeOptions}
+                onChange={setAliasFrom}
                 placeholder="Откуда (как сейчас называется)"
-                className="input text-sm"
+                maxHeight="240px"
               />
               <span className="text-muted hidden md:inline">→</span>
-              <input
-                list="payee-options"
+              <Combobox
                 value={aliasTo}
-                onChange={(e) => setAliasTo(e.target.value)}
+                options={allPayeeOptions}
+                onChange={setAliasTo}
                 placeholder="Куда (как должно стать)"
-                className="input text-sm"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitAlias();
-                }}
+                maxHeight="240px"
               />
               <button
                 onClick={submitAlias}
@@ -1318,11 +1418,6 @@ export function ImportPage() {
               >
                 Добавить
               </button>
-              <datalist id="payee-options">
-                {allPayeeOptions.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
             </div>
 
             {/* Existing aliases */}
