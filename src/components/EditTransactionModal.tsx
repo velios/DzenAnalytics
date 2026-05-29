@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Pencil, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -310,7 +311,13 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   // viewports. 240px ≈ 8 visible rows, plenty for browsing.
   const DROPDOWN_MAX = "min(38vh, 240px)";
 
-  return (
+  // Portal to <body> so the overlay isn't a child of the page tree.
+  // Rendered inline it inherited a `margin-top: 24px` from the parent's
+  // `space-y-6` utility (it's a sibling row), which on a `fixed top:0`
+  // element pushed the scrim down 24px — leaving an uncovered strip at
+  // the top. A body-level portal also matches the standard modal pattern
+  // (immune to ancestor transforms / containing blocks).
+  return createPortal(
     <div
       // Plain dim scrim — NO backdrop-filter. A full-viewport
       // `backdrop-blur` over the chart-heavy page makes Chromium snapshot
@@ -555,7 +562,8 @@ export function EditTransactionModal({ tx, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
