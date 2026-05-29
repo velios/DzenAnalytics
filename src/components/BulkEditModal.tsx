@@ -109,7 +109,7 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
             <Layers className="w-4 h-4 text-accent" />
             Массовое изменение
             <span className="text-muted font-normal text-sm">
-              · выбрано {count}
+              · выбрано {count} {pluralOps(count)}
             </span>
           </div>
           <button
@@ -204,4 +204,14 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
     </div>,
     document.body
   );
+}
+
+/** Russian plural for «операция»: 1 операция, 2–4 операции, 5+ операций
+ *  (with the 11–14 exception). */
+function pluralOps(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "операция";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "операции";
+  return "операций";
 }
