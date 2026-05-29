@@ -9,10 +9,10 @@ import type { TransactionEdit } from "../store/useEditsStore";
  * Bulk-edit modal. Lets the user change Категория (+подкатегория),
  * Получатель and/or Комментарий for many selected transactions at once.
  *
- * Each field has an enable checkbox: only enabled fields go into the
- * patch, so the user can change one, two, or all three. An enabled but
- * empty Комментарий clears comments (valid); category/payee require a
- * value to be applied.
+ * All fields are open inputs. A field is applied only if the user typed
+ * something into it; empty fields are left untouched (their placeholder
+ * reads "… без изменений"). So the user can change one, two, or all
+ * three in one go.
  *
  * The patch mirrors the single-row modal: Получатель maps to `brand`
  * (Zenmoney's curated counterparty), category/subcategory feed the
@@ -27,10 +27,8 @@ interface Props {
 }
 
 export function BulkEditModal({ count, allTransactions, onApply, onClose }: Props) {
-  const [enableCategory, setEnableCategory] = useState(false);
-  const [enablePayee, setEnablePayee] = useState(false);
-  const [enableComment, setEnableComment] = useState(false);
-
+  // No enable-checkboxes: a field is "to be changed" iff the user typed
+  // something into it. Empty = leave that field untouched.
   const [category, setCategory] = useState("");
   const [subcategory, setSubcategory] = useState("");
   const [payee, setPayee] = useState("");
@@ -73,22 +71,20 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
   }, [allTransactions]);
 
   const canApply =
-    (enableCategory && category.trim() !== "") ||
-    (enablePayee && payee.trim() !== "") ||
-    enableComment;
+    category.trim() !== "" || payee.trim() !== "" || comment.trim() !== "";
 
   async function apply() {
     const patch: TransactionEdit = {};
-    if (enableCategory && category.trim()) {
+    if (category.trim()) {
       patch.category = category.trim();
+      // Subcategory only travels with a category; empty → clear it.
       patch.subcategory = subcategory.trim() || null;
     }
-    if (enablePayee && payee.trim()) {
+    if (payee.trim()) {
       patch.brand = payee.trim();
     }
-    if (enableComment) {
-      // Enabled-but-empty intentionally clears the comment.
-      patch.comment = comment;
+    if (comment.trim()) {
+      patch.comment = comment.trim();
     }
     if (Object.keys(patch).length === 0) return;
     setSaving(true);
@@ -129,16 +125,12 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
           <p className="text-xs text-muted">
-            Отметьте поля, которые нужно изменить. Неотмеченные останутся как
-            есть. Изменения применятся ко всем выбранным операциям.
+            Изменения применятся ко всем выбранным операциям.
           </p>
 
-          {/* Category */}
-          <FieldToggle
-            label="Категория"
-            enabled={enableCategory}
-            onToggle={setEnableCategory}
-          >
+          {/* Category + subcategory */}
+          <div>
+            <label className="label block mb-1">Категория</label>
             <div className="grid grid-cols-2 gap-2">
               <Combobox
                 value={category}
@@ -153,7 +145,7 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
                     setSubcategory("");
                   }
                 }}
-                placeholder="Категория"
+                placeholder="Категория без изменений"
                 maxHeight="200px"
               />
               <Combobox
@@ -164,41 +156,35 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
                 allowCustom={false}
                 clearable
                 onChange={setSubcategory}
-                placeholder="Подкатегория (необяз.)"
+                placeholder="Подкатегория"
                 maxHeight="200px"
               />
             </div>
-          </FieldToggle>
+          </div>
 
           {/* Payee */}
-          <FieldToggle
-            label="Получатель"
-            enabled={enablePayee}
-            onToggle={setEnablePayee}
-          >
+          <div>
+            <label className="label block mb-1">Получатель</label>
             <Combobox
               value={payee}
               options={payeeOptions}
               onChange={setPayee}
-              placeholder="Новый получатель для всех"
+              placeholder="Получатель без изменений"
               maxHeight="200px"
             />
-          </FieldToggle>
+          </div>
 
           {/* Comment */}
-          <FieldToggle
-            label="Комментарий"
-            enabled={enableComment}
-            onToggle={setEnableComment}
-          >
+          <div>
+            <label className="label block mb-1">Комментарий</label>
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={2}
-              placeholder="Новый комментарий (пусто — очистить)"
+              placeholder="Комментарий без изменений"
               className="input text-sm w-full resize-y min-h-[2.5rem]"
             />
-          </FieldToggle>
+          </div>
         </div>
 
         {/* Footer */}
@@ -217,37 +203,5 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
       </div>
     </div>,
     document.body
-  );
-}
-
-/** A labelled enable-checkbox that reveals its control when checked. */
-function FieldToggle({
-  label,
-  enabled,
-  onToggle,
-  children,
-}: {
-  label: string;
-  enabled: boolean;
-  onToggle: (v: boolean) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-lg border p-3 transition-colors ${
-        enabled ? "border-accent/40 bg-accent/[0.03]" : "border-border"
-      }`}
-    >
-      <label className="flex items-center gap-2 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => onToggle(e.target.checked)}
-          className="accent-accent w-4 h-4"
-        />
-        <span className="text-sm font-medium">{label}</span>
-      </label>
-      {enabled && <div className="mt-3">{children}</div>}
-    </div>
   );
 }
