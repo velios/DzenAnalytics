@@ -80,10 +80,11 @@ export function ConfirmDialog() {
 
   return (
     <div
-      // Backdrop: frosted (blurred), darkened. Click dismisses as
-      // cancel. `role="dialog"` for accessibility; `aria-modal` so
-      // screen readers know everything underneath is inert.
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-bg/60 backdrop-blur-sm animate-fade"
+      // Backdrop: a plain dim scrim (no backdrop-filter — a
+      // full-viewport blur over the chart page intermittently flashed
+      // the white root background on open). Click dismisses as cancel.
+      // `role="dialog"` + `aria-modal` for accessibility.
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-fade"
       onClick={() => close(false)}
       role="dialog"
       aria-modal="true"

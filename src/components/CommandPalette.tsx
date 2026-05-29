@@ -310,8 +310,11 @@ export function CommandPalette({ open, onClose }: Props) {
 
   return (
     <>
+      {/* Plain dim scrim — no backdrop-filter. A full-viewport blur over
+          the chart page intermittently flashes the white root background
+          on open (Chromium snapshots the page to blur it). */}
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 animate-fade"
+        className="fixed inset-0 bg-black/50 z-50 animate-fade"
         onClick={onClose}
       />
       <div

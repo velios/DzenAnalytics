@@ -312,7 +312,11 @@ export function EditTransactionModal({ tx, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      // Plain dim scrim — NO backdrop-filter. A full-viewport
+      // `backdrop-blur` over the chart-heavy page makes Chromium snapshot
+      // the page to blur it, which intermittently flashes the root
+      // (white) background for a frame on open. A solid dim never does.
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
       // Only treat as "click on backdrop" when both press AND release
       // happened on the backdrop itself. Otherwise a mousedown inside
       // the modal (e.g. text-selecting through to whitespace, or
