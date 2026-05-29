@@ -121,15 +121,19 @@ function AutoGroupRow({
         }`}
         title={overridden ? "Изменено вручную" : "Авто-группировка"}
       />
-      {overridden && (
-        <button
-          onClick={() => onReset(from)}
-          className="text-muted hover:text-text shrink-0 p-1"
-          title="Сбросить к авто-группировке"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-        </button>
-      )}
+      {/* Fixed-width slot so the row width doesn't jump when the reset
+          button appears/disappears on override. */}
+      <span className="w-7 shrink-0 flex items-center justify-center">
+        {overridden && (
+          <button
+            onClick={() => onReset(from)}
+            className="text-muted hover:text-text p-1"
+            title="Сбросить к авто-группировке"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </span>
     </div>
   );
 }
