@@ -14,11 +14,21 @@
  *   • category        (resolved to a single tag id by title)
  *   • subcategory     (resolved as a child tag where parent's title matches)
  *
+ *   • kind change        — supported for the single-leg flips
+ *                          Расход ↔ Доход ↔ Возврат: the money moves
+ *                          between the income/outcome legs of the SAME
+ *                          account (or, for income↔refund, stays put and
+ *                          only the category flavour changes).
+ *
  * The following are deliberately NOT supported yet (the edit stays in
  * the local overlay; user gets a clear "skipped" reason):
  *
- *   • kind change        — requires rewriting both legs of the tx
- *   • account change     — same; legs must stay consistent
+ *   • kind change to/from
+ *     «Перевод»          — requires a second account
+ *   • kind change on an
+ *     FX row             — non-zero opIncome/opOutcome; flipping legs
+ *                          would need to re-map operational instruments
+ *   • account change     — legs must stay consistent
  *   • outcomeAccount /
  *     incomeAccount      — used together with kind=transfer changes
  *
@@ -189,13 +199,44 @@ export function buildPushItems(
     // only edit still carries `kind` / `account` / both legs unchanged).
     // Comparing against the original lets us treat those as no-ops.
     const orig = classifyOriginal(original, accountsById, tagsById);
-    if (edit.kind !== undefined && edit.kind !== orig.kind) {
-      skipped.push({
-        id,
-        reason:
-          "Phase 1 не поддерживает смену типа операции (Расход/Доход/Перевод/Возврат). Отредактируйте в мобильном приложении.",
-      });
-      continue;
+    const targetKind: TxKind = (edit.kind as TxKind | undefined) ?? orig.kind;
+
+    // ── Kind transition (Phase 2: expense ↔ income ↔ refund) ──────────
+    // These three are single-leg, same-account flips: the money moves
+    // between the income and outcome legs of the SAME account, or (for
+    // income↔refund) stays put and only the category flavour differs.
+    // `origLeg` / `targetLeg` say which leg holds the money before/after.
+    // Transfers (need a 2nd account) and FX rows (operational op-amounts)
+    // are still out of scope — they're refused below.
+    const origLeg: "income" | "outcome" =
+      orig.kind === "expense" ? "outcome" : "income";
+    const targetLeg: "income" | "outcome" =
+      targetKind === "expense" ? "outcome" : "income";
+    if (targetKind !== orig.kind) {
+      if (orig.kind === "transfer" || targetKind === "transfer") {
+        skipped.push({
+          id,
+          reason:
+            "Смена типа на «Перевод» или с него пока не поддерживается — отредактируйте в мобильном приложении.",
+        });
+        continue;
+      }
+      // FX guard: a NON-ZERO operational amount means the transaction's
+      // currency differs from the account's (op-amount is the foreign
+      // value). Note Zenmoney stores 0 (not null) for the unused leg of
+      // a plain same-currency row, so we must test `> 0`, not non-null —
+      // otherwise every ordinary expense (opOutcome: 0) would be skipped.
+      if (
+        (original.opIncome || 0) > 0 ||
+        (original.opOutcome || 0) > 0
+      ) {
+        skipped.push({
+          id,
+          reason:
+            "Операция в валюте, отличной от счёта (мультивалютная) — смену типа пока не поддерживаем.",
+        });
+        continue;
+      }
     }
     if (edit.account !== undefined && edit.account !== orig.account) {
       skipped.push({
@@ -250,6 +291,30 @@ export function buildPushItems(
     // ── Build the patched ZenTransaction ──────────────────────────────
     const zen: ZenTransaction = { ...original };
 
+    // Apply a kind flip by moving the money between legs of the SAME
+    // account (verified above: non-transfer rows have
+    // incomeAccount === outcomeAccount, no FX op-amounts). The account
+    // ids stay as-is (both already point to the same account); we move
+    // the amount, the instrument and the bank-reconciliation id onto the
+    // target leg and zero the source leg. income↔refund don't move legs
+    // (origLeg === targetLeg) — only the category tag flavour differs,
+    // handled by the category edit below.
+    if (targetKind !== orig.kind && origLeg !== targetLeg) {
+      if (targetLeg === "income") {
+        zen.income = original.outcome;
+        zen.incomeInstrument = original.outcomeInstrument;
+        zen.incomeBankID = original.outcomeBankID;
+        zen.outcome = 0;
+        zen.outcomeBankID = null;
+      } else {
+        zen.outcome = original.income;
+        zen.outcomeInstrument = original.incomeInstrument;
+        zen.outcomeBankID = original.incomeBankID;
+        zen.income = 0;
+        zen.incomeBankID = null;
+      }
+    }
+
     if (edit.date !== undefined) {
       // We only accept ISO YYYY-MM-DD here — the EditTransactionModal
       // already guards on this, but be defensive in case of stale data.
@@ -296,20 +361,20 @@ export function buildPushItems(
       }
     }
 
-    // Amount goes on the side that already had non-zero (Zen's data
-    // model has both legs; for income-only tx only `income` is > 0; for
-    // expense-only only `outcome`). Transfer legs would each have their
-    // own amount — we refused those above via the kind/account guard.
+    // Amount + currency go on `targetLeg` — the leg that holds the money
+    // after any kind flip (for unchanged rows targetLeg === the original
+    // non-zero leg, so this matches the old behaviour). This runs AFTER
+    // the leg-move above, so an edited amount overrides the moved value.
     if (edit.amount !== undefined) {
-      if ((original.outcome || 0) > 0) zen.outcome = edit.amount;
-      else if ((original.income || 0) > 0) zen.income = edit.amount;
+      if (targetLeg === "outcome") zen.outcome = edit.amount;
+      else zen.income = edit.amount;
     }
 
     if (edit.currency !== undefined) {
       const instr = instrumentsBySymbol.get(edit.currency);
       if (instr) {
-        if ((original.outcome || 0) > 0) zen.outcomeInstrument = instr.id;
-        else if ((original.income || 0) > 0) zen.incomeInstrument = instr.id;
+        if (targetLeg === "outcome") zen.outcomeInstrument = instr.id;
+        else zen.incomeInstrument = instr.id;
       } else {
         skipped.push({
           id,
