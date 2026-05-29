@@ -41,6 +41,10 @@ interface EditsState {
   loaded: boolean;
   hydrate: () => Promise<void>;
   setEdit: (id: string, patch: TransactionEdit) => Promise<void>;
+  /** Apply the same patch to many transactions at once — one IDB write
+   *  + one store update (so the pipeline re-runs / auto-push fires once,
+   *  not N times). */
+  setEditMany: (ids: string[], patch: TransactionEdit) => Promise<void>;
   clearEdit: (id: string) => Promise<void>;
   clearAll: () => Promise<void>;
 }
@@ -58,6 +62,17 @@ export const useEditsStore = create<EditsState>((set, get) => ({
 
   setEdit: async (id, patch) => {
     const next = { ...get().edits, [id]: { ...get().edits[id], ...patch } };
+    await db.saveJSON(KEY, next);
+    set({ edits: next });
+  },
+
+  setEditMany: async (ids, patch) => {
+    if (ids.length === 0) return;
+    const prev = get().edits;
+    const next = { ...prev };
+    for (const id of ids) {
+      next[id] = { ...prev[id], ...patch };
+    }
     await db.saveJSON(KEY, next);
     set({ edits: next });
   },

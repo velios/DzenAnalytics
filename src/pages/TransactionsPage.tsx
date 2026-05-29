@@ -12,12 +12,13 @@ import {
   ListChecks,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
-import { useEditsStore } from "../store/useEditsStore";
+import { useEditsStore, type TransactionEdit } from "../store/useEditsStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { EditTransactionModal } from "../components/EditTransactionModal";
+import { BulkEditModal } from "../components/BulkEditModal";
 import { CategoryDot } from "../components/CategoryDot";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
@@ -54,10 +55,11 @@ function transferCounterparty(t: Transaction): string | null {
  *   FULL: date · category · payee · comment · account · amount · edit
  *   NODATE: (используется внутри group-by-day) то же самое без date
  */
+// Leading 32px column = selection checkbox.
 const GRID_COLS_FULL =
-  "84px minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
+  "32px 84px minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
 const GRID_COLS_NODATE =
-  "minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
+  "32px minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
 
 const PAGE_SIZE = 100;
 
@@ -90,6 +92,8 @@ export function TransactionsPage() {
   const edits = useEditsStore((s) => s.edits);
   const editsLoaded = useEditsStore((s) => s.loaded);
   const hydrateEdits = useEditsStore((s) => s.hydrate);
+  const setEditMany = useEditsStore((s) => s.setEditMany);
+  const reapplyRules = useDataStore((s) => s.reapplyRules);
   useEffect(() => {
     if (!editsLoaded) hydrateEdits();
   }, [editsLoaded, hydrateEdits]);
@@ -97,6 +101,28 @@ export function TransactionsPage() {
   const [pageSearch, setPageSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("date-desc");
   const [editing, setEditing] = useState<Transaction | null>(null);
+
+  // ── Bulk selection + edit ──────────────────────────────────────────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function applyBulk(patch: TransactionEdit) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    await setEditMany(ids, patch);
+    await reapplyRules();
+    setSelected(new Set());
+    setBulkOpen(false);
+  }
 
   const filtered = useMemo(
     () => applyFilters(transactions, filters, monthStartDay),
@@ -151,6 +177,18 @@ export function TransactionsPage() {
   if (sorted !== prevSorted) {
     setPrevSorted(sorted);
     setVisibleCount(PAGE_SIZE);
+    // Drop selection when the underlying set changes — selected ids
+    // may no longer be visible / relevant.
+    if (selected.size > 0) setSelected(new Set());
+  }
+
+  // Selection helpers computed over the full filtered+searched set (not
+  // just the lazily-rendered slice), so "select all" covers everything
+  // under the current filters.
+  const allSelected = searched.length > 0 && selected.size === searched.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(searched.map((t) => t.id)));
   }
 
   const visible = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
@@ -293,7 +331,12 @@ export function TransactionsPage() {
           </div>
         ) : groupedByDay ? (
           <div>
-            <HeaderRow grouped />
+            <HeaderRow
+              grouped
+              allSelected={allSelected}
+              someSelected={someSelected}
+              onToggleAll={toggleSelectAll}
+            />
             {groupedByDay.map(([ymd, txs]) => (
               <DayGroup
                 key={ymd}
@@ -303,12 +346,19 @@ export function TransactionsPage() {
                 edits={edits}
                 onEdit={setEditing}
                 onDelete={handleDelete}
+                selected={selected}
+                onToggleSelect={toggleSelect}
               />
             ))}
           </div>
         ) : (
           <div>
-            <HeaderRow grouped={false} />
+            <HeaderRow
+              grouped={false}
+              allSelected={allSelected}
+              someSelected={someSelected}
+              onToggleAll={toggleSelectAll}
+            />
             {visible.map((t) => (
               <Row
                 key={t.id}
@@ -316,6 +366,8 @@ export function TransactionsPage() {
                 edited={!!edits[t.id]}
                 onEdit={() => setEditing(t)}
                 onDelete={() => handleDelete(t)}
+                selected={selected.has(t.id)}
+                onToggleSelect={() => toggleSelect(t.id)}
               />
             ))}
           </div>
@@ -337,18 +389,67 @@ export function TransactionsPage() {
       {editing && (
         <EditTransactionModal tx={editing} onClose={() => setEditing(null)} />
       )}
+
+      {/* Floating bulk-action bar — appears when ≥1 row is selected. */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-panel shadow-xl">
+          <span className="text-sm">
+            Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
+          </span>
+          <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
+            <Pencil className="w-3.5 h-3.5" />
+            Изменить
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="btn-ghost text-sm text-muted"
+          >
+            Снять выделение
+          </button>
+        </div>
+      )}
+
+      {bulkOpen && (
+        <BulkEditModal
+          count={selected.size}
+          allTransactions={transactions}
+          onApply={applyBulk}
+          onClose={() => setBulkOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
 /** Колоночные заголовки. Сетка та же, что и у строк. */
-function HeaderRow({ grouped }: { grouped: boolean }) {
+function HeaderRow({
+  grouped,
+  allSelected,
+  someSelected,
+  onToggleAll,
+}: {
+  grouped: boolean;
+  allSelected: boolean;
+  someSelected: boolean;
+  onToggleAll: () => void;
+}) {
   const template = grouped ? GRID_COLS_NODATE : GRID_COLS_FULL;
   return (
     <div
       className="grid items-center gap-3 px-3 py-2 border-b border-border bg-panel text-xs uppercase tracking-wider text-muted font-medium sticky top-0 z-20"
       style={{ gridTemplateColumns: template }}
     >
+      <input
+        type="checkbox"
+        className="accent-accent w-4 h-4"
+        checked={allSelected}
+        ref={(el) => {
+          if (el) el.indeterminate = someSelected;
+        }}
+        onChange={onToggleAll}
+        title="Выбрать всё (под фильтрами)"
+        aria-label="Выбрать все операции"
+      />
       {!grouped && <div>Дата</div>}
       <div>Категория</div>
       <div>Получатель</div>
@@ -367,6 +468,8 @@ function DayGroup({
   edits,
   onEdit,
   onDelete,
+  selected,
+  onToggleSelect,
 }: {
   ymd: string;
   txs: Transaction[];
@@ -374,6 +477,8 @@ function DayGroup({
   edits: Record<string, unknown>;
   onEdit: (t: Transaction) => void;
   onDelete: (t: Transaction) => void;
+  selected: Set<string>;
+  onToggleSelect: (id: string) => void;
 }) {
   const { label, weekday } = useMemo(() => formatDayHeader(ymd), [ymd]);
   const totals = useMemo(() => {
@@ -422,6 +527,8 @@ function DayGroup({
           edited={!!edits[t.id]}
           onEdit={() => onEdit(t)}
           onDelete={() => onDelete(t)}
+          selected={selected.has(t.id)}
+          onToggleSelect={() => onToggleSelect(t.id)}
           hideDate
         />
       ))}
@@ -434,12 +541,16 @@ function Row({
   edited,
   onEdit,
   onDelete,
+  selected,
+  onToggleSelect,
   hideDate = false,
 }: {
   tx: Transaction;
   edited: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  selected: boolean;
+  onToggleSelect: () => void;
   hideDate?: boolean;
 }) {
   const template = hideDate ? GRID_COLS_NODATE : GRID_COLS_FULL;
@@ -450,10 +561,20 @@ function Row({
   return (
     <div
       onDoubleClick={onEdit}
-      className="grid items-center gap-3 px-3 py-2 border-b border-border/40 hover:bg-panel2/40 cursor-pointer group text-sm"
+      className={`grid items-center gap-3 px-3 py-2 border-b border-border/40 cursor-pointer group text-sm ${
+        selected ? "bg-accent/5" : "hover:bg-panel2/40"
+      }`}
       style={{ gridTemplateColumns: template }}
       title="Двойной клик — редактировать"
     >
+      <input
+        type="checkbox"
+        className="accent-accent w-4 h-4"
+        checked={selected}
+        onClick={(e) => e.stopPropagation()}
+        onChange={onToggleSelect}
+        aria-label="Выбрать операцию"
+      />
       {!hideDate && (
         <div className="text-muted text-xs tabular-nums whitespace-nowrap">
           {tx.date.slice(8, 10)}.{tx.date.slice(5, 7)}.{tx.date.slice(2, 4)}
