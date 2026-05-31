@@ -19,6 +19,8 @@ import {
   Settings2,
   Trash2,
   CheckCircle2,
+  LayoutGrid,
+  Table as TableIcon,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
@@ -27,6 +29,8 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { confirm } from "../store/useConfirmStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { getLiveAccountsFromCache } from "../store/useZenmoneyStore";
+import type { LiveAccount } from "../store/useZenmoneyStore";
 import {
   balancesByAccount,
   dailyBalanceSeries,
@@ -50,6 +54,8 @@ import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Sparkline } from "../components/Sparkline";
+import { AccountLogo } from "../components/AccountLogo";
+import { accountTypeLabel } from "../lib/accountType";
 
 const STACK_COLORS = [
   "#22D3EE", "#A78BFA", "#F59E0B", "#10B981", "#EC4899",
@@ -58,16 +64,32 @@ const STACK_COLORS = [
 
 type View = "stacked" | "single";
 type Scope = "filtered" | "all";
+type AccountsView = "cards" | "table";
 
 export function AccountsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const rates = useDataStore((s) => s.rates);
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [view, setView] = useState<View>("stacked");
   const [scope, setScope] = useState<Scope>("all");
+  const [accountsView, setAccountsView] = useState<AccountsView>("cards");
+
+  // Real per-account balances (API mode only). CSV mode → null, we fall back
+  // to the flow-derived delta and label it honestly.
+  const [liveAccounts, setLiveAccounts] = useState<LiveAccount[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getLiveAccountsFromCache().then((data) => {
+      if (!cancelled) setLiveAccounts(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
 
   const showDrill = useDrillStore((s) => s.show);
   const calibration = useCalibrationStore((s) => s.calibration);
@@ -108,6 +130,38 @@ export function AccountsPage() {
 
   const accounts = useMemo(() => balancesByAccount(filtered), [filtered]);
   const accountsAll = useMemo(() => balancesByAccount(transactions), [transactions]);
+
+  // Merge the flow-derived figures (delta / income / expense / count — these
+  // respect the active filters) with the real current balance from the API
+  // cache (when connected). `balanceBase` is null in CSV mode / for accounts
+  // the cache doesn't know about — the UI then shows the delta instead.
+  const accountRows = useMemo(() => {
+    const liveByTitle = new Map((liveAccounts ?? []).map((a) => [a.title, a]));
+    const toBase = (amt: number, cur: string) =>
+      cur === base ? amt : amt * (rates.rates[cur] || 1);
+    const rows = accounts.map((a) => {
+      const live = liveByTitle.get(a.account);
+      return {
+        account: a.account,
+        delta: a.balance,
+        income: a.income,
+        expense: a.expense,
+        count: a.count,
+        balanceBase: live ? toBase(live.balance, live.currency) : null,
+        nativeBalance: live ? live.balance : null,
+        nativeCurrency: live ? live.currency : null,
+        type: live?.type ?? "",
+        archive: live?.archive ?? false,
+      };
+    });
+    // Sort by real balance when we have it, otherwise by the flow delta.
+    rows.sort((x, y) => (y.balanceBase ?? y.delta) - (x.balanceBase ?? x.delta));
+    return rows;
+  }, [accounts, liveAccounts, base, rates]);
+
+  // True when at least one account carries a real (API) balance — drives the
+  // headline ("Баланс" vs "Изменение") and the table's column labels.
+  const hasRealBalances = accountRows.some((r) => r.balanceBase !== null);
   const series = useMemo(
     () => dailyBalanceSeries(filtered, selectedAccount ?? undefined),
     [filtered, selectedAccount]
@@ -527,71 +581,257 @@ export function AccountsPage() {
       </div>
 
       <div className="card card-pad">
-        <div className="font-semibold mb-3 flex items-center gap-2">
-          <Wallet className="w-4 h-4" />
-          Счета ({accounts.length})
-        </div>
-        <div className="text-xs text-muted mb-3">
-          Клик по карточке — фильтр графика «Дельта» по счёту. Кнопка «Операции» — список транзакций.
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {accounts.map((a) => (
-            <div
-              key={a.account}
-              className={`p-4 rounded-lg border transition-colors ${
-                selectedAccount === a.account
-                  ? "bg-accent/10 border-accent"
-                  : "bg-panel2 border-border hover:border-accent/50"
+        <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+          <div className="font-semibold flex items-center gap-2">
+            <Wallet className="w-4 h-4" />
+            Счета ({accountRows.length})
+          </div>
+          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+            <button
+              onClick={() => setAccountsView("cards")}
+              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
+                accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
               }`}
             >
-              <div className="flex items-start justify-between mb-2 gap-2">
-                <button
-                  onClick={() =>
-                    setSelectedAccount(selectedAccount === a.account ? null : a.account)
-                  }
-                  className="font-medium text-sm truncate text-left flex-1"
-                  title={a.account}
-                >
-                  {a.account}
-                </button>
-                <span className="pill text-[10px] shrink-0">{a.count}</span>
-              </div>
-              <button
-                onClick={() =>
-                  setSelectedAccount(selectedAccount === a.account ? null : a.account)
-                }
-                className="block text-left w-full"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div
-                    className={`text-lg font-semibold tabular-nums ${
-                      a.balance >= 0 ? "text-income" : "text-expense"
-                    }`}
-                  >
-                    {formatMoney(a.balance, base, { compact: true, signed: true })}
-                  </div>
-                  <Sparkline
-                    data={accountMonthlyDeltas(transactions, a.account, 12)}
-                    color={a.balance >= 0 ? "rgb(var(--c-income))" : "rgb(var(--c-expense))"}
-                    width={70}
-                    height={20}
-                  />
-                </div>
-                <div className="text-xs text-muted flex justify-between mt-1 mb-3">
-                  <span>+ {formatMoney(a.income, base, { compact: true })}</span>
-                  <span>− {formatMoney(a.expense, base, { compact: true })}</span>
-                </div>
-              </button>
-              <button
-                onClick={() => openAccount(a.account)}
-                className="btn-ghost text-xs w-full !py-1.5"
-              >
-                <List className="w-3 h-3" />
-                Операции
-              </button>
-            </div>
-          ))}
+              <LayoutGrid className="w-3 h-3" />
+              Карточки
+            </button>
+            <button
+              onClick={() => setAccountsView("table")}
+              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
+                accountsView === "table" ? "bg-accent text-accent-fg" : "text-muted"
+              }`}
+            >
+              <TableIcon className="w-3 h-3" />
+              Таблица
+            </button>
+          </div>
         </div>
+        <div className="text-xs text-muted mb-3">
+          {hasRealBalances
+            ? "«Баланс» — актуальная сумма из Дзен-мани. «Δ период» — изменение по текущим фильтрам. "
+            : "В CSV нет остатков счетов — показано «Изменение» (доход − расход) по фильтрам. "}
+          Клик по карточке/строке — фильтр графика «Дельта». «Операции» — список транзакций.
+        </div>
+
+        {accountsView === "cards" ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {accountRows.map((a) => {
+              const isSel = selectedAccount === a.account;
+              const hasReal = a.balanceBase !== null;
+              // Headline = real balance when known, else the flow delta.
+              const headline = hasReal ? a.balanceBase! : a.delta;
+              const headlineNeg = headline < 0;
+              // Real balances are neutral when positive (match dashboard);
+              // a flow delta keeps income/expense colouring.
+              const headlineColor = headlineNeg
+                ? "text-expense"
+                : hasReal
+                  ? "text-text"
+                  : "text-income";
+              const sparkColor = headlineNeg
+                ? "rgb(var(--c-expense))"
+                : "rgb(var(--c-income))";
+              return (
+                <div
+                  key={a.account}
+                  className={`p-4 rounded-lg border transition-colors ${
+                    isSel
+                      ? "bg-accent/10 border-accent"
+                      : "bg-panel2 border-border hover:border-accent/50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-2 gap-2">
+                    <button
+                      onClick={() => setSelectedAccount(isSel ? null : a.account)}
+                      className="flex items-center gap-2 min-w-0 text-left flex-1"
+                      title={a.account}
+                    >
+                      <AccountLogo title={a.account} type={a.type} />
+                      <span className="min-w-0">
+                        <span className="font-medium text-sm truncate block">
+                          {a.account}
+                        </span>
+                        {hasReal && (
+                          <span className="text-[10px] text-muted">
+                            {accountTypeLabel(a.type)}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    <span className="pill text-[10px] shrink-0">{a.count}</span>
+                  </div>
+                  <button
+                    onClick={() => setSelectedAccount(isSel ? null : a.account)}
+                    className="block text-left w-full"
+                  >
+                    <div className="text-[10px] uppercase tracking-wider text-muted">
+                      {hasReal ? "Баланс" : "Изменение"}
+                    </div>
+                    <div className="flex items-end justify-between gap-2">
+                      <div className="min-w-0">
+                        <div
+                          className={`text-xl font-bold tabular-nums truncate ${headlineColor}`}
+                          title={formatMoney(headline, base, { decimals: 2 })}
+                        >
+                          {formatMoney(headline, base, {
+                            decimals: 0,
+                            signed: !hasReal,
+                          })}
+                        </div>
+                        {hasReal &&
+                          a.nativeCurrency &&
+                          a.nativeCurrency !== base && (
+                            <div
+                              className="text-[11px] text-muted tabular-nums"
+                              title={formatMoney(a.nativeBalance!, a.nativeCurrency, {
+                                decimals: 2,
+                              })}
+                            >
+                              {formatMoney(a.nativeBalance!, a.nativeCurrency, {
+                                decimals: 0,
+                              })}
+                            </div>
+                          )}
+                      </div>
+                      <Sparkline
+                        data={accountMonthlyDeltas(transactions, a.account, 12)}
+                        color={sparkColor}
+                        width={70}
+                        height={20}
+                      />
+                    </div>
+                    <div className="text-xs text-muted flex justify-between mt-2 mb-3">
+                      {hasReal ? (
+                        <span title="Изменение по текущим фильтрам">
+                          Δ {formatMoney(a.delta, base, { compact: true, signed: true })}
+                        </span>
+                      ) : (
+                        <span />
+                      )}
+                      <span className="flex gap-2">
+                        <span className="text-income">
+                          +{formatMoney(a.income, base, { compact: true })}
+                        </span>
+                        <span className="text-expense">
+                          −{formatMoney(a.expense, base, { compact: true })}
+                        </span>
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => openAccount(a.account)}
+                    className="btn-ghost text-xs w-full !py-1.5"
+                  >
+                    <List className="w-3 h-3" />
+                    Операции
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-muted text-left">
+                  <th className="font-normal py-2 pr-2">Счёт</th>
+                  <th className="font-normal py-2 px-2 text-right">
+                    {hasRealBalances ? "Баланс" : "Изменение"}
+                  </th>
+                  <th className="font-normal py-2 px-2 text-right">Δ период</th>
+                  <th className="font-normal py-2 px-2 text-right">Поступления</th>
+                  <th className="font-normal py-2 px-2 text-right">Списания</th>
+                  <th className="font-normal py-2 px-2 text-right">Опер.</th>
+                  <th className="font-normal py-2 pl-2 text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {accountRows.map((a) => {
+                  const isSel = selectedAccount === a.account;
+                  const hasReal = a.balanceBase !== null;
+                  const headline = hasReal ? a.balanceBase! : a.delta;
+                  const headlineNeg = headline < 0;
+                  const headlineColor = headlineNeg
+                    ? "text-expense"
+                    : hasReal
+                      ? "text-text"
+                      : "text-income";
+                  return (
+                    <tr
+                      key={a.account}
+                      onClick={() => setSelectedAccount(isSel ? null : a.account)}
+                      className={`border-t border-border cursor-pointer group ${
+                        isSel ? "bg-accent/10" : "hover:bg-panel2/50"
+                      } ${a.archive ? "opacity-60" : ""}`}
+                    >
+                      <td className="py-2 pr-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <AccountLogo title={a.account} type={a.type} />
+                          <div className="min-w-0">
+                            <div
+                              className="font-medium truncate max-w-[200px] group-hover:text-accent"
+                              title={a.account}
+                            >
+                              {a.account}
+                            </div>
+                            {hasReal && (
+                              <div className="text-[10px] text-muted">
+                                {accountTypeLabel(a.type)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td
+                        className={`py-2 px-2 text-right tabular-nums font-semibold whitespace-nowrap ${headlineColor}`}
+                        title={formatMoney(headline, base, { decimals: 2 })}
+                      >
+                        {formatMoney(headline, base, { decimals: 0, signed: !hasReal })}
+                        {hasReal && a.nativeCurrency && a.nativeCurrency !== base && (
+                          <div className="text-[10px] text-muted font-normal">
+                            {formatMoney(a.nativeBalance!, a.nativeCurrency, {
+                              decimals: 0,
+                            })}
+                          </div>
+                        )}
+                      </td>
+                      <td
+                        className={`py-2 px-2 text-right tabular-nums whitespace-nowrap ${
+                          a.delta >= 0 ? "text-income" : "text-expense"
+                        }`}
+                      >
+                        {formatMoney(a.delta, base, { compact: true, signed: true })}
+                      </td>
+                      <td className="py-2 px-2 text-right tabular-nums text-income whitespace-nowrap">
+                        {formatMoney(a.income, base, { compact: true })}
+                      </td>
+                      <td className="py-2 px-2 text-right tabular-nums text-expense whitespace-nowrap">
+                        {formatMoney(a.expense, base, { compact: true })}
+                      </td>
+                      <td className="py-2 px-2 text-right tabular-nums text-muted">
+                        {formatNum(a.count)}
+                      </td>
+                      <td className="py-2 pl-2 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openAccount(a.account);
+                          }}
+                          className="btn-ghost text-xs !py-1 whitespace-nowrap"
+                          title="Список операций"
+                        >
+                          <List className="w-3 h-3" />
+                          Операции
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
