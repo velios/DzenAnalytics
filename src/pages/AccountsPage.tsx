@@ -377,7 +377,7 @@ export function AccountsPage() {
         <div className="card card-pad">
           <div className="label mb-1">Совокупный баланс</div>
           <div className={`stat-num ${lastNetWorth >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(lastNetWorth, base, { compact: true, signed: true })}
+            {formatMoney(lastNetWorth, base, { decimals: 0, signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">
             {scope === "all" ? "Вся история" : "В пределах фильтра"}
@@ -386,20 +386,20 @@ export function AccountsPage() {
         <div className="card card-pad">
           <div className="label mb-1">Пиковое значение</div>
           <div className="stat-num text-accent">
-            {formatMoney(peakNetWorth, base, { compact: true })}
+            {formatMoney(peakNetWorth, base, { decimals: 0 })}
           </div>
           <div className="text-xs text-muted mt-1">Максимум за период графика</div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Поступления (фильтр)</div>
           <div className="stat-num text-income">
-            {formatMoney(totalIncome, base, { compact: true })}
+            {formatMoney(totalIncome, base, { decimals: 0 })}
           </div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Списания (фильтр)</div>
           <div className="stat-num text-expense">
-            {formatMoney(totalExpense, base, { compact: true })}
+            {formatMoney(totalExpense, base, { decimals: 0 })}
           </div>
         </div>
       </div>
@@ -562,14 +562,14 @@ export function AccountsPage() {
           <div
             className={`stat-num ${totalNet >= 0 ? "text-income" : "text-expense"}`}
           >
-            {formatMoney(totalNet, base, { compact: true, signed: true })}
+            {formatMoney(totalNet, base, { decimals: 0, signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">По текущим фильтрам</div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Чистая дельта (вся история)</div>
           <div className={`stat-num ${totalAllAccounts >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(totalAllAccounts, base, { compact: true, signed: true })}
+            {formatMoney(totalAllAccounts, base, { decimals: 0, signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">Без фильтров</div>
         </div>
