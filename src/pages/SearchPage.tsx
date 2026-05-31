@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
-import { Search, Calendar, Coins, Tag, X, ArrowUpDown } from "lucide-react";
+import { Search, Calendar, Coins, Tag, X, ArrowUpDown, Pencil } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
+import { useEditsStore } from "../store/useEditsStore";
+import type { TransactionEdit } from "../store/useEditsStore";
 import { formatMoney, formatDate, formatNum } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
+import { BulkEditModal } from "../components/BulkEditModal";
 import type { Transaction } from "../types";
 
 type SortKey = "date" | "amount" | "category" | "payee";
@@ -12,6 +15,8 @@ type SortKey = "date" | "amount" | "category" | "payee";
 export function SearchPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const reapplyRules = useDataStore((s) => s.reapplyRules);
+  const setEditMany = useEditsStore((s) => s.setEditMany);
   const showDrill = useDrillStore((s) => s.show);
 
   const [query, setQuery] = useState("");
@@ -24,6 +29,28 @@ export function SearchPage() {
   const [kind, setKind] = useState<"all" | "expense" | "income">("all");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDesc, setSortDesc] = useState(true);
+
+  // ── Bulk selection + edit ──────────────────────────────────────────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function applyBulk(patch: TransactionEdit) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    await setEditMany(ids, patch);
+    await reapplyRules();
+    setSelected(new Set());
+    setBulkOpen(false);
+  }
 
   const matches = useMemo(() => {
     if (transactions.length === 0) return [];
@@ -90,6 +117,19 @@ export function SearchPage() {
     });
     return arr;
   }, [matches, sortKey, sortDesc]);
+
+  // Select-all covers the whole result set (not just the 200 shown rows), so
+  // a mass edit can hit every match. Reset when the result set changes.
+  const allSelected = sorted.length > 0 && sorted.every((t) => selected.has(t.id));
+  const someSelected = selected.size > 0 && !allSelected;
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(sorted.map((t) => t.id)));
+  }
+  const [prevSorted, setPrevSorted] = useState(sorted);
+  if (sorted !== prevSorted) {
+    setPrevSorted(sorted);
+    if (selected.size > 0) setSelected(new Set());
+  }
 
   const totals = useMemo(() => {
     let inc = 0;
@@ -306,6 +346,19 @@ export function SearchPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
+                  <th className="table-th w-8">
+                    <input
+                      type="checkbox"
+                      className="accent-accent w-4 h-4 align-middle"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={toggleSelectAll}
+                      title="Выбрать все результаты"
+                      aria-label="Выбрать все найденные операции"
+                    />
+                  </th>
                   <SortHead label="Дата" k="date" cur={sortKey} desc={sortDesc} on={toggleSort} />
                   <SortHead label="Категория" k="category" cur={sortKey} desc={sortDesc} on={toggleSort} />
                   <SortHead label="Получатель" k="payee" cur={sortKey} desc={sortDesc} on={toggleSort} />
@@ -315,12 +368,26 @@ export function SearchPage() {
                 </tr>
               </thead>
               <tbody>
-                {sorted.slice(0, 200).map((t) => (
+                {sorted.slice(0, 200).map((t) => {
+                  const isSel = selected.has(t.id);
+                  return (
                   <tr
                     key={t.id}
                     onClick={() => openOne(t)}
-                    className="hover:bg-panel2/50 cursor-pointer align-top"
+                    className={`cursor-pointer align-top ${
+                      isSel ? "bg-accent/5" : "hover:bg-panel2/50"
+                    }`}
                   >
+                    <td className="table-td w-8">
+                      <input
+                        type="checkbox"
+                        className="accent-accent w-4 h-4 align-middle"
+                        checked={isSel}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleSelect(t.id)}
+                        aria-label="Выбрать операцию"
+                      />
+                    </td>
                     <td className="table-td whitespace-nowrap text-muted">
                       {formatDate(t.date, "short")}
                     </td>
@@ -342,7 +409,8 @@ export function SearchPage() {
                       {formatMoney(t.amount, t.currency)}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             {sorted.length > 200 && (
@@ -352,6 +420,34 @@ export function SearchPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Floating bulk-action bar — appears when ≥1 result is selected. */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-panel shadow-xl">
+          <span className="text-sm">
+            Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
+          </span>
+          <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
+            <Pencil className="w-3.5 h-3.5" />
+            Изменить
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="btn-ghost text-sm text-muted"
+          >
+            Снять выделение
+          </button>
+        </div>
+      )}
+
+      {bulkOpen && (
+        <BulkEditModal
+          count={selected.size}
+          allTransactions={transactions}
+          onApply={applyBulk}
+          onClose={() => setBulkOpen(false)}
+        />
       )}
     </div>
   );

@@ -1,15 +1,20 @@
 import { useMemo, useState } from "react";
-import { Copy, AlertCircle } from "lucide-react";
+import { Copy, AlertCircle, Pencil } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
+import { useEditsStore } from "../store/useEditsStore";
+import type { TransactionEdit } from "../store/useEditsStore";
 import { detectDuplicates } from "../lib/aggregations";
 import { formatMoney, formatDate, formatNum } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
+import { BulkEditModal } from "../components/BulkEditModal";
 
 export function DuplicatesPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const reapplyRules = useDataStore((s) => s.reapplyRules);
+  const setEditMany = useEditsStore((s) => s.setEditMany);
   const showDrill = useDrillStore((s) => s.show);
 
   const [windowDays, setWindowDays] = useState(3);
@@ -17,6 +22,35 @@ export function DuplicatesPage() {
     () => detectDuplicates(transactions, windowDays),
     [transactions, windowDays]
   );
+
+  // ── Bulk selection + edit (global across all duplicate groups) ──────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function applyBulk(patch: TransactionEdit) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    await setEditMany(ids, patch);
+    await reapplyRules();
+    setSelected(new Set());
+    setBulkOpen(false);
+  }
+
+  // Reset selection when the detected groups change (window / data).
+  const [prevGroups, setPrevGroups] = useState(groups);
+  if (groups !== prevGroups) {
+    setPrevGroups(groups);
+    if (selected.size > 0) setSelected(new Set());
+  }
 
   if (transactions.length === 0) return <EmptyState />;
 
@@ -85,6 +119,15 @@ export function DuplicatesPage() {
         <div className="space-y-3">
           {groups.map((g, i) => {
             const first = g.txs[0];
+            const groupAll = g.txs.length > 0 && g.txs.every((t) => selected.has(t.id));
+            const groupSome = g.txs.some((t) => selected.has(t.id)) && !groupAll;
+            const toggleGroup = () =>
+              setSelected((prev) => {
+                const next = new Set(prev);
+                if (groupAll) g.txs.forEach((t) => next.delete(t.id));
+                else g.txs.forEach((t) => next.add(t.id));
+                return next;
+              });
             return (
               <div key={i} className="card card-pad">
                 <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
@@ -109,6 +152,19 @@ export function DuplicatesPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr>
+                      <th className="table-th w-8">
+                        <input
+                          type="checkbox"
+                          className="accent-accent w-4 h-4 align-middle"
+                          checked={groupAll}
+                          ref={(el) => {
+                            if (el) el.indeterminate = groupSome;
+                          }}
+                          onChange={toggleGroup}
+                          title="Выбрать всю группу"
+                          aria-label="Выбрать все операции группы"
+                        />
+                      </th>
                       <th className="table-th">Дата</th>
                       <th className="table-th">Категория</th>
                       <th className="table-th">Комментарий</th>
@@ -117,8 +173,22 @@ export function DuplicatesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {g.txs.map((t) => (
-                      <tr key={t.id} className="hover:bg-panel2/40">
+                    {g.txs.map((t) => {
+                      const isSel = selected.has(t.id);
+                      return (
+                      <tr
+                        key={t.id}
+                        className={isSel ? "bg-accent/5" : "hover:bg-panel2/40"}
+                      >
+                        <td className="table-td w-8">
+                          <input
+                            type="checkbox"
+                            className="accent-accent w-4 h-4 align-middle"
+                            checked={isSel}
+                            onChange={() => toggleSelect(t.id)}
+                            aria-label="Выбрать операцию"
+                          />
+                        </td>
                         <td className="table-td whitespace-nowrap text-muted">
                           {formatDate(t.date, "short")}
                         </td>
@@ -142,13 +212,42 @@ export function DuplicatesPage() {
                           {formatMoney(t.amount, t.currency)}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Floating bulk-action bar — appears when ≥1 row is selected. */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-panel shadow-xl">
+          <span className="text-sm">
+            Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
+          </span>
+          <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
+            <Pencil className="w-3.5 h-3.5" />
+            Изменить
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="btn-ghost text-sm text-muted"
+          >
+            Снять выделение
+          </button>
+        </div>
+      )}
+
+      {bulkOpen && (
+        <BulkEditModal
+          count={selected.size}
+          allTransactions={transactions}
+          onApply={applyBulk}
+          onClose={() => setBulkOpen(false)}
+        />
       )}
     </div>
   );
