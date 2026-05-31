@@ -832,14 +832,9 @@ export function DashboardPage() {
                                 decimals: 2,
                               })}
                             >
-                              {Math.abs(a.balanceBase) >= 1_000_000
-                                ? formatMoney(a.balanceBase, base, {
-                                    compact: true,
-                                    decimals: 2,
-                                  })
-                                : formatMoney(a.balanceBase, base, {
-                                    decimals: 2,
-                                  })}
+                              {formatMoney(a.balanceBase, base, {
+                                decimals: 2,
+                              })}
                             </div>
                             {hasFx && (
                               <div
@@ -850,17 +845,9 @@ export function DashboardPage() {
                                   { decimals: 2 }
                                 )}
                               >
-                                {Math.abs(a.nativeBalance) >= 1_000_000
-                                  ? formatMoney(
-                                      a.nativeBalance,
-                                      a.nativeCurrency,
-                                      { compact: true, decimals: 2 }
-                                    )
-                                  : formatMoney(
-                                      a.nativeBalance,
-                                      a.nativeCurrency,
-                                      { decimals: 2 }
-                                    )}
+                                {formatMoney(a.nativeBalance, a.nativeCurrency, {
+                                  decimals: 2,
+                                })}
                               </div>
                             )}
                           </td>
