@@ -99,7 +99,7 @@ export function DuplicatesPage() {
         <div className="card card-pad">
           <div className="label mb-1">Лишняя сумма</div>
           <div className="stat-num text-expense">
-            {formatMoney(totalDuplicateAmount, base, { compact: true })}
+            {formatMoney(totalDuplicateAmount, base, { decimals: 0 })}
           </div>
           <div className="text-xs text-muted mt-1">
             если все «лишние» копии — действительно дубли

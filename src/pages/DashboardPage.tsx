@@ -203,7 +203,7 @@ function MiniHeatmap({
                   title={
                     c?.date
                       ? `${formatDate(c.date)}: ${
-                          c.cell ? formatMoney(c.cell.expense, base, { compact: true }) : "—"
+                          c.cell ? formatMoney(c.cell.expense, base, { decimals: 0 }) : "—"
                         }${c.cell ? ` · ${c.cell.count} оп.` : ""}`
                       : ""
                   }
@@ -541,7 +541,7 @@ export function DashboardPage() {
           </div>
           <div className="text-xs text-muted mt-1">
             {sr !== null && last
-              ? `Чистый: ${formatMoney(last.net, base, { compact: true, signed: true })}`
+              ? `Чистый: ${formatMoney(last.net, base, { decimals: 0, signed: true })}`
               : "—"}
           </div>
         </div>
@@ -573,7 +573,7 @@ export function DashboardPage() {
                 <YAxis stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
                 <Tooltip
                   {...chartTooltipProps}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base, { compact: true })}
+                  formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
                 />
                 <Bar dataKey="income" name="Доход" fill="#10B981" radius={[4, 4, 0, 0]} activeBar={false} />
                 <Bar dataKey="expense" name="Расход" fill="#EF4444" radius={[4, 4, 0, 0]} activeBar={false} />
@@ -954,13 +954,13 @@ export function DashboardPage() {
                       </div>
                     </div>
                     <div className="text-sm font-semibold tabular-nums text-expense whitespace-nowrap">
-                      ≈ {formatMoney(c.avgAmount, c.currency, { compact: true })}
+                      ≈ {formatMoney(c.avgAmount, c.currency, { decimals: 0 })}
                     </div>
                   </div>
                 );
               })}
               <div className="mt-3 pt-3 border-t border-border text-xs text-muted">
-                ≈ {formatMoney(totalRecurringMonthly, base, { compact: true })} / мес всего на регулярные
+                ≈ {formatMoney(totalRecurringMonthly, base, { decimals: 0 })} / мес всего на регулярные
               </div>
             </div>
           )}

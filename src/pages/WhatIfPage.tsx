@@ -128,7 +128,7 @@ export function WhatIfPage() {
               max={2.0}
               step={0.05}
               format={(v) => `${v >= 1 ? "+" : ""}${formatPct(v - 1, 0)}`}
-              hint={`Текущий: ${formatMoney(baseScenario.avgIncome, base, { compact: true })}/мес → ${formatMoney(out.newIncome, base, { compact: true })}/мес`}
+              hint={`Текущий: ${formatMoney(baseScenario.avgIncome, base, { decimals: 0 })}/мес → ${formatMoney(out.newIncome, base, { decimals: 0 })}/мес`}
               onChange={(v) => setInputs((prev) => ({ ...prev, incomeMul: v }))}
             />
             <Slider
@@ -138,7 +138,7 @@ export function WhatIfPage() {
               max={1.5}
               step={0.05}
               format={(v) => `${v >= 1 ? "+" : ""}${formatPct(v - 1, 0)}`}
-              hint={`Текущий: ${formatMoney(baseScenario.avgExpense, base, { compact: true })}/мес → ${formatMoney(out.newExpense, base, { compact: true })}/мес`}
+              hint={`Текущий: ${formatMoney(baseScenario.avgExpense, base, { decimals: 0 })}/мес → ${formatMoney(out.newExpense, base, { decimals: 0 })}/мес`}
               onChange={(v) => setInputs((prev) => ({ ...prev, expenseMul: v }))}
             />
             <Slider
@@ -147,7 +147,7 @@ export function WhatIfPage() {
               min={0}
               max={Math.max(50000, baseScenario.avgIncome * 0.5)}
               step={500}
-              format={(v) => `+${formatMoney(v, base, { compact: true })}`}
+              format={(v) => `+${formatMoney(v, base, { decimals: 0 })}`}
               hint="Фиксированная сумма поверх нынешнего баланса доход−расход"
               onChange={(v) => setInputs((prev) => ({ ...prev, extraMonthlySave: v }))}
             />
@@ -171,7 +171,7 @@ export function WhatIfPage() {
               </div>
               <div className="text-[11px] text-muted mt-1">
                 По умолчанию — текущий совокупный баланс (
-                {formatMoney(currentNetWorth, base, { compact: true })}).
+                {formatMoney(currentNetWorth, base, { decimals: 0 })}).
               </div>
             </div>
           </div>
@@ -194,7 +194,7 @@ export function WhatIfPage() {
                       max={2}
                       step={0.05}
                       format={(v) => (v === 0 ? "−100%" : `${v >= 1 ? "+" : ""}${formatPct(v - 1, 0)}`)}
-                      hint={`Сейчас ${formatMoney(c.monthly, base, { compact: true })}/мес → ${formatMoney(c.monthly * mul, base, { compact: true })}/мес`}
+                      hint={`Сейчас ${formatMoney(c.monthly, base, { decimals: 0 })}/мес → ${formatMoney(c.monthly * mul, base, { decimals: 0 })}/мес`}
                       onChange={(v) =>
                         setInputs((prev) => ({
                           ...prev,
@@ -229,30 +229,30 @@ export function WhatIfPage() {
                 <tr className="border-t border-border">
                   <td className="py-2">Доход / мес</td>
                   <td className="py-2 text-right">
-                    {formatMoney(baseScenario.avgIncome, base, { compact: true })}
+                    {formatMoney(baseScenario.avgIncome, base, { decimals: 0 })}
                   </td>
                   <td className="py-2 text-right">
-                    {formatMoney(out.newIncome, base, { compact: true })}
+                    {formatMoney(out.newIncome, base, { decimals: 0 })}
                   </td>
                 </tr>
                 <tr className="border-t border-border">
                   <td className="py-2">Расход / мес</td>
                   <td className="py-2 text-right">
-                    {formatMoney(baseScenario.avgExpense, base, { compact: true })}
+                    {formatMoney(baseScenario.avgExpense, base, { decimals: 0 })}
                   </td>
                   <td className="py-2 text-right">
-                    {formatMoney(out.newExpense, base, { compact: true })}
+                    {formatMoney(out.newExpense, base, { decimals: 0 })}
                   </td>
                 </tr>
                 <tr className="border-t border-border">
                   <td className="py-2">Сбережения / мес</td>
                   <td className="py-2 text-right">
-                    {formatMoney(baseScenario.avgSavings, base, { compact: true })}
+                    {formatMoney(baseScenario.avgSavings, base, { decimals: 0 })}
                   </td>
                   <td
                     className={`py-2 text-right font-semibold ${out.newSavings > baseScenario.avgSavings ? "text-income" : out.newSavings < baseScenario.avgSavings ? "text-expense" : ""}`}
                   >
-                    {formatMoney(out.newSavings, base, { compact: true })}
+                    {formatMoney(out.newSavings, base, { decimals: 0 })}
                   </td>
                 </tr>
                 <tr className="border-t border-border">
@@ -336,7 +336,7 @@ export function WhatIfPage() {
                     className={out.annualSavingsDelta > 0 ? "text-income" : "text-expense"}
                   >
                     {out.annualSavingsDelta > 0 ? "+" : ""}
-                    {formatMoney(out.annualSavingsDelta, base, { compact: true })}
+                    {formatMoney(out.annualSavingsDelta, base, { decimals: 0 })}
                   </strong>{" "}
                   к текущей траектории.
                 </span>
@@ -392,7 +392,7 @@ function Stat({ label, value, base }: { label: string; value: number; base: stri
   return (
     <div>
       <div className="label">{label}</div>
-      <div className="stat-num text-base">{formatMoney(value, base, { compact: true })}</div>
+      <div className="stat-num text-base">{formatMoney(value, base, { decimals: 0 })}</div>
     </div>
   );
 }

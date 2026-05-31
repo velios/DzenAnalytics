@@ -139,7 +139,7 @@ export function TopPage() {
                           kind === "expense" ? "text-expense" : "text-income"
                         }`}
                       >
-                        {formatMoney(v, base, { compact: true })}
+                        {formatMoney(v, base, { decimals: 0 })}
                       </span>
                     );
                   },
@@ -173,7 +173,7 @@ export function TopPage() {
                     const v = kind === "expense" ? c.expense : c.income;
                     return (
                       <span className="tabular-nums text-muted">
-                        {formatMoney(v / c.count, base, { compact: true })}
+                        {formatMoney(v / c.count, base, { decimals: 0 })}
                       </span>
                     );
                   },
@@ -219,7 +219,7 @@ export function TopPage() {
                         kind === "expense" ? "text-expense" : "text-income"
                       }`}
                     >
-                      {formatMoney(p.total, base, { compact: true })}
+                      {formatMoney(p.total, base, { decimals: 0 })}
                     </span>
                   ),
                 },
@@ -246,7 +246,7 @@ export function TopPage() {
                   sortValue: (p) => (p.count > 0 ? p.total / p.count : 0),
                   render: (p) => (
                     <span className="tabular-nums text-muted">
-                      {formatMoney(p.total / p.count, base, { compact: true })}
+                      {formatMoney(p.total / p.count, base, { decimals: 0 })}
                     </span>
                   ),
                 },

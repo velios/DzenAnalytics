@@ -335,7 +335,7 @@ export function AccountsPage() {
                 <div className="text-[11px] text-muted mt-1">
                   Сейчас график показывает{" "}
                   <span className="tabular-nums">
-                    {formatMoney(rawAtCalibDate, base, { compact: true, signed: true })}
+                    {formatMoney(rawAtCalibDate, base, { decimals: 0, signed: true })}
                   </span>{" "}
                   на эту дату
                 </div>
@@ -438,7 +438,7 @@ export function AccountsPage() {
                 <Tooltip
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base, { compact: true, signed: true })}
+                  formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0, signed: true })}
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {stacked.accounts.map((acc, i) => (
@@ -480,7 +480,7 @@ export function AccountsPage() {
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
                   formatter={(v: unknown) => [
-                    formatMoney(toNum(v), base, { compact: true, signed: true }),
+                    formatMoney(toNum(v), base, { decimals: 0, signed: true }),
                     "Баланс",
                   ]}
                 />
@@ -540,7 +540,7 @@ export function AccountsPage() {
                 {...chartTooltipProps}
                 labelFormatter={(d) => formatDate(d as string)}
                 formatter={(v: unknown, n: unknown) => [
-                  formatMoney(toNum(v), base, { compact: true, signed: true }),
+                  formatMoney(toNum(v), base, { decimals: 0, signed: true }),
                   n === "balance" ? "Баланс" : "Дельта",
                 ]}
               />
@@ -704,17 +704,17 @@ export function AccountsPage() {
                     <div className="text-xs text-muted flex justify-between mt-2 mb-3">
                       {hasReal ? (
                         <span title="Изменение по текущим фильтрам">
-                          Δ {formatMoney(a.delta, base, { compact: true, signed: true })}
+                          Δ {formatMoney(a.delta, base, { decimals: 0, signed: true })}
                         </span>
                       ) : (
                         <span />
                       )}
                       <span className="flex gap-2">
                         <span className="text-income">
-                          +{formatMoney(a.income, base, { compact: true })}
+                          +{formatMoney(a.income, base, { decimals: 0 })}
                         </span>
                         <span className="text-expense">
-                          −{formatMoney(a.expense, base, { compact: true })}
+                          −{formatMoney(a.expense, base, { decimals: 0 })}
                         </span>
                       </span>
                     </div>
@@ -801,13 +801,13 @@ export function AccountsPage() {
                           a.delta >= 0 ? "text-income" : "text-expense"
                         }`}
                       >
-                        {formatMoney(a.delta, base, { compact: true, signed: true })}
+                        {formatMoney(a.delta, base, { decimals: 0, signed: true })}
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums text-income whitespace-nowrap">
-                        {formatMoney(a.income, base, { compact: true })}
+                        {formatMoney(a.income, base, { decimals: 0 })}
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums text-expense whitespace-nowrap">
-                        {formatMoney(a.expense, base, { compact: true })}
+                        {formatMoney(a.expense, base, { decimals: 0 })}
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums text-muted">
                         {formatNum(a.count)}

@@ -102,19 +102,19 @@ export function GoalsPage() {
             </div>
             <div className="text-xs text-muted mt-1">
               {avgSavings > 0
-                ? `+${formatMoney(avgSavings, base, { compact: true })}/мес`
-                : `−${formatMoney(-avgSavings, base, { compact: true })}/мес`}
+                ? `+${formatMoney(avgSavings, base, { decimals: 0 })}/мес`
+                : `−${formatMoney(-avgSavings, base, { decimals: 0 })}/мес`}
             </div>
           </div>
           <div className="card card-pad bg-panel2">
             <div className="label mb-1">Годовой расход</div>
-            <div className="stat-num">{formatMoney(annualExpense, base, { compact: true })}</div>
+            <div className="stat-num">{formatMoney(annualExpense, base, { decimals: 0 })}</div>
             <div className="text-xs text-muted mt-1">средний за 6 мес × 12</div>
           </div>
           <div className="card card-pad bg-panel2">
             <div className="label mb-1">Целевой капитал</div>
             <div className="stat-num text-accent">
-              {formatMoney(fireTarget, base, { compact: true })}
+              {formatMoney(fireTarget, base, { decimals: 0 })}
             </div>
             <div className="text-xs text-muted mt-1">×25 от годового расхода</div>
           </div>
@@ -239,8 +239,8 @@ export function GoalsPage() {
                   <div className="min-w-0">
                     <div className="font-semibold text-base">{g.name}</div>
                     <div className="text-xs text-muted mt-0.5">
-                      {formatMoney(g.current, base, { compact: true })} из{" "}
-                      {formatMoney(g.target, base, { compact: true })} ·{" "}
+                      {formatMoney(g.current, base, { decimals: 0 })} из{" "}
+                      {formatMoney(g.target, base, { decimals: 0 })} ·{" "}
                       {(ratio * 100).toFixed(0)}%
                     </div>
                   </div>
@@ -284,7 +284,7 @@ export function GoalsPage() {
                   <div className="flex items-center gap-1.5 text-muted">
                     <TrendingUp className="w-3.5 h-3.5" />
                     {monthsRemaining !== null
-                      ? `${monthsRemaining} мес при +${formatMoney(avgSavings, base, { compact: true })}/мес`
+                      ? `${monthsRemaining} мес при +${formatMoney(avgSavings, base, { decimals: 0 })}/мес`
                       : "Темп сбережений отрицательный — копить нечего"}
                   </div>
                   {projectedFinish && (

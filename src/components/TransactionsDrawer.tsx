@@ -281,13 +281,13 @@ export function TransactionsDrawer() {
           <div>
             <div className="label">Доходы</div>
             <div className="text-income font-semibold tabular-nums">
-              {formatMoney(totals.inc, base, { compact: true })}
+              {formatMoney(totals.inc, base, { decimals: 0 })}
             </div>
           </div>
           <div>
             <div className="label">Расходы</div>
             <div className="text-expense font-semibold tabular-nums">
-              {formatMoney(totals.exp, base, { compact: true })}
+              {formatMoney(totals.exp, base, { decimals: 0 })}
             </div>
           </div>
           <div>
@@ -297,7 +297,7 @@ export function TransactionsDrawer() {
                 totals.net >= 0 ? "text-income" : "text-expense"
               }`}
             >
-              {formatMoney(totals.net, base, { compact: true, signed: true })}
+              {formatMoney(totals.net, base, { decimals: 0, signed: true })}
             </div>
           </div>
         </div>

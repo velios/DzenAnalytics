@@ -57,7 +57,7 @@ export function TagsPage() {
         hint={
           <>
             {tags.length} тегов в {taggedCount} операциях
-            {totalExpense > 0 && ` · всего ${formatMoney(totalExpense, base, { compact: true })}`}.
+            {totalExpense > 0 && ` · всего ${formatMoney(totalExpense, base, { decimals: 0 })}`}.
             Клик по тегу — операции.
           </>
         }
@@ -86,7 +86,7 @@ export function TagsPage() {
                 <Hash className="w-3 h-3 text-accent shrink-0" />
                 <span className="font-medium">{t.tag}</span>
                 <span className="text-muted text-xs tabular-nums">
-                  {formatMoney(t.expense + t.income, base, { compact: true })}
+                  {formatMoney(t.expense + t.income, base, { decimals: 0 })}
                 </span>
               </button>
             );
@@ -123,7 +123,7 @@ export function TagsPage() {
                 sortValue: (t) => t.expense,
                 render: (t) => (
                   <span className="tabular-nums text-expense">
-                    {t.expense > 0 ? formatMoney(t.expense, base, { compact: true }) : "—"}
+                    {t.expense > 0 ? formatMoney(t.expense, base, { decimals: 0 }) : "—"}
                   </span>
                 ),
               },
@@ -134,7 +134,7 @@ export function TagsPage() {
                 sortValue: (t) => t.income,
                 render: (t) => (
                   <span className="tabular-nums text-income">
-                    {t.income > 0 ? formatMoney(t.income, base, { compact: true }) : "—"}
+                    {t.income > 0 ? formatMoney(t.income, base, { decimals: 0 }) : "—"}
                   </span>
                 ),
               },

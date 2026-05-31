@@ -504,19 +504,19 @@ function DayGroup({
           <span className="text-muted whitespace-nowrap">{txs.length} оп.</span>
           {totals.inc > 0 && (
             <span className="text-income whitespace-nowrap">
-              +{formatMoney(totals.inc, base, { compact: true })}
+              +{formatMoney(totals.inc, base, { decimals: 0 })}
             </span>
           )}
           {totals.exp > 0 && (
             <span className="text-expense whitespace-nowrap">
-              −{formatMoney(totals.exp, base, { compact: true })}
+              −{formatMoney(totals.exp, base, { decimals: 0 })}
             </span>
           )}
           <span
             className={`font-medium whitespace-nowrap ${totals.net >= 0 ? "text-income" : "text-expense"}`}
             title="Чистый поток за день"
           >
-            {formatMoney(totals.net, base, { compact: true, signed: true })}
+            {formatMoney(totals.net, base, { decimals: 0, signed: true })}
           </span>
         </div>
       </div>

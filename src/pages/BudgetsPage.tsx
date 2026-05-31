@@ -113,13 +113,13 @@ export function BudgetsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card card-pad">
           <div className="label mb-1">Всего лимитов</div>
-          <div className="stat-num">{formatMoney(totalBudget, base, { compact: true })}</div>
+          <div className="stat-num">{formatMoney(totalBudget, base, { decimals: 0 })}</div>
           <div className="text-xs text-muted mt-1">{budgetEntries.length} категорий</div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Потрачено</div>
           <div className="stat-num text-expense">
-            {formatMoney(totalSpent, base, { compact: true })}
+            {formatMoney(totalSpent, base, { decimals: 0 })}
           </div>
           <div className="text-xs text-muted mt-1">
             {totalBudget > 0 ? `${((totalSpent / totalBudget) * 100).toFixed(0)}% от лимитов` : "—"}
@@ -128,7 +128,7 @@ export function BudgetsPage() {
         <div className="card card-pad">
           <div className="label mb-1">Прогноз на месяц</div>
           <div className={`stat-num ${totalProj > totalBudget ? "text-expense" : "text-warn"}`}>
-            {totalProj > 0 ? formatMoney(totalProj, base, { compact: true }) : "—"}
+            {totalProj > 0 ? formatMoney(totalProj, base, { decimals: 0 }) : "—"}
           </div>
           <div className="text-xs text-muted mt-1">При текущем темпе</div>
         </div>
@@ -137,7 +137,7 @@ export function BudgetsPage() {
           <div
             className={`stat-num ${totalBudget - totalSpent < 0 ? "text-expense" : "text-income"}`}
           >
-            {formatMoney(totalBudget - totalSpent, base, { compact: true, signed: true })}
+            {formatMoney(totalBudget - totalSpent, base, { decimals: 0, signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">Лимит минус факт</div>
         </div>
@@ -230,13 +230,13 @@ export function BudgetsPage() {
                       {cat}
                     </button>
                     <div className="text-xs text-muted mt-0.5">
-                      Лимит: {formatMoney(limit, base, { compact: true })} / мес
+                      Лимит: {formatMoney(limit, base, { decimals: 0 })} / мес
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right">
                       <div className={`text-lg font-semibold tabular-nums ${toneClass}`}>
-                        {formatMoney(spent, base, { compact: true })}
+                        {formatMoney(spent, base, { decimals: 0 })}
                       </div>
                       <div className="text-xs text-muted">
                         {(ratio * 100).toFixed(0)}% израсходовано
@@ -291,13 +291,13 @@ export function BudgetsPage() {
                   <div>
                     Прогноз:{" "}
                     <span className={`tabular-nums ${projOver > 0 ? "text-expense" : "text-text"}`}>
-                      {formatMoney(projected, base, { compact: true })}
+                      {formatMoney(projected, base, { decimals: 0 })}
                     </span>
                   </div>
                   <div className="text-right">
                     Осталось:{" "}
                     <span className={`tabular-nums ${remaining < 0 ? "text-expense" : "text-income"}`}>
-                      {formatMoney(remaining, base, { compact: true, signed: true })}
+                      {formatMoney(remaining, base, { decimals: 0, signed: true })}
                     </span>
                   </div>
                 </div>
@@ -305,7 +305,7 @@ export function BudgetsPage() {
                 {projOver > 0 && (
                   <div className="text-xs text-warn mt-2">
                     ⚠ При текущем темпе перерасход составит ≈
-                    {formatMoney(projOver, base, { compact: true })}
+                    {formatMoney(projOver, base, { decimals: 0 })}
                   </div>
                 )}
 

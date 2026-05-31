@@ -139,14 +139,14 @@ export function YearReviewPage() {
           <div className="grid md:grid-cols-3 gap-6">
             <Hero
               label="Доход"
-              value={formatMoney(review.totalIncome, baseCurrency, { compact: true })}
+              value={formatMoney(review.totalIncome, baseCurrency, { decimals: 0 })}
               delta={review.prev.available ? incomeDelta.text : undefined}
               deltaCls={review.prev.available ? incomeDelta.cls : undefined}
               icon={<TrendingUp className="w-5 h-5 text-income" />}
             />
             <Hero
               label="Расход"
-              value={formatMoney(review.totalExpense, baseCurrency, { compact: true })}
+              value={formatMoney(review.totalExpense, baseCurrency, { decimals: 0 })}
               delta={review.prev.available ? expenseDelta.text : undefined}
               deltaCls={review.prev.available ? expenseDelta.cls : undefined}
               icon={<TrendingDown className="w-5 h-5 text-expense" />}
@@ -154,7 +154,7 @@ export function YearReviewPage() {
             <Hero
               label="Чистый поток"
               value={formatMoney(review.netFlow, baseCurrency, {
-                compact: true,
+                decimals: 0,
                 signed: true,
               })}
               delta={review.prev.available ? netDelta.text : undefined}
@@ -176,7 +176,7 @@ export function YearReviewPage() {
             }
             sub={
               review.recordMonths.bestSaving
-                ? `${formatMoney(review.recordMonths.bestSaving.net, baseCurrency, { compact: true, signed: true })} чистого потока`
+                ? `${formatMoney(review.recordMonths.bestSaving.net, baseCurrency, { decimals: 0, signed: true })} чистого потока`
                 : ""
             }
             color="text-income"
@@ -190,7 +190,7 @@ export function YearReviewPage() {
             }
             sub={
               review.recordMonths.biggestExpense
-                ? formatMoney(review.recordMonths.biggestExpense.expense, baseCurrency, { compact: true })
+                ? formatMoney(review.recordMonths.biggestExpense.expense, baseCurrency, { decimals: 0 })
                 : ""
             }
             color="text-expense"
@@ -204,7 +204,7 @@ export function YearReviewPage() {
             }
             sub={
               review.recordMonths.biggestIncome
-                ? formatMoney(review.recordMonths.biggestIncome.income, baseCurrency, { compact: true })
+                ? formatMoney(review.recordMonths.biggestIncome.income, baseCurrency, { decimals: 0 })
                 : ""
             }
             color="text-accent"
@@ -253,7 +253,7 @@ export function YearReviewPage() {
                     </div>
                   </div>
                   <div className="text-expense font-semibold tabular-nums">
-                    {formatMoney(t.amountBase, baseCurrency, { compact: true })}
+                    {formatMoney(t.amountBase, baseCurrency, { decimals: 0 })}
                   </div>
                 </button>
               ))}
@@ -273,7 +273,7 @@ export function YearReviewPage() {
                 <>
                   В среднем тратили{" "}
                   <strong>
-                    {formatMoney(review.avgPerDay, baseCurrency, { compact: true })}
+                    {formatMoney(review.avgPerDay, baseCurrency, { decimals: 0 })}
                   </strong>{" "}
                   в день
                 </>
@@ -284,7 +284,7 @@ export function YearReviewPage() {
                 <>
                   Любимый день недели для трат —{" "}
                   <strong>{review.favoriteWeekday.name}</strong> (
-                  {formatMoney(review.favoriteWeekday.total, baseCurrency, { compact: true })}
+                  {formatMoney(review.favoriteWeekday.total, baseCurrency, { decimals: 0 })}
                   )
                 </>
               }
@@ -441,7 +441,7 @@ function TopList({
                 <div className="flex items-center justify-between">
                   <div className="truncate">{item.name}</div>
                   <div className="tabular-nums whitespace-nowrap text-muted text-xs ml-3">
-                    {formatMoney(item.amount, baseCurrency, { compact: true })}
+                    {formatMoney(item.amount, baseCurrency, { decimals: 0 })}
                   </div>
                 </div>
                 <div className="h-1 rounded-full overflow-hidden bg-panel2 mt-1">

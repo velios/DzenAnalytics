@@ -78,14 +78,14 @@ export function AnomaliesPage() {
         <div className="card card-pad">
           <div className="label mb-1">Их сумма</div>
           <div className="stat-num text-expense">
-            {formatMoney(totalAnomalyAmount, base, { compact: true })}
+            {formatMoney(totalAnomalyAmount, base, { decimals: 0 })}
           </div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Всплески по категориям</div>
           <div className="stat-num text-warn">{spikes.length}</div>
           <div className="text-xs text-muted mt-1">
-            Превышение {formatMoney(totalSpikesDelta, base, { compact: true })}
+            Превышение {formatMoney(totalSpikesDelta, base, { decimals: 0 })}
           </div>
         </div>
       </div>
@@ -249,7 +249,7 @@ export function AnomaliesPage() {
                     sortValue: (s) => s.baseline,
                     render: (s) => (
                       <span className="tabular-nums text-muted">
-                        {formatMoney(s.baseline, base, { compact: true })}
+                        {formatMoney(s.baseline, base, { decimals: 0 })}
                       </span>
                     ),
                   },
@@ -260,7 +260,7 @@ export function AnomaliesPage() {
                     sortValue: (s) => s.current,
                     render: (s) => (
                       <span className="tabular-nums text-expense">
-                        {formatMoney(s.current, base, { compact: true })}
+                        {formatMoney(s.current, base, { decimals: 0 })}
                       </span>
                     ),
                   },
@@ -271,7 +271,7 @@ export function AnomaliesPage() {
                     sortValue: (s) => s.delta,
                     render: (s) => (
                       <span className="tabular-nums text-warn font-medium">
-                        +{formatMoney(s.delta, base, { compact: true })}
+                        +{formatMoney(s.delta, base, { decimals: 0 })}
                       </span>
                     ),
                   },

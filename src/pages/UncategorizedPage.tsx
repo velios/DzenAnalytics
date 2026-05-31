@@ -115,7 +115,7 @@ export function UncategorizedPage() {
         <div className="card card-pad">
           <div className="label mb-1">Сумма</div>
           <div className="stat-num text-warn">
-            {formatMoney(total, base, { compact: true })}
+            {formatMoney(total, base, { decimals: 0 })}
           </div>
         </div>
         <div className="card card-pad">
