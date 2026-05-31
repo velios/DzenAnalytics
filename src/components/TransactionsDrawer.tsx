@@ -13,11 +13,13 @@ import {
 import { useDrillStore } from "../store/useDrillStore";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
+import type { TransactionEdit } from "../store/useEditsStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { CategoryDot } from "./CategoryDot";
 import { EditTransactionModal } from "./EditTransactionModal";
-import { formatMoney, formatDate, displayPayee, secondaryPayee } from "../lib/format";
+import { BulkEditModal } from "./BulkEditModal";
+import { formatMoney, formatDate, formatNum, displayPayee, secondaryPayee } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
@@ -47,6 +49,8 @@ export function TransactionsDrawer() {
   const base = useDataStore((s) => s.rates.base);
   const allTransactions = useDataStore((s) => s.transactions);
   const deleteTransaction = useDataStore((s) => s.deleteTransaction);
+  const reapplyRules = useDataStore((s) => s.reapplyRules);
+  const setEditMany = useEditsStore((s) => s.setEditMany);
 
   async function handleDelete(tx: Transaction) {
     const pushMode = useZenmoneyStore.getState().pushMode;
@@ -66,6 +70,29 @@ export function TransactionsDrawer() {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [editing, setEditing] = useState<Transaction | null>(null);
+
+  // ── Bulk selection + edit ──────────────────────────────────────────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function applyBulk(patch: TransactionEdit) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    await setEditMany(ids, patch);
+    await reapplyRules();
+    setSelected(new Set());
+    setBulkOpen(false);
+  }
+
   const edits = useEditsStore((s) => s.edits);
   const editsLoaded = useEditsStore((s) => s.loaded);
   const hydrateEdits = useEditsStore((s) => s.hydrate);
@@ -91,7 +118,18 @@ export function TransactionsDrawer() {
   const [prevOpen, setPrevOpen] = useState(open);
   if (open !== prevOpen) {
     setPrevOpen(open);
-    if (open) setSearch("");
+    if (open) {
+      setSearch("");
+      if (selected.size > 0) setSelected(new Set());
+    }
+  }
+
+  // The "Похожие" shortcuts re-drill in place (new `transactions` snapshot
+  // without closing the drawer). Drop a stale selection when that happens.
+  const [prevTx, setPrevTx] = useState(transactions);
+  if (transactions !== prevTx) {
+    setPrevTx(transactions);
+    if (selected.size > 0) setSelected(new Set());
   }
 
   // Drill store keeps a snapshot of transactions taken at the moment the drawer
@@ -119,6 +157,14 @@ export function TransactionsDrawer() {
     };
     return [...filtered].sort(cmp);
   }, [liveTransactions, search, sortKey, sortDir]);
+
+  // Select-all reflects the currently visible (searched + sorted) set, so it
+  // stays correct across sorting and search without clearing the selection.
+  const allSelected = sorted.length > 0 && sorted.every((t) => selected.has(t.id));
+  const someSelected = selected.size > 0 && !allSelected;
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(sorted.map((t) => t.id)));
+  }
 
   const totals = useMemo(() => {
     let inc = 0;
@@ -286,6 +332,19 @@ export function TransactionsDrawer() {
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-panel z-10">
                 <tr>
+                  <th className="table-th w-8">
+                    <input
+                      type="checkbox"
+                      className="accent-accent w-4 h-4 align-middle"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={toggleSelectAll}
+                      title="Выбрать всё (под текущим поиском)"
+                      aria-label="Выбрать все операции"
+                    />
+                  </th>
                   <SortHead label="Дата" k="date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortHead label="Категория" k="category" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortHead label="Получатель" k="payee" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
@@ -298,13 +357,26 @@ export function TransactionsDrawer() {
               <tbody>
                 {sorted.map((t) => {
                   const isEdited = !!edits[t.id];
+                  const isSel = selected.has(t.id);
                   return (
                   <tr
                     key={t.id}
                     onDoubleClick={() => setEditing(t)}
-                    className="hover:bg-panel2/40 align-top group cursor-pointer"
+                    className={`align-top group cursor-pointer ${
+                      isSel ? "bg-accent/5" : "hover:bg-panel2/40"
+                    }`}
                     title="Двойной клик — редактировать"
                   >
+                    <td className="table-td w-8">
+                      <input
+                        type="checkbox"
+                        className="accent-accent w-4 h-4 align-middle"
+                        checked={isSel}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleSelect(t.id)}
+                        aria-label="Выбрать операцию"
+                      />
+                    </td>
                     <td className="table-td whitespace-nowrap text-muted">
                       {formatDate(t.date, "short")}
                     </td>
@@ -391,6 +463,36 @@ export function TransactionsDrawer() {
           )}
         </div>
       </aside>
+
+      {/* Floating bulk-action bar — appears when ≥1 row is selected. Sits
+          above the drawer (z-50) but below the edit modal (portaled, z-60). */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[55] flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-panel shadow-xl">
+          <span className="text-sm">
+            Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
+          </span>
+          <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
+            <Pencil className="w-3.5 h-3.5" />
+            Изменить
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="btn-ghost text-sm text-muted"
+          >
+            Снять выделение
+          </button>
+        </div>
+      )}
+
+      {bulkOpen && (
+        <BulkEditModal
+          count={selected.size}
+          allTransactions={allTransactions}
+          onApply={applyBulk}
+          onClose={() => setBulkOpen(false)}
+        />
+      )}
+
       {editing && (
         <EditTransactionModal
           tx={editing}
