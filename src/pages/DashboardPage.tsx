@@ -68,6 +68,7 @@ import {
 } from "../lib/format";
 import { affectsExpense } from "../lib/txKindStyle";
 import { AccountLogo } from "../components/AccountLogo";
+import { accountTypeLabel } from "../lib/accountType";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { InsightsPanel } from "../components/InsightsPanel";
@@ -90,23 +91,6 @@ const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTH_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
 // Zenmoney account-type strings → Russian labels for the dashboard table.
-const ACCOUNT_TYPE_RU: Record<string, string> = {
-  ccard: "Карта",
-  debit: "Карта",
-  checking: "Счёт",
-  cash: "Наличные",
-  deposit: "Вклад",
-  loan: "Долг",
-  credit: "Долг",
-  debt: "Долг",
-  emoney: "Кошелёк",
-};
-
-function accountTypeLabel(type: string): string {
-  if (!type) return "—";
-  return ACCOUNT_TYPE_RU[type] || type;
-}
-
 function buildBins(values: number[], n = 8): number[] {
   const positives = values.filter((v) => v > 0).sort((a, b) => a - b);
   if (positives.length === 0) return [];
