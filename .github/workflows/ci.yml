@@ -4,7 +4,10 @@ name: CI
 # and v0.5.6: a strict TypeScript error that `tsc --noEmit` glossed
 # over but `tsc -b` (which the release build uses) refused to compile.
 #
-# Two jobs:
+# Three jobs:
+#   • test   — `npm test` (vitest run). Required. Guards the
+#     money-critical pure logic (aggregations, csv, zenmoney push,
+#     backup, safe-regex) on every push/PR.
 #   • build  — `npm run build` (= tsc -b + vite build). Required.
 #     Builds both the regular bundle and the standalone single-file
 #     bundle so we never ship a broken release.
@@ -19,6 +22,19 @@ on:
     branches: [main]
 
 jobs:
+  test:
+    name: Test (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm test
+
   build:
     name: Build (tsc -b + vite)
     runs-on: ubuntu-latest
