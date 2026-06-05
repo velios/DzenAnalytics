@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, Calendar, Coins, Tag, X, ArrowUpDown, Pencil } from "lucide-react";
+import { Search, Calendar, Coins, Tag, X, ArrowUpDown, Pencil, Trash2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -8,6 +8,7 @@ import { formatMoney, formatDate, formatNum } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { BulkEditModal } from "../components/BulkEditModal";
+import { confirmBulkDelete } from "../lib/confirmBulkDelete";
 import type { Transaction } from "../types";
 
 type SortKey = "date" | "amount" | "category" | "payee";
@@ -16,6 +17,7 @@ export function SearchPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const reapplyRules = useDataStore((s) => s.reapplyRules);
+  const deleteTransactionMany = useDataStore((s) => s.deleteTransactionMany);
   const setEditMany = useEditsStore((s) => s.setEditMany);
   const showDrill = useDrillStore((s) => s.show);
 
@@ -50,6 +52,15 @@ export function SearchPage() {
     await reapplyRules();
     setSelected(new Set());
     setBulkOpen(false);
+  }
+
+  async function deleteBulk() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const ok = await confirmBulkDelete(ids.length);
+    if (!ok) return;
+    await deleteTransactionMany(ids);
+    setSelected(new Set());
   }
 
   const matches = useMemo(() => {
@@ -435,6 +446,10 @@ export function SearchPage() {
           <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
             <Pencil className="w-3.5 h-3.5" />
             Изменить
+          </button>
+          <button onClick={deleteBulk} className="btn-danger text-sm">
+            <Trash2 className="w-3.5 h-3.5" />
+            Удалить
           </button>
           <button
             onClick={() => setSelected(new Set())}

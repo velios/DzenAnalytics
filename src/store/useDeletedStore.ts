@@ -33,6 +33,8 @@ interface DeletedState {
   hydrate: () => Promise<void>;
   /** Hide a transaction. No-op if already hidden. */
   remove: (id: string) => Promise<void>;
+  /** Hide many at once — one IDB write + one store update. */
+  removeMany: (ids: string[]) => Promise<void>;
   /** Un-hide a previously deleted transaction. */
   restore: (id: string) => Promise<void>;
   /** Un-hide many at once — one IDB write + one store update. */
@@ -56,6 +58,15 @@ export const useDeletedStore = create<DeletedState>((set, get) => ({
   remove: async (id) => {
     if (get().deletedSet.has(id)) return;
     const ids = [...get().deletedIds, id];
+    set({ deletedIds: ids, deletedSet: new Set(ids) });
+    await db.saveJSON(KEY, ids);
+  },
+
+  removeMany: async (toAdd) => {
+    const cur = get().deletedSet;
+    const fresh = toAdd.filter((id) => !cur.has(id));
+    if (fresh.length === 0) return;
+    const ids = [...get().deletedIds, ...fresh];
     set({ deletedIds: ids, deletedSet: new Set(ids) });
     await db.saveJSON(KEY, ids);
   },

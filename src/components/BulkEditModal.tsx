@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Layers, X } from "lucide-react";
 import { Combobox } from "./Combobox";
+import { pluralOps } from "../lib/plural";
 import type { Transaction } from "../types";
 import type { TransactionEdit } from "../store/useEditsStore";
 
@@ -224,14 +225,4 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
     </div>,
     document.body
   );
-}
-
-/** Russian plural for «операция»: 1 операция, 2–4 операции, 5+ операций
- *  (with the 11–14 exception). */
-function pluralOps(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return "операция";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "операции";
-  return "операций";
 }

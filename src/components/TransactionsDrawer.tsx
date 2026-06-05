@@ -19,6 +19,7 @@ import { confirm } from "../store/useConfirmStore";
 import { CategoryDot } from "./CategoryDot";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { BulkEditModal } from "./BulkEditModal";
+import { confirmBulkDelete } from "../lib/confirmBulkDelete";
 import { formatMoney, formatDate, formatNum, displayPayee, secondaryPayee } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
@@ -50,6 +51,7 @@ export function TransactionsDrawer() {
   const allTransactions = useDataStore((s) => s.transactions);
   const deleteTransaction = useDataStore((s) => s.deleteTransaction);
   const reapplyRules = useDataStore((s) => s.reapplyRules);
+  const deleteTransactionMany = useDataStore((s) => s.deleteTransactionMany);
   const setEditMany = useEditsStore((s) => s.setEditMany);
 
   async function handleDelete(tx: Transaction) {
@@ -91,6 +93,15 @@ export function TransactionsDrawer() {
     await reapplyRules();
     setSelected(new Set());
     setBulkOpen(false);
+  }
+
+  async function deleteBulk() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const ok = await confirmBulkDelete(ids.length);
+    if (!ok) return;
+    await deleteTransactionMany(ids);
+    setSelected(new Set());
   }
 
   const edits = useEditsStore((s) => s.edits);
@@ -478,6 +489,10 @@ export function TransactionsDrawer() {
           <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
             <Pencil className="w-3.5 h-3.5" />
             Изменить
+          </button>
+          <button onClick={deleteBulk} className="btn-danger text-sm">
+            <Trash2 className="w-3.5 h-3.5" />
+            Удалить
           </button>
           <button
             onClick={() => setSelected(new Set())}

@@ -19,6 +19,7 @@ import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { BulkEditModal } from "../components/BulkEditModal";
+import { confirmBulkDelete } from "../lib/confirmBulkDelete";
 import { CategoryDot } from "../components/CategoryDot";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
@@ -72,6 +73,7 @@ export function TransactionsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const deleteTransaction = useDataStore((s) => s.deleteTransaction);
+  const deleteTransactionMany = useDataStore((s) => s.deleteTransactionMany);
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
@@ -122,6 +124,15 @@ export function TransactionsPage() {
     await reapplyRules();
     setSelected(new Set());
     setBulkOpen(false);
+  }
+
+  async function deleteBulk() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const ok = await confirmBulkDelete(ids.length);
+    if (!ok) return;
+    await deleteTransactionMany(ids);
+    setSelected(new Set());
   }
 
   const filtered = useMemo(
@@ -403,6 +414,10 @@ export function TransactionsPage() {
           <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
             <Pencil className="w-3.5 h-3.5" />
             Изменить
+          </button>
+          <button onClick={deleteBulk} className="btn-danger text-sm">
+            <Trash2 className="w-3.5 h-3.5" />
+            Удалить
           </button>
           <button
             onClick={() => setSelected(new Set())}

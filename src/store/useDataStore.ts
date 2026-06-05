@@ -83,6 +83,8 @@ interface DataState {
    *  visible list. Cloud-side deletion (when push is on) is handled
    *  separately by the Zenmoney store's push path. */
   deleteTransaction: (id: string) => Promise<void>;
+  /** Hide many transactions at once (one recompute). */
+  deleteTransactionMany: (ids: string[]) => Promise<void>;
   /** Un-hide a previously deleted transaction. */
   restoreTransaction: (id: string) => Promise<void>;
   /** Un-hide many at once (one recompute). */
@@ -341,6 +343,14 @@ export const useDataStore = create<DataState>((set, get) => ({
     await useDeletedStore.getState().remove(id);
     // Recompute visible list from the unchanged raw set — the row is
     // still in `transactionsRaw` (and IDB) so a restore brings it back.
+    const { transactionsRaw: raw, rates } = get();
+    const final = await finalize(raw, rates);
+    set({ transactions: final });
+  },
+
+  deleteTransactionMany: async (ids) => {
+    if (ids.length === 0) return;
+    await useDeletedStore.getState().removeMany(ids);
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
     set({ transactions: final });
