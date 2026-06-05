@@ -424,7 +424,11 @@ export function SearchPage() {
 
       {/* Floating bulk-action bar — appears when ≥1 result is selected. */}
       {selected.size > 0 && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-panel shadow-xl">
+        <div
+          role="region"
+          aria-label="Массовые действия"
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-panel shadow-xl max-w-[calc(100vw-1.5rem)]"
+        >
           <span className="text-sm">
             Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
           </span>

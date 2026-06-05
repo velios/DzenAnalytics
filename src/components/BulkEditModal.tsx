@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Layers, X } from "lucide-react";
 import { Combobox } from "./Combobox";
@@ -35,6 +35,7 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
   const [comment, setComment] = useState("");
 
   const [saving, setSaving] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -43,6 +44,18 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Move focus into the dialog on open and return it to whatever was
+  // focused before (e.g. the «Изменить» button) on close — keyboard and
+  // screen-reader users keep their place.
+  useEffect(() => {
+    const prevFocused = document.activeElement as HTMLElement | null;
+    const t = setTimeout(() => panelRef.current?.focus(), 30);
+    return () => {
+      clearTimeout(t);
+      if (prevFocused && document.contains(prevFocused)) prevFocused.focus();
+    };
+  }, []);
 
   // Option lists from the current dataset.
   const { categoryOptions, subcatByCategory, payeeOptions } = useMemo(() => {
@@ -102,10 +115,17 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg rounded-xl border border-border bg-panel shadow-xl">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bulk-edit-title"
+        className="w-full max-w-lg rounded-xl border border-border bg-panel shadow-xl outline-none"
+      >
         {/* Header */}
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2 font-semibold">
+          <div id="bulk-edit-title" className="flex items-center gap-2 font-semibold">
             <Layers className="w-4 h-4 text-accent" />
             Массовое изменение
             <span className="text-muted font-normal text-sm">

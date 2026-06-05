@@ -586,9 +586,14 @@ export function AccountsPage() {
             <Wallet className="w-4 h-4" />
             Счета ({accountRows.length})
           </div>
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+          <div
+            role="group"
+            aria-label="Вид списка счетов"
+            className="flex bg-panel2 rounded-lg p-1 border border-border"
+          >
             <button
               onClick={() => setAccountsView("cards")}
+              aria-pressed={accountsView === "cards"}
               className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
                 accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
               }`}
@@ -598,6 +603,7 @@ export function AccountsPage() {
             </button>
             <button
               onClick={() => setAccountsView("table")}
+              aria-pressed={accountsView === "table"}
               className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
                 accountsView === "table" ? "bg-accent text-accent-fg" : "text-muted"
               }`}

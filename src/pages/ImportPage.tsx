@@ -614,7 +614,11 @@ export function ImportPage() {
           sections; sub-headings inside each tab keep their own
           structure (e.g. "Резервные копии" → "Облачный снимок" +
           "Push в облако"). */}
-      <div className="border-b border-border flex items-center gap-1 -mt-2 overflow-x-auto overflow-y-hidden">
+      <div
+        role="tablist"
+        aria-label="Разделы настроек"
+        className="border-b border-border flex items-center gap-1 -mt-2 overflow-x-auto overflow-y-hidden"
+      >
         {([
           { id: "source", label: "Данные", icon: Database },
           { id: "currency", label: "Валюты", icon: Coins },
@@ -626,6 +630,8 @@ export function ImportPage() {
           return (
             <button
               key={t.id}
+              role="tab"
+              aria-selected={active}
               onClick={() => setSettingsTab(t.id)}
               className={[
                 "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium",
