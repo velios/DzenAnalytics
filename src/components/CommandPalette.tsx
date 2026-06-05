@@ -28,6 +28,7 @@ import {
   Moon,
   Monitor,
   Camera,
+  Trash2,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
@@ -67,6 +68,7 @@ const PAGE_ITEMS: { path: string; title: string; icon: React.ComponentType<{ cla
   { path: "/anomalies", title: "Аномалии", icon: Zap, aliases: ["anomalies"] },
   { path: "/duplicates", title: "Дубликаты", icon: Copy, aliases: ["duplicates"] },
   { path: "/uncategorized", title: "Без категории", icon: Tag, aliases: ["uncategorized"] },
+  { path: "/trash", title: "Удалённые", icon: Trash2, aliases: ["trash", "корзина", "удалённые", "удаленные", "deleted", "restore"] },
   { path: "/sankey", title: "Потоки (Sankey)", icon: GitFork, aliases: ["sankey", "flow"] },
   { path: "/wordcloud", title: "Облако слов", icon: Hash, aliases: ["wordcloud", "слова"] },
   { path: "/annotations", title: "Аннотации", icon: Bookmark, aliases: ["annotations"] },

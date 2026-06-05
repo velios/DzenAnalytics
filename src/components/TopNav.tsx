@@ -28,6 +28,7 @@ import {
   Sparkles,
   Newspaper,
   Settings,
+  Trash2,
   Menu,
   X,
 } from "lucide-react";
@@ -62,6 +63,7 @@ const SECONDARY = [
   { to: "/anomalies", label: "Аномалии", icon: Zap },
   { to: "/duplicates", label: "Дубликаты", icon: Copy },
   { to: "/uncategorized", label: "Без категории", icon: Tag },
+  { to: "/trash", label: "Удалённые", icon: Trash2 },
   { to: "/recurring", label: "Регулярные", icon: Repeat },
   { to: "/annotations", label: "Аннотации", icon: Bookmark },
   { to: "/tags", label: "Хэштеги", icon: Hash },

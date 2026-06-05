@@ -85,6 +85,8 @@ interface DataState {
   deleteTransaction: (id: string) => Promise<void>;
   /** Un-hide a previously deleted transaction. */
   restoreTransaction: (id: string) => Promise<void>;
+  /** Un-hide many at once (one recompute). */
+  restoreTransactionMany: (ids: string[]) => Promise<void>;
 }
 
 function recalcBase(txs: Transaction[], rates: CurrencyRates): Transaction[] {
@@ -346,6 +348,14 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   restoreTransaction: async (id) => {
     await useDeletedStore.getState().restore(id);
+    const { transactionsRaw: raw, rates } = get();
+    const final = await finalize(raw, rates);
+    set({ transactions: final });
+  },
+
+  restoreTransactionMany: async (ids) => {
+    if (ids.length === 0) return;
+    await useDeletedStore.getState().restoreMany(ids);
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
     set({ transactions: final });

@@ -23,6 +23,7 @@ import { SearchPage } from "./pages/SearchPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { UncategorizedPage } from "./pages/UncategorizedPage";
+import { TrashPage } from "./pages/TrashPage";
 import { SankeyPage } from "./pages/SankeyPage";
 import { AnnotationsPage } from "./pages/AnnotationsPage";
 import { HelpPage } from "./pages/HelpPage";
@@ -216,6 +217,7 @@ function App() {
             <Route path="/goals" element={<GoalsPage />} />
             <Route path="/duplicates" element={<DuplicatesPage />} />
             <Route path="/uncategorized" element={<UncategorizedPage />} />
+            <Route path="/trash" element={<TrashPage />} />
             <Route path="/annotations" element={<AnnotationsPage />} />
             <Route path="/help" element={<HelpPage />} />
             <Route path="/rules" element={<RulesPage />} />
