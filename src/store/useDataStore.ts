@@ -139,15 +139,17 @@ async function snapshotForCloudRestore(ids: string[]): Promise<void> {
 }
 
 /**
- * After a restore, nudge an auto-push so the resurrection reaches the
- * cloud right away (manual / on-sync modes pick it up on their next
- * push). Dynamic import avoids a static cycle with useZenmoneyStore.
+ * After a restore, push so the resurrection reaches the cloud right away.
+ * Restoring a cloud-deleted row inherently needs a cloud write (the row is
+ * re-created there), and it's an explicit user action — so we push under
+ * ANY two-way mode, not just "auto". A no-op when there's nothing to
+ * resurrect. Dynamic import avoids a static cycle with useZenmoneyStore.
  */
-async function autoPushAfterRestore(): Promise<void> {
+async function pushAfterRestore(): Promise<void> {
   try {
     const { useZenmoneyStore } = await import("./useZenmoneyStore");
     const zen = useZenmoneyStore.getState();
-    if (zen.pushMode === "auto" && zen.token && zen.pushStatus !== "syncing") {
+    if (zen.pushMode !== "off" && zen.token && zen.pushStatus !== "syncing") {
       await zen.pushPendingEdits();
     }
   } catch {
@@ -408,7 +410,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
     set({ transactions: final });
-    void autoPushAfterRestore();
+    void pushAfterRestore();
   },
 
   restoreTransactionMany: async (ids) => {
@@ -417,6 +419,6 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
     set({ transactions: final });
-    void autoPushAfterRestore();
+    void pushAfterRestore();
   },
 }));

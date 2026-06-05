@@ -141,31 +141,59 @@ export function buildDeletions(
   return out;
 }
 
+export interface Resurrection {
+  /** Original (now permanently tombstoned) id — used to drop the spent
+   *  snapshot once the re-create succeeds. */
+  oldId: string;
+  /** A fresh transaction (NEW id) to create in the cloud. */
+  tx: ZenTransaction;
+}
+
 /**
- * Build "resurrection" upserts for restored transactions — full Zenmoney
- * objects re-sent so a previously cloud-deleted row comes back.
+ * Build "resurrection" re-creates for restored transactions.
  *
- * Derived purely from state, so it's idempotent and self-healing:
- *   • id still hidden locally (in `deletedIds`)  → skip (keep it deleted)
- *   • id already present in the cloud cache       → skip (nothing to do —
- *     the deletion was never pushed, or it's already back)
- *   • otherwise (restored + absent from cloud)    → re-send the snapshot
- *     with `deleted: false` and a fresh `changed` so last-write-wins
- *     revives it.
+ * Zenmoney tombstones are sticky: re-pushing a deleted id (even with
+ * `deleted:false`) is rejected — the server keeps it deleted (verified
+ * against the API). So we revive a row by **creating a copy with a new
+ * id**, preserving every field (payee, merchant, tags, amounts, date…).
+ *
+ * Derived purely from state, so it's safe to recompute each push:
+ *   • id still hidden locally (in `deletedIds`) → skip (keep it deleted)
+ *   • id LIVE in the cloud cache                → skip (deletion was never
+ *     pushed — the original is still there)
+ *   • otherwise (restored + gone/tombstoned)    → re-create under a new id
+ *
+ * NB: a full sync returns deleted rows as `deleted:true` tombstones, which
+ * land in `cache.transactions`. A tombstone does NOT count as "present" —
+ * we only treat a LIVE (deleted !== true) row as still in the cloud.
+ *
+ * After a successful push the caller MUST drop the snapshots for the
+ * returned `oldId`s, otherwise the next push would create duplicates.
  */
 export function buildResurrections(
   payloads: Record<string, ZenTransaction>,
   deletedIds: Iterable<string>,
   cache: ZenCache,
-  stampSeconds: number
-): ZenTransaction[] {
+  stampSeconds: number,
+  mintId: () => string
+): Resurrection[] {
   const deletedSet = new Set(deletedIds);
-  const inCache = new Set(cache.transactions.map((t) => String(t.id)));
-  const out: ZenTransaction[] = [];
+  const liveInCache = new Set(
+    cache.transactions.filter((t) => !t.deleted).map((t) => String(t.id))
+  );
+  const out: Resurrection[] = [];
   for (const id of Object.keys(payloads)) {
     if (deletedSet.has(id)) continue;
-    if (inCache.has(id)) continue;
-    out.push({ ...payloads[id], deleted: false, changed: stampSeconds });
+    if (liveInCache.has(id)) continue;
+    out.push({
+      oldId: id,
+      tx: {
+        ...payloads[id],
+        id: mintId(),
+        deleted: false,
+        changed: stampSeconds,
+      },
+    });
   }
   return out;
 }

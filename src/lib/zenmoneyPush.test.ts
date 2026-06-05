@@ -58,28 +58,63 @@ describe("buildDeletions", () => {
 describe("buildResurrections", () => {
   const payloads = (txs: ZenTransaction[]) =>
     Object.fromEntries(txs.map((t) => [t.id, t]));
+  const mint = () => "NEW";
 
-  it("re-sends a restored payload absent from the cloud, deleted:false + fresh changed", () => {
+  it("re-creates a restored, purged payload under a NEW id (deleted:false, fresh changed)", () => {
     const snap = zt("a", 7, true); // snapshot may carry deleted=true
-    const out = buildResurrections(payloads([snap]), [], cache([]), 1234);
+    const out = buildResurrections(payloads([snap]), [], cache([]), 1234, mint);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ id: "a", user: 7, deleted: false, changed: 1234 });
+    expect(out[0].oldId).toBe("a");
+    expect(out[0].tx).toMatchObject({
+      id: "NEW",
+      user: 7,
+      deleted: false,
+      changed: 1234,
+    });
   });
 
   it("skips ids still hidden locally (in deletedIds)", () => {
     const snap = zt("a", 7);
-    expect(buildResurrections(payloads([snap]), ["a"], cache([]), 1)).toEqual([]);
+    expect(buildResurrections(payloads([snap]), ["a"], cache([]), 1, mint)).toEqual([]);
   });
 
-  it("skips ids the cloud still has (deletion never pushed / already back)", () => {
+  it("skips ids the cloud still has LIVE (deletion never pushed)", () => {
     const snap = zt("a", 7);
     expect(
-      buildResurrections(payloads([snap]), [], cache([zt("a", 7)]), 1)
+      buildResurrections(payloads([snap]), [], cache([zt("a", 7)]), 1, mint)
     ).toEqual([]);
   });
 
+  it("resurrects an id that's in cache only as a deleted tombstone", () => {
+    const snap = zt("a", 7);
+    // full sync returns the deleted row as deleted:true → must NOT count
+    // as 'present' in the cloud
+    const out = buildResurrections(
+      payloads([snap]),
+      [],
+      cache([zt("a", 7, true)]),
+      1,
+      mint
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ oldId: "a", tx: { id: "NEW", deleted: false } });
+  });
+
   it("returns an empty array when there are no snapshots", () => {
-    expect(buildResurrections({}, [], cache([]), 1)).toEqual([]);
+    expect(buildResurrections({}, [], cache([]), 1, mint)).toEqual([]);
+  });
+
+  it("mints a distinct new id per resurrection, preserving oldId", () => {
+    let n = 0;
+    const out = buildResurrections(
+      payloads([zt("a", 1), zt("b", 1)]),
+      [],
+      cache([]),
+      1,
+      () => `new-${n++}`
+    );
+    expect(out.map((r) => r.tx.id).sort()).toEqual(["new-0", "new-1"]);
+    expect(out.map((r) => r.oldId).sort()).toEqual(["a", "b"]);
   });
 });
 

@@ -573,13 +573,15 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         useDeletedStore.getState().deletedIds,
         cache
       );
-      // Restored transactions whose cloud row was already deleted →
-      // re-send the snapshot to revive it (see buildResurrections).
+      // Restored transactions whose cloud row was already deleted → revive
+      // them by re-creating under a NEW id (tombstones are sticky — see
+      // buildResurrections).
       const resurrections = buildResurrections(
         await loadDeletedPayloads(),
         useDeletedStore.getState().deletedIds,
         cache,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
+        () => crypto.randomUUID()
       );
       if (
         toPush.length === 0 &&
@@ -624,7 +626,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         get().serverTimestamp,
         toPush,
         deletions,
-        resurrections
+        resurrections.map((r) => r.tx)
       );
 
       // 4) Merge server response into local cache so subsequent diffs
@@ -634,19 +636,24 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       const nextCache = applyDiff(cache, response);
       await saveZenCache(nextCache);
 
-      // Prune snapshots that are no longer needed: the row is back in the
-      // cloud (resurrected, or its deletion was never pushed) and isn't
-      // hidden locally. Keeps the snapshot store from growing unbounded.
+      // Prune snapshots that are no longer needed:
+      //   • the resurrected `oldId`s — re-created under a new id, so the
+      //     snapshot is spent (and keeping it would dup on the next push);
+      //   • ids back in the cloud + not hidden locally (deletion was never
+      //     pushed, so the original is still live).
       {
         const deletedNow = new Set(useDeletedStore.getState().deletedIds);
-        const inCacheNow = new Set(
-          nextCache.transactions.map((t) => String(t.id))
+        const liveInCacheNow = new Set(
+          nextCache.transactions
+            .filter((t) => !t.deleted)
+            .map((t) => String(t.id))
         );
-        const prune = Object.keys(await loadDeletedPayloads()).filter(
-          (id) => inCacheNow.has(id) && !deletedNow.has(id)
-        );
-        if (prune.length > 0) {
-          await useDeletedPayloadsStore.getState().removeMany(prune);
+        const prune = new Set(resurrections.map((r) => r.oldId));
+        for (const id of Object.keys(await loadDeletedPayloads())) {
+          if (liveInCacheNow.has(id) && !deletedNow.has(id)) prune.add(id);
+        }
+        if (prune.size > 0) {
+          await useDeletedPayloadsStore.getState().removeMany([...prune]);
         }
       }
       const mapped = mapZenmoneyDiff(cacheToDiffResponse(nextCache));
