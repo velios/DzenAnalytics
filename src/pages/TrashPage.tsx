@@ -1,10 +1,13 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Trash2, RotateCcw, Undo2, Info } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useDeletedStore } from "../store/useDeletedStore";
+import { useDeletedPayloadsStore } from "../store/useDeletedPayloadsStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { applyEdits } from "../lib/applyEdits";
+import { loadZenCache, cacheToDiffResponse } from "../lib/zenmoneyCache";
+import { mapZenmoneyDiff } from "../lib/zenmoneyMap";
 import {
   formatMoney,
   formatDate,
@@ -15,13 +18,19 @@ import {
 import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
 import { CategoryDot } from "../components/CategoryDot";
 import { PageHeader } from "../components/PageHeader";
+import type { Transaction } from "../types";
 
 /**
  * «Корзина» — locally-deleted (hidden) transactions and a way to bring
- * them back. Deleting is a soft, reversible operation: the row stays in
- * `transactionsRaw`, only hidden from every view via `useDeletedStore`.
- * Here we re-surface those hidden rows (with the user's edits applied on
- * top) and let them be restored one-by-one or all at once.
+ * them back. Deleting is a soft, reversible operation; the underlying row
+ * is recoverable, so we re-surface it here for one-click restore.
+ *
+ * Two data sources, merged:
+ *   • `transactionsRaw` — rows still in the pipeline (CSV, or deleted but
+ *     not yet pushed to the cloud).
+ *   • Zenmoney snapshots — once a cloud deletion is pushed, the row is
+ *     purged from cache/`transactionsRaw`; we then reconstruct it from the
+ *     full payload captured at delete time (`useDeletedPayloadsStore`).
  */
 export function TrashPage() {
   const transactionsRaw = useDataStore((s) => s.transactionsRaw);
@@ -31,16 +40,64 @@ export function TrashPage() {
   const edits = useEditsStore((s) => s.edits);
   const deletedSet = useDeletedStore((s) => s.deletedSet);
   const pushMode = useZenmoneyStore((s) => s.pushMode);
+  const payloads = useDeletedPayloadsStore((s) => s.payloads);
+  const payloadsLoaded = useDeletedPayloadsStore((s) => s.loaded);
+  const hydratePayloads = useDeletedPayloadsStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!payloadsLoaded) hydratePayloads();
+  }, [payloadsLoaded, hydratePayloads]);
 
-  // Hidden rows = the raw pipeline output (with edits applied) intersected
-  // with the deleted-id set, newest first.
-  const deletedTxs = useMemo(() => {
+  // Hidden rows still present in the pipeline (with edits applied).
+  const fromRaw = useMemo(() => {
     if (deletedSet.size === 0) return [];
     const withEdits = applyEdits(transactionsRaw, edits, rates);
-    return withEdits
-      .filter((t) => deletedSet.has(t.id))
-      .sort((a, b) => b.date.localeCompare(a.date));
+    return withEdits.filter((t) => deletedSet.has(t.id));
   }, [transactionsRaw, edits, rates, deletedSet]);
+
+  // Hidden rows the cloud deletion purged from cache → rebuild from the
+  // snapshot by mapping the saved ZenTransaction with the cache's
+  // (still intact) account/tag/instrument dictionaries.
+  const [fromSnapshots, setFromSnapshots] = useState<Transaction[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const presentIds = new Set(transactionsRaw.map((t) => t.id));
+      const missing = [...deletedSet].filter(
+        (id) => !presentIds.has(id) && payloads[id]
+      );
+      if (missing.length === 0) {
+        if (!cancelled) setFromSnapshots([]);
+        return;
+      }
+      const cache = await loadZenCache();
+      if (!cache) {
+        if (!cancelled) setFromSnapshots([]);
+        return;
+      }
+      const synthetic = {
+        ...cache,
+        transactions: missing.map((id) => payloads[id]),
+      };
+      const mapped = mapZenmoneyDiff(cacheToDiffResponse(synthetic));
+      const withEdits = applyEdits(mapped.transactions, edits, rates);
+      if (!cancelled) setFromSnapshots(withEdits);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [transactionsRaw, deletedSet, payloads, edits, rates]);
+
+  // Merge both sources (dedup by id), newest first.
+  const deletedTxs = useMemo(() => {
+    const seen = new Set<string>();
+    const all: Transaction[] = [];
+    for (const t of [...fromRaw, ...fromSnapshots]) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      all.push(t);
+    }
+    return all.sort((a, b) => b.date.localeCompare(a.date));
+  }, [fromRaw, fromSnapshots]);
 
   if (deletedTxs.length === 0) {
     return (
