@@ -11,8 +11,10 @@ import {
   ListFilter,
   ListChecks,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore, type TransactionEdit } from "../store/useEditsStore";
+import { useDeletedStore } from "../store/useDeletedStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
@@ -74,6 +76,7 @@ export function TransactionsPage() {
   const base = useDataStore((s) => s.rates.base);
   const deleteTransaction = useDataStore((s) => s.deleteTransaction);
   const deleteTransactionMany = useDataStore((s) => s.deleteTransactionMany);
+  const deletedCount = useDeletedStore((s) => s.deletedIds.length);
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
@@ -334,6 +337,23 @@ export function TransactionsPage() {
             <Download className="w-3.5 h-3.5" />
             CSV
           </button>
+          <Link
+            to="/trash"
+            className="relative btn-ghost text-xs !px-2"
+            title="Удалённые (корзина)"
+            aria-label={
+              deletedCount > 0
+                ? `Удалённые операции: ${deletedCount}`
+                : "Удалённые операции"
+            }
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {deletedCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-expense text-white text-[10px] leading-4 text-center tabular-nums">
+                {deletedCount}
+              </span>
+            )}
+          </Link>
         </div>
 
         {sorted.length === 0 ? (
