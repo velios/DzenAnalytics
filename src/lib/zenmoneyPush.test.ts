@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildDeletions, buildPushItems } from "./zenmoneyPush";
+import {
+  buildDeletions,
+  buildPushItems,
+  buildResurrections,
+} from "./zenmoneyPush";
 import type { ZenCache } from "./zenmoneyCache";
 import type { ZenAccount, ZenInstrument, ZenTransaction } from "./zenmoney";
 import type { TransactionEdit } from "../store/useEditsStore";
@@ -48,6 +52,34 @@ describe("buildDeletions", () => {
 
   it("returns an empty array for no deleted ids", () => {
     expect(buildDeletions([], cache([zt("a", 1)]))).toEqual([]);
+  });
+});
+
+describe("buildResurrections", () => {
+  const payloads = (txs: ZenTransaction[]) =>
+    Object.fromEntries(txs.map((t) => [t.id, t]));
+
+  it("re-sends a restored payload absent from the cloud, deleted:false + fresh changed", () => {
+    const snap = zt("a", 7, true); // snapshot may carry deleted=true
+    const out = buildResurrections(payloads([snap]), [], cache([]), 1234);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ id: "a", user: 7, deleted: false, changed: 1234 });
+  });
+
+  it("skips ids still hidden locally (in deletedIds)", () => {
+    const snap = zt("a", 7);
+    expect(buildResurrections(payloads([snap]), ["a"], cache([]), 1)).toEqual([]);
+  });
+
+  it("skips ids the cloud still has (deletion never pushed / already back)", () => {
+    const snap = zt("a", 7);
+    expect(
+      buildResurrections(payloads([snap]), [], cache([zt("a", 7)]), 1)
+    ).toEqual([]);
+  });
+
+  it("returns an empty array when there are no snapshots", () => {
+    expect(buildResurrections({}, [], cache([]), 1)).toEqual([]);
   });
 });
 

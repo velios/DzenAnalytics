@@ -18,6 +18,7 @@ import {
 import {
   buildPushItems,
   buildDeletions,
+  buildResurrections,
   sendPush,
   type PushBuildResult,
 } from "../lib/zenmoneyPush";
@@ -27,6 +28,10 @@ import { useCalibrationStore } from "./useCalibrationStore";
 import { useCategoryMetaStore } from "./useCategoryMetaStore";
 import { useEditsStore } from "./useEditsStore";
 import { useDeletedStore } from "./useDeletedStore";
+import {
+  useDeletedPayloadsStore,
+  loadDeletedPayloads,
+} from "./useDeletedPayloadsStore";
 import { useSyncLogStore } from "./useSyncLogStore";
 import { formatNum } from "../lib/format";
 import type { ImportMeta } from "../types";
@@ -568,7 +573,19 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         useDeletedStore.getState().deletedIds,
         cache
       );
-      if (toPush.length === 0 && deletions.length === 0) {
+      // Restored transactions whose cloud row was already deleted →
+      // re-send the snapshot to revive it (see buildResurrections).
+      const resurrections = buildResurrections(
+        await loadDeletedPayloads(),
+        useDeletedStore.getState().deletedIds,
+        cache,
+        Math.floor(Date.now() / 1000)
+      );
+      if (
+        toPush.length === 0 &&
+        deletions.length === 0 &&
+        resurrections.length === 0
+      ) {
         const result: PushResult = { pushed: 0, skipped, snapshotId };
         set({
           pushStatus: "ok",
@@ -606,7 +623,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         token,
         get().serverTimestamp,
         toPush,
-        deletions
+        deletions,
+        resurrections
       );
 
       // 4) Merge server response into local cache so subsequent diffs
@@ -615,6 +633,22 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       //    pulls — the same shape comes back.
       const nextCache = applyDiff(cache, response);
       await saveZenCache(nextCache);
+
+      // Prune snapshots that are no longer needed: the row is back in the
+      // cloud (resurrected, or its deletion was never pushed) and isn't
+      // hidden locally. Keeps the snapshot store from growing unbounded.
+      {
+        const deletedNow = new Set(useDeletedStore.getState().deletedIds);
+        const inCacheNow = new Set(
+          nextCache.transactions.map((t) => String(t.id))
+        );
+        const prune = Object.keys(await loadDeletedPayloads()).filter(
+          (id) => inCacheNow.has(id) && !deletedNow.has(id)
+        );
+        if (prune.length > 0) {
+          await useDeletedPayloadsStore.getState().removeMany(prune);
+        }
+      }
       const mapped = mapZenmoneyDiff(cacheToDiffResponse(nextCache));
 
       // 5) Clear successfully-pushed edits from the overlay. The edit's
@@ -660,6 +694,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         parts.push(`Отправлено: ${formatNum(toPush.length)}`);
       if (deletions.length > 0)
         parts.push(`Удалено: ${formatNum(deletions.length)}`);
+      if (resurrections.length > 0)
+        parts.push(`Восстановлено в облаке: ${formatNum(resurrections.length)}`);
       if (skipped.length > 0)
         parts.push(`Пропущено: ${formatNum(skipped.length)}`);
       void useSyncLogStore.getState().append({

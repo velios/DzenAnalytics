@@ -80,13 +80,13 @@ export function TrashPage() {
       />
 
       {pushMode !== "off" && (
-        <div className="card card-pad bg-warn/5 border-warn/40 flex items-start gap-2 text-sm">
-          <Info className="w-4 h-4 text-warn shrink-0 mt-0.5" />
+        <div className="card card-pad bg-accent/5 border-accent/40 flex items-start gap-2 text-sm">
+          <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
           <span className="text-muted">
-            Включена двусторонняя синхронизация. Если удаление уже было
-            отправлено в Дзен-мани, восстановление вернёт операцию{" "}
-            <strong>только локально</strong> — в облаке она уже удалена
-            безвозвратно.
+            Включена двусторонняя синхронизация: восстановление вернёт операцию
+            <strong> и в облако Дзен-мани</strong> — она будет создана заново при
+            следующей отправке/синхронизации (со всеми полями: получатель, теги,
+            суммы).
           </span>
         </div>
       )}

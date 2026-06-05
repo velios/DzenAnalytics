@@ -7,6 +7,9 @@ import { applyCategoryRules, type CategoryRule } from "./useCategoryRulesStore";
 import { applyEdits } from "../lib/applyEdits";
 import { useEditsStore } from "./useEditsStore";
 import { useDeletedStore, loadDeletedSet } from "./useDeletedStore";
+import { useDeletedPayloadsStore } from "./useDeletedPayloadsStore";
+import { loadZenCache } from "../lib/zenmoneyCache";
+import type { ZenTransaction } from "../lib/zenmoney";
 import { aliasesToMap, type PayeeAlias } from "./usePayeeAliasStore";
 
 // Rough cross-rates relative to RUB — purely a starting point so the rates UI
@@ -109,6 +112,47 @@ async function finalize(
   const deleted = await loadDeletedSet();
   if (deleted.size === 0) return withEdits;
   return withEdits.filter((t) => !deleted.has(t.id));
+}
+
+/**
+ * API mode only: stash the full Zenmoney payload of the given ids before
+ * a cloud deletion purges them from cache, so a later restore can revive
+ * them in the cloud. Best-effort — a snapshot failure never blocks the
+ * (local) delete.
+ */
+async function snapshotForCloudRestore(ids: string[]): Promise<void> {
+  try {
+    const cache = await loadZenCache();
+    if (!cache) return; // CSV mode — no cloud to restore to
+    const byId = new Map(cache.transactions.map((t) => [String(t.id), t]));
+    const found: ZenTransaction[] = [];
+    for (const id of ids) {
+      const zt = byId.get(id);
+      if (zt && !zt.deleted) found.push(zt);
+    }
+    if (found.length > 0) {
+      await useDeletedPayloadsStore.getState().saveMany(found);
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * After a restore, nudge an auto-push so the resurrection reaches the
+ * cloud right away (manual / on-sync modes pick it up on their next
+ * push). Dynamic import avoids a static cycle with useZenmoneyStore.
+ */
+async function autoPushAfterRestore(): Promise<void> {
+  try {
+    const { useZenmoneyStore } = await import("./useZenmoneyStore");
+    const zen = useZenmoneyStore.getState();
+    if (zen.pushMode === "auto" && zen.token && zen.pushStatus !== "syncing") {
+      await zen.pushPendingEdits();
+    }
+  } catch {
+    /* surfaced via pushError + sync log */
+  }
 }
 
 async function loadRules(): Promise<CategoryRule[]> {
@@ -266,6 +310,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   clearAll: async () => {
     await db.clearTransactions();
     await useDeletedStore.getState().clearAll();
+    await useDeletedPayloadsStore.getState().clearAll();
     set({ transactions: [], transactionsRaw: [], importMeta: null });
   },
 
@@ -340,6 +385,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   deleteTransaction: async (id) => {
+    await snapshotForCloudRestore([id]);
     await useDeletedStore.getState().remove(id);
     // Recompute visible list from the unchanged raw set — the row is
     // still in `transactionsRaw` (and IDB) so a restore brings it back.
@@ -350,6 +396,7 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   deleteTransactionMany: async (ids) => {
     if (ids.length === 0) return;
+    await snapshotForCloudRestore(ids);
     await useDeletedStore.getState().removeMany(ids);
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
@@ -361,6 +408,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
     set({ transactions: final });
+    void autoPushAfterRestore();
   },
 
   restoreTransactionMany: async (ids) => {
@@ -369,5 +417,6 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
     set({ transactions: final });
+    void autoPushAfterRestore();
   },
 }));

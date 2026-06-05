@@ -39,6 +39,7 @@ import { useBackupStore } from "./store/useBackupStore";
 import { useZenmoneyStore } from "./store/useZenmoneyStore";
 import { useEditsStore } from "./store/useEditsStore";
 import { useDeletedStore } from "./store/useDeletedStore";
+import { useDeletedPayloadsStore } from "./store/useDeletedPayloadsStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
 import { useFiltersStore } from "./store/useFiltersStore";
 
@@ -73,6 +74,7 @@ function App() {
     // falls back to disk anyway, but this populates the in-memory copy
     // that the UI + auto-push subscription read.)
     useDeletedStore.getState().hydrate();
+    useDeletedPayloadsStore.getState().hydrate();
     hydrate();
     backupHydrate();
     reportPeriodHydrate();

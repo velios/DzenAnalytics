@@ -142,6 +142,35 @@ export function buildDeletions(
 }
 
 /**
+ * Build "resurrection" upserts for restored transactions — full Zenmoney
+ * objects re-sent so a previously cloud-deleted row comes back.
+ *
+ * Derived purely from state, so it's idempotent and self-healing:
+ *   • id still hidden locally (in `deletedIds`)  → skip (keep it deleted)
+ *   • id already present in the cloud cache       → skip (nothing to do —
+ *     the deletion was never pushed, or it's already back)
+ *   • otherwise (restored + absent from cloud)    → re-send the snapshot
+ *     with `deleted: false` and a fresh `changed` so last-write-wins
+ *     revives it.
+ */
+export function buildResurrections(
+  payloads: Record<string, ZenTransaction>,
+  deletedIds: Iterable<string>,
+  cache: ZenCache,
+  stampSeconds: number
+): ZenTransaction[] {
+  const deletedSet = new Set(deletedIds);
+  const inCache = new Set(cache.transactions.map((t) => String(t.id)));
+  const out: ZenTransaction[] = [];
+  for (const id of Object.keys(payloads)) {
+    if (deletedSet.has(id)) continue;
+    if (inCache.has(id)) continue;
+    out.push({ ...payloads[id], deleted: false, changed: stampSeconds });
+  }
+  return out;
+}
+
+/**
  * Walk every pending edit and classify it as push-ready or skipped.
  * Pure function — no IO, no API calls; can be called from a preview UI.
  */
@@ -475,10 +504,11 @@ export async function sendPush(
   token: string,
   serverTimestamp: number,
   items: PushItem[],
-  deletions: ZenDeletion[] = []
+  deletions: ZenDeletion[] = [],
+  resurrections: ZenTransaction[] = []
 ): Promise<ZenDiffResponse> {
   const payload: PushPayload = {
-    transaction: items.map((i) => i.zen),
+    transaction: [...items.map((i) => i.zen), ...resurrections],
     ...(deletions.length > 0 ? { deletion: deletions } : {}),
   };
   // Debug aid: surface the full payload in DevTools so it's easy to
