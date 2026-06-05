@@ -150,6 +150,39 @@ export interface Resurrection {
 }
 
 /**
+ * A DETERMINISTIC new id derived from the tombstoned old id. Using a
+ * stable derived id (instead of a random one) makes resurrection
+ * idempotent: re-pushing the same restored row hits the SAME new id, so
+ * the server upserts it rather than creating a duplicate. This is the
+ * safety net against ever spamming copies if the post-push snapshot prune
+ * doesn't land. UUID-shaped (Zenmoney ids are UUIDs); FNV-1a fill — not
+ * cryptographic, just stable + collision-free enough against real ids.
+ */
+export function resurrectionId(oldId: string): string {
+  const bytes: number[] = [];
+  let h = 0x811c9dc5;
+  for (let i = 0; i < 16; i++) {
+    h ^= i + 0x9e;
+    h = Math.imul(h, 0x01000193);
+    for (let j = 0; j < oldId.length; j++) {
+      h ^= oldId.charCodeAt(j);
+      h = Math.imul(h, 0x01000193);
+    }
+    bytes.push((h >>> 0) & 0xff);
+  }
+  // Make it a valid RFC-4122 v4-shaped UUID — Zenmoney rejects ids that
+  // aren't proper UUIDs. Set the version (4) and variant (10xx) bits.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.map((b) => b.toString(16).padStart(2, "0"));
+  return (
+    `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-` +
+    `${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-` +
+    `${hex.slice(10, 16).join("")}`
+  );
+}
+
+/**
  * Build "resurrection" re-creates for restored transactions.
  *
  * Zenmoney tombstones are sticky: re-pushing a deleted id (even with
@@ -175,7 +208,7 @@ export function buildResurrections(
   deletedIds: Iterable<string>,
   cache: ZenCache,
   stampSeconds: number,
-  mintId: () => string
+  mintId: (oldId: string) => string = resurrectionId
 ): Resurrection[] {
   const deletedSet = new Set(deletedIds);
   const liveInCache = new Set(
@@ -184,12 +217,16 @@ export function buildResurrections(
   const out: Resurrection[] = [];
   for (const id of Object.keys(payloads)) {
     if (deletedSet.has(id)) continue;
-    if (liveInCache.has(id)) continue;
+    if (liveInCache.has(id)) continue; // original still live → nothing to do
+    const newId = mintId(id);
+    // Idempotency: if the deterministic copy is already live in the cloud,
+    // the resurrection already landed — skip it (its snapshot gets pruned).
+    if (liveInCache.has(newId)) continue;
     out.push({
       oldId: id,
       tx: {
         ...payloads[id],
-        id: mintId(),
+        id: newId,
         deleted: false,
         changed: stampSeconds,
       },

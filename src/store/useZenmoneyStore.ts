@@ -580,8 +580,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         await loadDeletedPayloads(),
         useDeletedStore.getState().deletedIds,
         cache,
-        Math.floor(Date.now() / 1000),
-        () => crypto.randomUUID()
+        Math.floor(Date.now() / 1000)
       );
       if (
         toPush.length === 0 &&

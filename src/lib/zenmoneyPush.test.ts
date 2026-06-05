@@ -3,6 +3,7 @@ import {
   buildDeletions,
   buildPushItems,
   buildResurrections,
+  resurrectionId,
 } from "./zenmoneyPush";
 import type { ZenCache } from "./zenmoneyCache";
 import type { ZenAccount, ZenInstrument, ZenTransaction } from "./zenmoney";
@@ -105,16 +106,36 @@ describe("buildResurrections", () => {
   });
 
   it("mints a distinct new id per resurrection, preserving oldId", () => {
-    let n = 0;
     const out = buildResurrections(
       payloads([zt("a", 1), zt("b", 1)]),
       [],
       cache([]),
       1,
-      () => `new-${n++}`
+      (oldId) => `new-${oldId}`
     );
-    expect(out.map((r) => r.tx.id).sort()).toEqual(["new-0", "new-1"]);
+    expect(out.map((r) => r.tx.id).sort()).toEqual(["new-a", "new-b"]);
     expect(out.map((r) => r.oldId).sort()).toEqual(["a", "b"]);
+  });
+
+  it("is idempotent: skips when the deterministic copy is already live", () => {
+    // newId for "a" is "COPY"; it already exists live in the cloud → no dup
+    const out = buildResurrections(
+      payloads([zt("a", 1)]),
+      [],
+      cache([zt("COPY", 1)]),
+      1,
+      () => "COPY"
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("default deterministic id: stable, uuid-shaped, differs from input", () => {
+    const a = resurrectionId("4ae9985a-e80b-47ee-8a2b-1dcc6def84bf");
+    const b = resurrectionId("4ae9985a-e80b-47ee-8a2b-1dcc6def84bf");
+    expect(a).toBe(b); // deterministic
+    expect(a).not.toBe("4ae9985a-e80b-47ee-8a2b-1dcc6def84bf");
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(resurrectionId("other")).not.toBe(a); // different seed → different id
   });
 });
 
