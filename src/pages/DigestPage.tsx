@@ -82,7 +82,7 @@ export function DigestPage() {
                   <div className="flex-1 min-w-0">
                     <div className="truncate font-medium">{e.label}</div>
                     <div className="text-[11px] text-muted truncate">
-                      {formatMoney(e.expense, baseCurrency, { decimals: 0 })} расход
+                      {formatMoney(e.expense, baseCurrency)} расход
                     </div>
                   </div>
                   <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-50" />
@@ -163,14 +163,14 @@ function DigestDetail({
         <div className="grid grid-cols-3 gap-4 mt-3">
           <Hero
             label="Доход"
-            value={formatMoney(entry.income, baseCurrency, { decimals: 0 })}
+            value={formatMoney(entry.income, baseCurrency)}
             delta={entry.incomeDelta}
             cls={incCls}
             arrowUp
           />
           <Hero
             label="Расход"
-            value={formatMoney(entry.expense, baseCurrency, { decimals: 0 })}
+            value={formatMoney(entry.expense, baseCurrency)}
             delta={entry.expenseDelta}
             cls={expCls}
             arrowUp={false}
@@ -215,12 +215,12 @@ function DigestDetail({
                         className={`tabular-nums whitespace-nowrap text-xs ml-3 ${up ? "text-expense" : "text-income"}`}
                       >
                         {up ? "+" : "−"}
-                        {formatMoney(diff, baseCurrency, { decimals: 0 })}
+                        {formatMoney(diff, baseCurrency)}
                       </div>
                     </div>
                     <div className="text-xs text-muted">
-                      сейчас {formatMoney(m.current, baseCurrency, { decimals: 0 })} ·
-                      раньше {formatMoney(m.previous, baseCurrency, { decimals: 0 })}
+                      сейчас {formatMoney(m.current, baseCurrency)} ·
+                      раньше {formatMoney(m.previous, baseCurrency)}
                       {m.previous > 0 && (
                         <>
                           {" "}
@@ -258,7 +258,7 @@ function DigestDetail({
                   </div>
                 </div>
                 <div className="text-expense font-semibold tabular-nums">
-                  {formatMoney(t.amountBase, baseCurrency, { decimals: 0 })}
+                  {formatMoney(t.amountBase, baseCurrency)}
                 </div>
               </button>
             ))}

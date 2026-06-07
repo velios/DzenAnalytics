@@ -92,7 +92,7 @@ export function SankeyPage() {
             >
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
             </Sankey>
           </ResponsiveContainer>

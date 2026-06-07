@@ -41,6 +41,19 @@ const symbolByCurrency: Record<string, string> = {
   THB: "฿",
 };
 
+// Global fraction-digit preference for non-compact money. 0 = whole
+// amounts (default), 2 = kopecks/cents. Kept as a module variable (synced
+// from useDisplayStore) so every `formatMoney` call without an explicit
+// `decimals` follows the user's toggle. Chart axes pass `compact` and are
+// unaffected; a few precision spots pass `decimals` explicitly.
+let _moneyFractionDigits = 0;
+export function setMoneyFractionDigits(n: number): void {
+  _moneyFractionDigits = n === 2 ? 2 : 0;
+}
+export function getMoneyFractionDigits(): number {
+  return _moneyFractionDigits;
+}
+
 export function formatMoney(
   amount: number,
   currency: Currency = "RUB",
@@ -48,18 +61,19 @@ export function formatMoney(
 ): string {
   const sign = opts?.signed && amount > 0 ? "+" : "";
   const abs = Math.abs(amount);
+  // Explicit `decimals` wins; otherwise compact caps at 1 and standard
+  // follows the global kopecks toggle.
+  const dec =
+    opts?.decimals !== undefined
+      ? opts.decimals
+      : opts?.compact
+        ? 1
+        : _moneyFractionDigits;
   const fmt = new Intl.NumberFormat("ru-RU", {
     notation: opts?.compact ? "compact" : "standard",
     minimumFractionDigits:
-      opts?.decimals !== undefined ? opts.decimals : undefined,
-    maximumFractionDigits:
-      opts?.decimals !== undefined
-        ? opts.decimals
-        : opts?.compact
-          ? 1
-          : abs >= 1000
-            ? 0
-            : 2,
+      opts?.compact && opts?.decimals === undefined ? 0 : dec,
+    maximumFractionDigits: dec,
   });
   const symbol = symbolByCurrency[currency] || currency;
   const value = fmt.format(amount < 0 ? -abs : abs);

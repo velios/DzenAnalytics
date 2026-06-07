@@ -166,13 +166,13 @@ export function CalendarPage() {
         <div className="card card-pad">
           <div className="label mb-1">Расходы за {year}</div>
           <div className="stat-num text-expense">
-            {formatMoney(yearStats.total, base, { decimals: 0 })}
+            {formatMoney(yearStats.total, base)}
           </div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Доходы за {year}</div>
           <div className="stat-num text-income">
-            {formatMoney(yearStats.totalInc, base, { decimals: 0 })}
+            {formatMoney(yearStats.totalInc, base)}
           </div>
         </div>
         <div className="card card-pad">
@@ -261,7 +261,7 @@ function MonthGrid({
       <div className="flex items-center justify-between mb-2">
         <div className="font-medium text-sm">{MONTHS[month]}</div>
         <div className={`text-xs tabular-nums ${kind === "expense" ? "text-expense" : "text-income"}`}>
-          {monthTotal > 0 ? formatMoney(monthTotal, base, { decimals: 0 }) : ""}
+          {monthTotal > 0 ? formatMoney(monthTotal, base) : ""}
         </div>
       </div>
       <div className="grid grid-cols-7 gap-1">
@@ -277,7 +277,7 @@ function MonthGrid({
           const bg = palette[idx];
           const isStrong = idx >= Math.ceil(palette.length * 0.55);
           const tooltip = c.cell
-            ? `${formatDate(c.date)}: ${formatMoney(v, base, { decimals: 0 })} · ${c.cell.count} оп.`
+            ? `${formatDate(c.date)}: ${formatMoney(v, base)} · ${c.cell.count} оп.`
             : formatDate(c.date);
           return (
             <button

@@ -77,14 +77,14 @@ export function RecurringPage() {
         <div className="card card-pad">
           <div className="label mb-1">≈ в месяц</div>
           <div className="stat-num text-warn">
-            {formatMoney(totalMonthly, base, { decimals: 0 })}
+            {formatMoney(totalMonthly, base)}
           </div>
           <div className="text-xs text-muted mt-1">оценка нагрузки</div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">≈ в год</div>
           <div className="stat-num text-warn">
-            {formatMoney(totalMonthly * 12, base, { decimals: 0 })}
+            {formatMoney(totalMonthly * 12, base)}
           </div>
           <div className="text-xs text-muted mt-1">экстраполяция</div>
         </div>
@@ -191,7 +191,7 @@ export function RecurringPage() {
                   <div className="flex items-center justify-between text-xs text-muted">
                     <span>{formatDate(c.nextExpected, "short")}</span>
                     <span className="text-expense font-semibold tabular-nums">
-                      ≈ {formatMoney(c.avgAmount, c.currency, { decimals: 0 })}
+                      ≈ {formatMoney(c.avgAmount, c.currency)}
                     </span>
                   </div>
                 </button>
@@ -240,7 +240,7 @@ export function RecurringPage() {
                   sortValue: (c) => c.avgAmount,
                   render: (c) => (
                     <span className="tabular-nums">
-                      {formatMoney(c.avgAmount, c.currency, { decimals: 0 })}
+                      {formatMoney(c.avgAmount, c.currency)}
                     </span>
                   ),
                 },
@@ -338,7 +338,7 @@ export function RecurringPage() {
                   sortValue: (c) => c.totalSpent,
                   render: (c) => (
                     <span className="tabular-nums text-expense font-medium">
-                      {formatMoney(c.totalSpent, c.currency, { decimals: 0 })}
+                      {formatMoney(c.totalSpent, c.currency)}
                     </span>
                   ),
                 },

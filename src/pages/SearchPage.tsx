@@ -327,19 +327,19 @@ export function SearchPage() {
         <div className="card card-pad">
           <div className="label mb-1">Доходы</div>
           <div className="stat-num text-income">
-            {formatMoney(totals.inc, base, { decimals: 0 })}
+            {formatMoney(totals.inc, base)}
           </div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Расходы</div>
           <div className="stat-num text-expense">
-            {formatMoney(totals.exp, base, { decimals: 0 })}
+            {formatMoney(totals.exp, base)}
           </div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Чистый</div>
           <div className={`stat-num ${totals.net >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(totals.net, base, { decimals: 0, signed: true })}
+            {formatMoney(totals.net, base, { signed: true })}
           </div>
         </div>
       </div>

@@ -139,7 +139,7 @@ export function WordcloudPage() {
                   fontWeight: fontSize(w.count) > 30 ? 700 : fontSize(w.count) > 20 ? 600 : 500,
                   lineHeight: 1.1,
                 }}
-                title={`«${w.text}» · ${w.count} раз · ${formatMoney(w.totalAmount, base, { decimals: 0 })}`}
+                title={`«${w.text}» · ${w.count} раз · ${formatMoney(w.totalAmount, base)}`}
               >
                 {w.text}
               </button>
@@ -171,7 +171,7 @@ export function WordcloudPage() {
                   <td className="table-td font-medium">{w.text}</td>
                   <td className="table-td text-right tabular-nums">{w.count}</td>
                   <td className="table-td text-right tabular-nums text-muted">
-                    {formatMoney(w.totalAmount, base, { decimals: 0 })}
+                    {formatMoney(w.totalAmount, base)}
                   </td>
                 </tr>
               ))}

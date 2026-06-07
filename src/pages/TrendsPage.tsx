@@ -243,7 +243,7 @@ export function TrendsPage() {
               />
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {activeCategories.map((cat, i) => (
@@ -291,7 +291,7 @@ export function TrendsPage() {
                   {...chartTooltipProps}
                   labelFormatter={(_, p) => (p?.[0]?.payload as { fullName?: string })?.fullName ?? ""}
                   formatter={(v: unknown, n: unknown) => [
-                    formatMoney(toNum(v), base, { decimals: 0 }),
+                    formatMoney(toNum(v), base),
                     n === "avg" ? "Средний за день" : "Всего",
                   ]}
                 />
@@ -325,7 +325,7 @@ export function TrendsPage() {
                 />
                 <Tooltip
                   {...chartTooltipProps}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                  formatter={(v: unknown) => formatMoney(toNum(v), base)}
                 />
               </RadarChart>
             </ResponsiveContainer>
@@ -337,19 +337,19 @@ export function TrendsPage() {
         <div className="card card-pad">
           <div className="label mb-1">Будни (среднее за день)</div>
           <div className={`stat-num ${kind === "expense" ? "text-expense" : "text-income"}`}>
-            {formatMoney(weekdayAvg, base, { decimals: 0 })}
+            {formatMoney(weekdayAvg, base)}
           </div>
           <div className="text-xs text-muted mt-1">
-            Всего за будни: {formatMoney(weekdayTotal, base, { decimals: 0 })}
+            Всего за будни: {formatMoney(weekdayTotal, base)}
           </div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Выходные (среднее за день)</div>
           <div className="stat-num text-accent2">
-            {formatMoney(weekendAvg, base, { decimals: 0 })}
+            {formatMoney(weekendAvg, base)}
           </div>
           <div className="text-xs text-muted mt-1">
-            Всего за выходные: {formatMoney(weekendTotal, base, { decimals: 0 })}
+            Всего за выходные: {formatMoney(weekendTotal, base)}
           </div>
         </div>
         <div className="card card-pad">

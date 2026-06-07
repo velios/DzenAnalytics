@@ -87,12 +87,12 @@ export function QuickCalibration() {
               <div className="text-xs text-muted">
                 На {formatDate(calibration.date)} баланс ={" "}
                 <span className="tabular-nums text-text">
-                  {formatMoney(calibration.amount, base, { decimals: 0 })}
+                  {formatMoney(calibration.amount, base)}
                 </span>
                 {" · "}
                 сейчас (на {formatDate(lastDate)}) ≈{" "}
                 <span className="tabular-nums text-text">
-                  {formatMoney(currentAtLast, base, { decimals: 0, signed: true })}
+                  {formatMoney(currentAtLast, base, { signed: true })}
                 </span>
               </div>
             </div>
@@ -172,7 +172,7 @@ export function QuickCalibration() {
             <div className="text-xs text-muted mt-1">
               Самая свежая: {formatDate(anchors[0].tx.date)} ·{" "}
               {anchors[0].tx.categoryFull} ·{" "}
-              {formatMoney(anchors[0].amount, base, { decimals: 0 })}
+              {formatMoney(anchors[0].amount, base)}
             </div>
           </div>
           <button onClick={applyAnchor} className="btn-ghost text-xs whitespace-nowrap">
@@ -210,7 +210,7 @@ export function QuickCalibration() {
         <div className="text-[11px] text-muted mt-2">
           Для даты {formatDate(lastDate)}. Сейчас график показывает{" "}
           <span className="tabular-nums">
-            {formatMoney(rawAtLast, base, { decimals: 0, signed: true })}
+            {formatMoney(rawAtLast, base, { signed: true })}
           </span>{" "}
           на эту дату — после калибровки он покажет введённую сумму.
         </div>

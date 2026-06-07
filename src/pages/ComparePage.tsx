@@ -321,13 +321,13 @@ export function ComparePage() {
               <div>
                 <div className="label">Доходы</div>
                 <div className="text-income font-semibold tabular-nums">
-                  {formatMoney(kpi.income, base, { decimals: 0 })}
+                  {formatMoney(kpi.income, base)}
                 </div>
               </div>
               <div>
                 <div className="label">Расходы</div>
                 <div className="text-expense font-semibold tabular-nums">
-                  {formatMoney(kpi.expense, base, { decimals: 0 })}
+                  {formatMoney(kpi.expense, base)}
                 </div>
               </div>
               <div>
@@ -337,7 +337,7 @@ export function ComparePage() {
                     kpi.net >= 0 ? "text-income" : "text-expense"
                   }`}
                 >
-                  {formatMoney(kpi.net, base, { decimals: 0, signed: true })}
+                  {formatMoney(kpi.net, base, { signed: true })}
                 </div>
               </div>
             </div>
@@ -365,8 +365,8 @@ export function ComparePage() {
           <tbody>
             <tr onClick={() => openPeriod("A")} className="hover:bg-panel2/40 cursor-pointer">
               <td className="table-td">Доходы</td>
-              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.income, base, { decimals: 0 })}</td>
-              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.income, base, { decimals: 0 })}</td>
+              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.income, base)}</td>
+              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.income, base)}</td>
               <td className="table-td text-right">
                 <div className="flex justify-end">
                   <Delta a={kpiA.income} b={kpiB.income} />
@@ -375,8 +375,8 @@ export function ComparePage() {
             </tr>
             <tr>
               <td className="table-td">Расходы</td>
-              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.expense, base, { decimals: 0 })}</td>
-              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.expense, base, { decimals: 0 })}</td>
+              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.expense, base)}</td>
+              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.expense, base)}</td>
               <td className="table-td text-right">
                 <div className="flex justify-end">
                   <Delta a={kpiA.expense} b={kpiB.expense} invert />
@@ -385,8 +385,8 @@ export function ComparePage() {
             </tr>
             <tr>
               <td className="table-td">Чистый поток</td>
-              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.net, base, { decimals: 0, signed: true })}</td>
-              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.net, base, { decimals: 0, signed: true })}</td>
+              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.net, base, { signed: true })}</td>
+              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.net, base, { signed: true })}</td>
               <td className="table-td text-right">
                 <div className="flex justify-end">
                   <Delta a={kpiA.net} b={kpiB.net} />
@@ -395,8 +395,8 @@ export function ComparePage() {
             </tr>
             <tr>
               <td className="table-td">Средний чек расхода</td>
-              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.avgExpense, base, { decimals: 0 })}</td>
-              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.avgExpense, base, { decimals: 0 })}</td>
+              <td className="table-td text-right tabular-nums">{formatMoney(kpiA.avgExpense, base)}</td>
+              <td className="table-td text-right tabular-nums text-muted">{formatMoney(kpiB.avgExpense, base)}</td>
               <td className="table-td text-right">
                 <div className="flex justify-end">
                   <Delta a={kpiA.avgExpense} b={kpiB.avgExpense} invert />
@@ -441,7 +441,7 @@ export function ComparePage() {
               />
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar

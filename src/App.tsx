@@ -40,6 +40,7 @@ import { useZenmoneyStore } from "./store/useZenmoneyStore";
 import { useEditsStore } from "./store/useEditsStore";
 import { useDeletedStore } from "./store/useDeletedStore";
 import { useDeletedPayloadsStore } from "./store/useDeletedPayloadsStore";
+import { useDisplayStore } from "./store/useDisplayStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
 import { useFiltersStore } from "./store/useFiltersStore";
 
@@ -64,6 +65,10 @@ function App() {
   const reportPeriodLoaded = useReportPeriodStore((s) => s.loaded);
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const resetToCurrentPeriod = useFiltersStore((s) => s.resetToCurrentPeriod);
+  // Subscribing here makes the whole tree re-render when the kopecks
+  // toggle flips, so every formatMoney call re-evaluates with the new
+  // fraction setting (which lives as a module variable in lib/format).
+  useDisplayStore((s) => s.fractionDigits);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   useGlobalShortcuts(() => setPaletteOpen(true));
@@ -75,6 +80,7 @@ function App() {
     // that the UI + auto-push subscription read.)
     useDeletedStore.getState().hydrate();
     useDeletedPayloadsStore.getState().hydrate();
+    useDisplayStore.getState().hydrate();
     hydrate();
     backupHydrate();
     reportPeriodHydrate();

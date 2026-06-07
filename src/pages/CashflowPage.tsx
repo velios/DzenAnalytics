@@ -174,21 +174,21 @@ export function CashflowPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat
           label="Доходы"
-          value={formatMoney(kpi.income, base, { decimals: 0 })}
+          value={formatMoney(kpi.income, base)}
           tone="income"
           icon={<TrendingUp className="w-4 h-4" />}
           hint={`${formatNum(avgMonthlyIncome)} ${base} / мес`}
         />
         <Stat
           label="Расходы"
-          value={formatMoney(kpi.expense, base, { decimals: 0 })}
+          value={formatMoney(kpi.expense, base)}
           tone="expense"
           icon={<TrendingDown className="w-4 h-4" />}
           hint={`${formatNum(avgMonthlyExpense)} ${base} / мес`}
         />
         <Stat
           label="Чистый поток"
-          value={formatMoney(kpi.net, base, { decimals: 0, signed: true })}
+          value={formatMoney(kpi.net, base, { signed: true })}
           tone={kpi.net >= 0 ? "income" : "expense"}
           icon={<Wallet className="w-4 h-4" />}
           hint={`Норма сбережений: ${(savingsRate * 100).toFixed(1)}%`}
@@ -263,7 +263,7 @@ export function CashflowPage() {
               />
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="income" name="Доходы" fill="#10B981" radius={[4, 4, 0, 0]} activeBar={false} />
@@ -343,7 +343,7 @@ export function CashflowPage() {
                   {...chartTooltipProps}
                   labelFormatter={(d) => monthLabel(String(d))}
                   formatter={(v: unknown, n: unknown) => [
-                    formatMoney(toNum(v), base, { decimals: 0 }),
+                    formatMoney(toNum(v), base),
                     String(n),
                   ]}
                 />
@@ -399,7 +399,7 @@ export function CashflowPage() {
               Чистый: <span className={vsAvg.current.net > vsAvg.avg.net ? "text-income" : "text-expense"}>
                 {vsAvg.current.net > vsAvg.avg.net ? "лучше" : "хуже"}
               </span>{" "}
-              среднего на {formatMoney(Math.abs(vsAvg.current.net - vsAvg.avg.net), base, { decimals: 0 })}
+              среднего на {formatMoney(Math.abs(vsAvg.current.net - vsAvg.avg.net), base)}
             </div>
           </div>
         )}
@@ -470,7 +470,7 @@ export function CashflowPage() {
                 />
                 <Tooltip
                   {...chartTooltipProps}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                  formatter={(v: unknown) => formatMoney(toNum(v), base)}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar
@@ -523,7 +523,7 @@ export function CashflowPage() {
                     const dev = p.payload?.expenseDeviationPct ?? 0;
                     const ys = p.payload?.yearsSampled ?? 0;
                     return [
-                      `${formatMoney(toNum(v), base, { decimals: 0 })} · ${dev > 0 ? "+" : ""}${(dev * 100).toFixed(0)}% · ${ys} год${ys === 1 ? "" : "а"} в выборке`,
+                      `${formatMoney(toNum(v), base)} · ${dev > 0 ? "+" : ""}${(dev * 100).toFixed(0)}% · ${ys} год${ys === 1 ? "" : "а"} в выборке`,
                       "Расход",
                     ];
                   }}
@@ -586,7 +586,7 @@ export function CashflowPage() {
               sortValue: (m) => m.income,
               render: (m) => (
                 <span className="tabular-nums text-income">
-                  {formatMoney(m.income, base, { decimals: 0 })}
+                  {formatMoney(m.income, base)}
                 </span>
               ),
             },
@@ -597,7 +597,7 @@ export function CashflowPage() {
               sortValue: (m) => m.expense,
               render: (m) => (
                 <span className="tabular-nums text-expense">
-                  {formatMoney(m.expense, base, { decimals: 0 })}
+                  {formatMoney(m.expense, base)}
                 </span>
               ),
             },
@@ -612,7 +612,7 @@ export function CashflowPage() {
                     m.net >= 0 ? "text-income" : "text-expense"
                   }`}
                 >
-                  {formatMoney(m.net, base, { decimals: 0, signed: true })}
+                  {formatMoney(m.net, base, { signed: true })}
                 </span>
               ),
             },

@@ -135,18 +135,38 @@ export function AccountsPage() {
   // respect the active filters) with the real current balance from the API
   // cache (when connected). `balanceBase` is null in CSV mode / for accounts
   // the cache doesn't know about — the UI then shows the delta instead.
+  //
+  // The row set is the UNION of (a) accounts with activity under the current
+  // filters and (b) every real Zenmoney account that counts toward the
+  // balance — so debts / credit cards / deposits with a balance but no
+  // operations in the period still show up (their delta/income/expense are
+  // just 0). Credit/debt accounts carry their native sign, so a liability
+  // renders negative (red) and reduces the totals correctly.
   const accountRows = useMemo(() => {
-    const liveByTitle = new Map((liveAccounts ?? []).map((a) => [a.title, a]));
+    const liveList = liveAccounts ?? [];
+    const liveByTitle = new Map(liveList.map((a) => [a.title, a]));
+    const txByTitle = new Map(accounts.map((a) => [a.account, a]));
     const toBase = (amt: number, cur: string) =>
       cur === base ? amt : amt * (rates.rates[cur] || 1);
-    const rows = accounts.map((a) => {
-      const live = liveByTitle.get(a.account);
+
+    const titles = new Set<string>();
+    for (const a of accounts) titles.add(a.account);
+    for (const a of liveList) {
+      if (!a.inBalance || a.archive) continue; // not part of net worth / archived
+      // Skip dormant zero-balance accounts with no activity — they'd be noise.
+      if (Math.abs(a.balance) <= 0.005 && !txByTitle.has(a.title)) continue;
+      titles.add(a.title);
+    }
+
+    const rows = [...titles].map((title) => {
+      const live = liveByTitle.get(title);
+      const tx = txByTitle.get(title);
       return {
-        account: a.account,
-        delta: a.balance,
-        income: a.income,
-        expense: a.expense,
-        count: a.count,
+        account: title,
+        delta: tx?.balance ?? 0,
+        income: tx?.income ?? 0,
+        expense: tx?.expense ?? 0,
+        count: tx?.count ?? 0,
         balanceBase: live ? toBase(live.balance, live.currency) : null,
         nativeBalance: live ? live.balance : null,
         nativeCurrency: live ? live.currency : null,
@@ -335,7 +355,7 @@ export function AccountsPage() {
                 <div className="text-[11px] text-muted mt-1">
                   Сейчас график показывает{" "}
                   <span className="tabular-nums">
-                    {formatMoney(rawAtCalibDate, base, { decimals: 0, signed: true })}
+                    {formatMoney(rawAtCalibDate, base, { signed: true })}
                   </span>{" "}
                   на эту дату
                 </div>
@@ -377,7 +397,7 @@ export function AccountsPage() {
         <div className="card card-pad">
           <div className="label mb-1">Совокупный баланс</div>
           <div className={`stat-num ${lastNetWorth >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(lastNetWorth, base, { decimals: 0, signed: true })}
+            {formatMoney(lastNetWorth, base, { signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">
             {scope === "all" ? "Вся история" : "В пределах фильтра"}
@@ -386,20 +406,20 @@ export function AccountsPage() {
         <div className="card card-pad">
           <div className="label mb-1">Пиковое значение</div>
           <div className="stat-num text-accent">
-            {formatMoney(peakNetWorth, base, { decimals: 0 })}
+            {formatMoney(peakNetWorth, base)}
           </div>
           <div className="text-xs text-muted mt-1">Максимум за период графика</div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Поступления (фильтр)</div>
           <div className="stat-num text-income">
-            {formatMoney(totalIncome, base, { decimals: 0 })}
+            {formatMoney(totalIncome, base)}
           </div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Списания (фильтр)</div>
           <div className="stat-num text-expense">
-            {formatMoney(totalExpense, base, { decimals: 0 })}
+            {formatMoney(totalExpense, base)}
           </div>
         </div>
       </div>
@@ -438,7 +458,7 @@ export function AccountsPage() {
                 <Tooltip
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0, signed: true })}
+                  formatter={(v: unknown) => formatMoney(toNum(v), base, { signed: true })}
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {stacked.accounts.map((acc, i) => (
@@ -480,7 +500,7 @@ export function AccountsPage() {
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
                   formatter={(v: unknown) => [
-                    formatMoney(toNum(v), base, { decimals: 0, signed: true }),
+                    formatMoney(toNum(v), base, { signed: true }),
                     "Баланс",
                   ]}
                 />
@@ -540,7 +560,7 @@ export function AccountsPage() {
                 {...chartTooltipProps}
                 labelFormatter={(d) => formatDate(d as string)}
                 formatter={(v: unknown, n: unknown) => [
-                  formatMoney(toNum(v), base, { decimals: 0, signed: true }),
+                  formatMoney(toNum(v), base, { signed: true }),
                   n === "balance" ? "Баланс" : "Дельта",
                 ]}
               />
@@ -562,14 +582,14 @@ export function AccountsPage() {
           <div
             className={`stat-num ${totalNet >= 0 ? "text-income" : "text-expense"}`}
           >
-            {formatMoney(totalNet, base, { decimals: 0, signed: true })}
+            {formatMoney(totalNet, base, { signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">По текущим фильтрам</div>
         </div>
         <div className="card card-pad">
           <div className="label mb-1">Чистая дельта (вся история)</div>
           <div className={`stat-num ${totalAllAccounts >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(totalAllAccounts, base, { decimals: 0, signed: true })}
+            {formatMoney(totalAllAccounts, base, { signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">Без фильтров</div>
         </div>
@@ -680,10 +700,7 @@ export function AccountsPage() {
                           className={`text-xl font-bold tabular-nums truncate ${headlineColor}`}
                           title={formatMoney(headline, base, { decimals: 2 })}
                         >
-                          {formatMoney(headline, base, {
-                            decimals: 0,
-                            signed: !hasReal,
-                          })}
+                          {formatMoney(headline, base, { signed: !hasReal })}
                         </div>
                         {hasReal &&
                           a.nativeCurrency &&
@@ -694,9 +711,7 @@ export function AccountsPage() {
                                 decimals: 2,
                               })}
                             >
-                              {formatMoney(a.nativeBalance!, a.nativeCurrency, {
-                                decimals: 0,
-                              })}
+                              {formatMoney(a.nativeBalance!, a.nativeCurrency)}
                             </div>
                           )}
                       </div>
@@ -710,17 +725,17 @@ export function AccountsPage() {
                     <div className="text-xs text-muted flex justify-between mt-2 mb-3">
                       {hasReal ? (
                         <span title="Изменение по текущим фильтрам">
-                          Δ {formatMoney(a.delta, base, { decimals: 0, signed: true })}
+                          Δ {formatMoney(a.delta, base, { signed: true })}
                         </span>
                       ) : (
                         <span />
                       )}
                       <span className="flex gap-2">
                         <span className="text-income">
-                          +{formatMoney(a.income, base, { decimals: 0 })}
+                          +{formatMoney(a.income, base)}
                         </span>
                         <span className="text-expense">
-                          −{formatMoney(a.expense, base, { decimals: 0 })}
+                          −{formatMoney(a.expense, base)}
                         </span>
                       </span>
                     </div>
@@ -793,12 +808,10 @@ export function AccountsPage() {
                         className={`py-2 px-2 text-right tabular-nums font-semibold whitespace-nowrap ${headlineColor}`}
                         title={formatMoney(headline, base, { decimals: 2 })}
                       >
-                        {formatMoney(headline, base, { decimals: 0, signed: !hasReal })}
+                        {formatMoney(headline, base, { signed: !hasReal })}
                         {hasReal && a.nativeCurrency && a.nativeCurrency !== base && (
                           <div className="text-[10px] text-muted font-normal">
-                            {formatMoney(a.nativeBalance!, a.nativeCurrency, {
-                              decimals: 0,
-                            })}
+                            {formatMoney(a.nativeBalance!, a.nativeCurrency)}
                           </div>
                         )}
                       </td>
@@ -807,13 +820,13 @@ export function AccountsPage() {
                           a.delta >= 0 ? "text-income" : "text-expense"
                         }`}
                       >
-                        {formatMoney(a.delta, base, { decimals: 0, signed: true })}
+                        {formatMoney(a.delta, base, { signed: true })}
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums text-income whitespace-nowrap">
-                        {formatMoney(a.income, base, { decimals: 0 })}
+                        {formatMoney(a.income, base)}
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums text-expense whitespace-nowrap">
-                        {formatMoney(a.expense, base, { decimals: 0 })}
+                        {formatMoney(a.expense, base)}
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums text-muted">
                         {formatNum(a.count)}

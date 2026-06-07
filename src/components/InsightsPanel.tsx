@@ -40,7 +40,7 @@ export function InsightsPanel({ insights, base }: { insights: Insight[]; base: s
               <div className="text-sm text-text">{ins.body}</div>
               {ins.value !== undefined && ins.kind === "highlight" && (
                 <div className="text-lg font-semibold tabular-nums mt-1">
-                  {formatMoney(ins.value, base, { decimals: 0 })}
+                  {formatMoney(ins.value, base)}
                 </div>
               )}
             </div>

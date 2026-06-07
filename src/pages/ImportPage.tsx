@@ -51,7 +51,8 @@ import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
-import { formatNum, formatDate } from "../lib/format";
+import { formatNum, formatDate, formatMoney } from "../lib/format";
+import { useDisplayStore } from "../store/useDisplayStore";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import { parseAndValidateBackup } from "../lib/backup";
 import * as db from "../lib/db";
@@ -152,6 +153,8 @@ export function ImportPage() {
   const setPayeeGrouping = useDataStore((s) => s.setPayeeGrouping);
   const inflation = useInflationStore((s) => s.config);
   const inflationLoaded = useInflationStore((s) => s.loaded);
+  const fractionDigits = useDisplayStore((s) => s.fractionDigits);
+  const setFractionDigits = useDisplayStore((s) => s.setFractionDigits);
   const setInflEnabled = useInflationStore((s) => s.setEnabled);
   const setInflBaseYear = useInflationStore((s) => s.setBaseYear);
   const setInflRate = useInflationStore((s) => s.setRate);
@@ -1122,6 +1125,47 @@ export function ImportPage() {
       </>)}
 
       {settingsTab === "currency" && (<>
+
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <Coins className="w-5 h-5 text-accent2" />
+          <span className="font-medium">Формат сумм</span>
+        </div>
+        <p className="text-xs text-muted mb-3">
+          Показывать ли копейки/центы — два знака после запятой. Влияет на все
+          суммы: KPI, карточки, таблицы, операции и подсказки. На осях графиков
+          всегда компактный вид.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div
+            role="group"
+            aria-label="Дробная часть сумм"
+            className="flex bg-panel2 rounded-lg p-1 border border-border"
+          >
+            <button
+              onClick={() => setFractionDigits(0)}
+              aria-pressed={fractionDigits === 0}
+              className={`px-3 py-1 text-sm rounded-md ${
+                fractionDigits === 0 ? "bg-accent text-accent-fg" : "text-muted"
+              }`}
+            >
+              Без копеек
+            </button>
+            <button
+              onClick={() => setFractionDigits(2)}
+              aria-pressed={fractionDigits === 2}
+              className={`px-3 py-1 text-sm rounded-md ${
+                fractionDigits === 2 ? "bg-accent text-accent-fg" : "text-muted"
+              }`}
+            >
+              С копейками
+            </button>
+          </div>
+          <span className="text-xs text-muted tabular-nums">
+            Пример: {formatMoney(1234.1, rates.base)}
+          </span>
+        </div>
+      </div>
 
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">

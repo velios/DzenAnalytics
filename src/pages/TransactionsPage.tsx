@@ -285,19 +285,19 @@ export function TransactionsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat
           label="Доходы"
-          value={formatMoney(totals.inc, base, { decimals: 0 })}
+          value={formatMoney(totals.inc, base)}
           tone="income"
           icon={<TrendingUp className="w-4 h-4" />}
         />
         <Stat
           label="Расходы"
-          value={formatMoney(totals.exp, base, { decimals: 0 })}
+          value={formatMoney(totals.exp, base)}
           tone="expense"
           icon={<TrendingDown className="w-4 h-4" />}
         />
         <Stat
           label="Прибыль"
-          value={formatMoney(totals.net, base, { decimals: 0, signed: true })}
+          value={formatMoney(totals.net, base, { signed: true })}
           tone={totals.net >= 0 ? "income" : "expense"}
           icon={<Wallet className="w-4 h-4" />}
         />
@@ -543,19 +543,19 @@ function DayGroup({
           <span className="text-muted whitespace-nowrap">{txs.length} оп.</span>
           {totals.inc > 0 && (
             <span className="text-income whitespace-nowrap">
-              +{formatMoney(totals.inc, base, { decimals: 0 })}
+              +{formatMoney(totals.inc, base)}
             </span>
           )}
           {totals.exp > 0 && (
             <span className="text-expense whitespace-nowrap">
-              −{formatMoney(totals.exp, base, { decimals: 0 })}
+              −{formatMoney(totals.exp, base)}
             </span>
           )}
           <span
             className={`font-medium whitespace-nowrap ${totals.net >= 0 ? "text-income" : "text-expense"}`}
             title="Чистый поток за день"
           >
-            {formatMoney(totals.net, base, { decimals: 0, signed: true })}
+            {formatMoney(totals.net, base, { signed: true })}
           </span>
         </div>
       </div>

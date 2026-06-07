@@ -362,7 +362,7 @@ export function CategoriesPage() {
       <PageHeader
         icon={PieChartIcon}
         title="Разбивка по категориям"
-        hint={`${tree.length} категорий · всего ${formatMoney(totalAll, base, { decimals: 0 })}. Клик по элементу — список операций.`}
+        hint={`${tree.length} категорий · всего ${formatMoney(totalAll, base)}. Клик по элементу — список операций.`}
         right={
           <div className="flex flex-wrap gap-2">
             <div className="flex bg-panel2 rounded-lg p-1 border border-border">
@@ -443,7 +443,7 @@ export function CategoriesPage() {
                     formatter={(v: unknown, _n: unknown, p: { payload?: { name?: string } }) => {
                       const n = toNum(v);
                       return [
-                        `${formatMoney(n, base, { decimals: 0 })} (${formatPct(n / totalAll, 1)})`,
+                        `${formatMoney(n, base)} (${formatPct(n / totalAll, 1)})`,
                         p.payload?.name ?? "",
                       ];
                     }}
@@ -555,7 +555,7 @@ export function CategoriesPage() {
                           {node.name}
                         </span>
                         <span className="tabular-nums shrink-0 text-xs">
-                          {formatMoney(node.total, base, { decimals: 0 })}
+                          {formatMoney(node.total, base)}
                         </span>
                       </div>
                       <div className="flex justify-between text-[10px] text-muted">
@@ -590,7 +590,7 @@ export function CategoriesPage() {
                               {sub.name}
                             </span>
                             <span className="tabular-nums shrink-0 text-muted">
-                              {formatMoney(sub.total, base, { decimals: 0 })}
+                              {formatMoney(sub.total, base)}
                               <span className="text-[10px] ml-1">
                                 ({formatPct(sub.total / node.total, 0)})
                               </span>
@@ -650,7 +650,7 @@ export function CategoriesPage() {
               />
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
               <Bar
                 dataKey="value"

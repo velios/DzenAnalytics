@@ -203,7 +203,7 @@ function MiniHeatmap({
                   title={
                     c?.date
                       ? `${formatDate(c.date)}: ${
-                          c.cell ? formatMoney(c.cell.expense, base, { decimals: 0 }) : "—"
+                          c.cell ? formatMoney(c.cell.expense, base) : "—"
                         }${c.cell ? ` · ${c.cell.count} оп.` : ""}`
                       : ""
                   }
@@ -488,7 +488,7 @@ export function DashboardPage() {
             <Wallet className="w-4 h-4 text-muted" />
           </div>
           <div className={`stat-num ${lastNetWorth >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(lastNetWorth, base, { decimals: 0, signed: true })}
+            {formatMoney(lastNetWorth, base, { signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">
             {calibration ? `Откалибровано на ${calibration.date}` : "от 0 в начале истории"}
@@ -504,7 +504,7 @@ export function DashboardPage() {
             <TrendingUp className="w-4 h-4 text-income" />
           </div>
           <div className="stat-num text-income">
-            {last ? formatMoney(last.income, base, { decimals: 0 }) : "—"}
+            {last ? formatMoney(last.income, base) : "—"}
           </div>
           {incDelta !== null && (
             <div className={`text-xs mt-1 ${incDelta >= 0 ? "text-income" : "text-muted"}`}>
@@ -522,7 +522,7 @@ export function DashboardPage() {
             <TrendingDown className="w-4 h-4 text-expense" />
           </div>
           <div className="stat-num text-expense">
-            {last ? formatMoney(last.expense, base, { decimals: 0 }) : "—"}
+            {last ? formatMoney(last.expense, base) : "—"}
           </div>
           {expDelta !== null && (
             <div className={`text-xs mt-1 ${expDelta <= 0 ? "text-income" : "text-warn"}`}>
@@ -541,7 +541,7 @@ export function DashboardPage() {
           </div>
           <div className="text-xs text-muted mt-1">
             {sr !== null && last
-              ? `Чистый: ${formatMoney(last.net, base, { decimals: 0, signed: true })}`
+              ? `Чистый: ${formatMoney(last.net, base, { signed: true })}`
               : "—"}
           </div>
         </div>
@@ -573,7 +573,7 @@ export function DashboardPage() {
                 <YAxis stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
                 <Tooltip
                   {...chartTooltipProps}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base, { decimals: 0 })}
+                  formatter={(v: unknown) => formatMoney(toNum(v), base)}
                 />
                 <Bar dataKey="income" name="Доход" fill="#10B981" radius={[4, 4, 0, 0]} activeBar={false} />
                 <Bar dataKey="expense" name="Расход" fill="#EF4444" radius={[4, 4, 0, 0]} activeBar={false} />
@@ -637,7 +637,7 @@ export function DashboardPage() {
                   {...chartTooltipProps}
                   labelFormatter={(d) => formatDate(d as string)}
                   formatter={(v: unknown) => [
-                    formatMoney(toNum(v), base, { decimals: 0, signed: true }),
+                    formatMoney(toNum(v), base, { signed: true }),
                     "Баланс",
                   ]}
                 />
@@ -676,21 +676,21 @@ export function DashboardPage() {
                     <div
                       className="bg-warn"
                       style={{ width: `${(flagsBreakdown.fixed / totalSpend) * 100}%` }}
-                      title={`Фиксированные: ${formatMoney(flagsBreakdown.fixed, base, { decimals: 0 })}`}
+                      title={`Фиксированные: ${formatMoney(flagsBreakdown.fixed, base)}`}
                     />
                   )}
                   {flagsBreakdown.discretionary > 0 && (
                     <div
                       className="bg-accent2"
                       style={{ width: `${(flagsBreakdown.discretionary / totalSpend) * 100}%` }}
-                      title={`Дискретные: ${formatMoney(flagsBreakdown.discretionary, base, { decimals: 0 })}`}
+                      title={`Дискретные: ${formatMoney(flagsBreakdown.discretionary, base)}`}
                     />
                   )}
                   {flagsBreakdown.unflagged > 0 && (
                     <div
                       className="bg-border"
                       style={{ width: `${(flagsBreakdown.unflagged / totalSpend) * 100}%` }}
-                      title={`Без флага: ${formatMoney(flagsBreakdown.unflagged, base, { decimals: 0 })}`}
+                      title={`Без флага: ${formatMoney(flagsBreakdown.unflagged, base)}`}
                     />
                   )}
                 </div>
@@ -700,7 +700,7 @@ export function DashboardPage() {
                       <span className="w-2 h-2 rounded bg-warn" /> Фиксированные
                     </div>
                     <div className="font-semibold tabular-nums">
-                      {formatMoney(flagsBreakdown.fixed, base, { decimals: 0 })}
+                      {formatMoney(flagsBreakdown.fixed, base)}
                     </div>
                   </div>
                   <div>
@@ -708,7 +708,7 @@ export function DashboardPage() {
                       <span className="w-2 h-2 rounded bg-accent2" /> Дискретные
                     </div>
                     <div className="font-semibold tabular-nums">
-                      {formatMoney(flagsBreakdown.discretionary, base, { decimals: 0 })}
+                      {formatMoney(flagsBreakdown.discretionary, base)}
                     </div>
                   </div>
                   <div>
@@ -716,7 +716,7 @@ export function DashboardPage() {
                       <span className="w-2 h-2 rounded bg-border" /> Без флага
                     </div>
                     <div className="font-semibold tabular-nums text-muted">
-                      {formatMoney(flagsBreakdown.unflagged, base, { decimals: 0 })}
+                      {formatMoney(flagsBreakdown.unflagged, base)}
                     </div>
                   </div>
                   <div>
@@ -726,7 +726,7 @@ export function DashboardPage() {
                         freedom > 0 ? "text-income" : "text-expense"
                       }`}
                     >
-                      {formatMoney(freedom, base, { decimals: 0, signed: true })}
+                      {formatMoney(freedom, base, { signed: true })}
                     </div>
                   </div>
                 </div>
@@ -832,9 +832,7 @@ export function DashboardPage() {
                                 decimals: 2,
                               })}
                             >
-                              {formatMoney(a.balanceBase, base, {
-                                decimals: 2,
-                              })}
+                              {formatMoney(a.balanceBase, base)}
                             </div>
                             {hasFx && (
                               <div
@@ -845,9 +843,7 @@ export function DashboardPage() {
                                   { decimals: 2 }
                                 )}
                               >
-                                {formatMoney(a.nativeBalance, a.nativeCurrency, {
-                                  decimals: 2,
-                                })}
+                                {formatMoney(a.nativeBalance, a.nativeCurrency)}
                               </div>
                             )}
                           </td>
@@ -903,7 +899,7 @@ export function DashboardPage() {
                         <span className="truncate">{c.category}</span>
                       </span>
                       <span className="tabular-nums text-xs shrink-0">
-                        {formatMoney(c.expense, base, { decimals: 2 })}
+                        {formatMoney(c.expense, base)}
                       </span>
                     </div>
                     <div className="h-1.5 bg-panel2 rounded-full overflow-hidden">
@@ -954,13 +950,13 @@ export function DashboardPage() {
                       </div>
                     </div>
                     <div className="text-sm font-semibold tabular-nums text-expense whitespace-nowrap">
-                      ≈ {formatMoney(c.avgAmount, c.currency, { decimals: 0 })}
+                      ≈ {formatMoney(c.avgAmount, c.currency)}
                     </div>
                   </div>
                 );
               })}
               <div className="mt-3 pt-3 border-t border-border text-xs text-muted">
-                ≈ {formatMoney(totalRecurringMonthly, base, { decimals: 0 })} / мес всего на регулярные
+                ≈ {formatMoney(totalRecurringMonthly, base)} / мес всего на регулярные
               </div>
             </div>
           )}
