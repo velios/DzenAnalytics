@@ -1132,9 +1132,10 @@ export function ImportPage() {
           <span className="font-medium">Формат сумм</span>
         </div>
         <p className="text-xs text-muted mb-3">
-          Показывать ли копейки/центы — два знака после запятой. Влияет на все
-          суммы: KPI, карточки, таблицы, операции и подсказки. На осях графиков
-          всегда компактный вид.
+          Показывать ли дробную часть — два знака после запятой (копейки,
+          центы и т.п., в зависимости от валюты). Влияет на все суммы: KPI,
+          карточки, таблицы, операции и подсказки. На осях графиков всегда
+          компактный вид.
         </p>
         <div className="flex items-center gap-3 flex-wrap">
           <div
@@ -1149,7 +1150,7 @@ export function ImportPage() {
                 fractionDigits === 0 ? "bg-accent text-accent-fg" : "text-muted"
               }`}
             >
-              Без копеек
+              Без дробной части
             </button>
             <button
               onClick={() => setFractionDigits(2)}
@@ -1158,7 +1159,7 @@ export function ImportPage() {
                 fractionDigits === 2 ? "bg-accent text-accent-fg" : "text-muted"
               }`}
             >
-              С копейками
+              С дробной частью
             </button>
           </div>
           <span className="text-xs text-muted tabular-nums">
