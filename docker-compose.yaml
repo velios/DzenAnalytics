@@ -1,0 +1,6 @@
+services:
+  dzen-analitics:
+    build: .
+    ports:
+      - 8009:8000
+    restart: unless-stopped

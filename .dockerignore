@@ -1,0 +1,16 @@
+node_modules/
+
+.claude/
+
+.git/
+.github/
+.gitignore
+
+Dockerfile
+docker-compose.yaml
+.dockerignore
+
+docs/
+LICENSE
+README.md
+samples/
