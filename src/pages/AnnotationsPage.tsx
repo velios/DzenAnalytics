@@ -5,6 +5,7 @@ import { confirm } from "../store/useConfirmStore";
 import { useDataStore } from "../store/useDataStore";
 import { formatDate } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { DateField } from "../components/DateField";
 
 const COLORS = [
   { value: "#A78BFA", label: "Сиреневый" },
@@ -60,8 +61,7 @@ export function AnnotationsPage() {
           Новая аннотация
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
-          <input
-            type="date"
+          <DateField
             value={date}
             onChange={(e) => setDate(e.target.value)}
             className="input text-sm"

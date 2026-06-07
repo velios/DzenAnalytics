@@ -7,6 +7,7 @@ import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { getBrandTitlesFromCache, useZenmoneyStore } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { Combobox } from "./Combobox";
+import { DateField } from "./DateField";
 import type { Transaction, TxKind } from "../types";
 
 interface Props {
@@ -389,8 +390,7 @@ export function EditTransactionModal({ tx, onClose }: Props) {
             </div>
           </Field>
           <Field label="Дата">
-            <input
-              type="date"
+            <DateField
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="input text-sm w-full"

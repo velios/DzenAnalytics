@@ -29,6 +29,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { periodKey, periodRange, shiftPeriod } from "../lib/period";
+import { DateField } from "../components/DateField";
 import type { Transaction } from "../types";
 
 /** Same logic as `periodKey` but accepts a Date instead of an ISO string. */
@@ -264,34 +265,34 @@ export function ComparePage() {
             <div>
               <div className="label mb-2">Период А</div>
               <div className="flex gap-2">
-                <input
-                  type="date"
+                <DateField
                   value={customA.from}
                   onChange={(e) => setCustomA({ ...customA, from: e.target.value })}
                   className="input text-xs py-1.5"
+                  wrapperClassName="flex-1"
                 />
-                <input
-                  type="date"
+                <DateField
                   value={customA.to}
                   onChange={(e) => setCustomA({ ...customA, to: e.target.value })}
                   className="input text-xs py-1.5"
+                  wrapperClassName="flex-1"
                 />
               </div>
             </div>
             <div>
               <div className="label mb-2">Период Б</div>
               <div className="flex gap-2">
-                <input
-                  type="date"
+                <DateField
                   value={customB.from}
                   onChange={(e) => setCustomB({ ...customB, from: e.target.value })}
                   className="input text-xs py-1.5"
+                  wrapperClassName="flex-1"
                 />
-                <input
-                  type="date"
+                <DateField
                   value={customB.to}
                   onChange={(e) => setCustomB({ ...customB, to: e.target.value })}
                   className="input text-xs py-1.5"
+                  wrapperClassName="flex-1"
                 />
               </div>
             </div>

@@ -8,6 +8,7 @@ import { formatMoney, formatDate, formatNum } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { BulkEditModal } from "../components/BulkEditModal";
+import { DateField } from "../components/DateField";
 import { confirmBulkDelete } from "../lib/confirmBulkDelete";
 import type { Transaction } from "../types";
 
@@ -243,8 +244,7 @@ export function SearchPage() {
             <label className="label block mb-1.5 flex items-center gap-1">
               <Calendar className="w-3 h-3" />C
             </label>
-            <input
-              type="date"
+            <DateField
               value={from}
               onChange={(e) => setFrom(e.target.value)}
               className="input text-xs"
@@ -252,8 +252,7 @@ export function SearchPage() {
           </div>
           <div>
             <label className="label block mb-1.5">По</label>
-            <input
-              type="date"
+            <DateField
               value={to}
               onChange={(e) => setTo(e.target.value)}
               className="input text-xs"

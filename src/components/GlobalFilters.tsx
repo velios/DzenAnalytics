@@ -11,6 +11,7 @@ import {
   ChevronRight,
   CalendarRange,
 } from "lucide-react";
+import { DateField } from "./DateField";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, type DatePreset } from "../store/useFiltersStore";
@@ -352,18 +353,18 @@ export function GlobalFilters() {
         </div>
 
         <div className="flex items-center gap-2">
-          <input
-            type="date"
+          <DateField
             value={f.from || ""}
             onChange={(e) => f.setRange(e.target.value || null, f.to)}
-            className="input text-xs py-1.5 w-36"
+            className="input text-xs py-1.5"
+            wrapperClassName="w-36"
           />
           <span className="text-muted">—</span>
-          <input
-            type="date"
+          <DateField
             value={f.to || ""}
             onChange={(e) => f.setRange(f.from, e.target.value || null)}
-            className="input text-xs py-1.5 w-36"
+            className="input text-xs py-1.5"
+            wrapperClassName="w-36"
           />
         </div>
 

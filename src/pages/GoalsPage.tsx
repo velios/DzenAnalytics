@@ -6,6 +6,7 @@ import { confirm } from "../store/useConfirmStore";
 import { groupByMonth } from "../lib/aggregations";
 import { formatMoney, formatDate } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { DateField } from "../components/DateField";
 
 function monthsBetween(fromIso: string, toIso: string): number {
   const a = new Date(fromIso);
@@ -181,8 +182,7 @@ export function GoalsPage() {
               onChange={(e) => setCurrent(e.target.value)}
               className="input"
             />
-            <input
-              type="date"
+            <DateField
               placeholder="Дедлайн"
               value={deadline}
               onChange={(e) => setDeadline(e.target.value)}

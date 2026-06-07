@@ -55,6 +55,7 @@ import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Sparkline } from "../components/Sparkline";
 import { AccountLogo } from "../components/AccountLogo";
+import { DateField } from "../components/DateField";
 import { accountTypeLabel } from "../lib/accountType";
 
 const STACK_COLORS = [
@@ -335,8 +336,7 @@ export function AccountsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
             <div>
               <label className="label block mb-1">На дату</label>
-              <input
-                type="date"
+              <DateField
                 value={calibDate}
                 onChange={(e) => setCalibDate(e.target.value)}
                 className="input text-sm"
