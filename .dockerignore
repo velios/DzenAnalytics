@@ -6,6 +6,9 @@ node_modules/
 .github/
 .gitignore
 
+.env
+.*.env
+
 Dockerfile
 docker-compose.yaml
 .dockerignore
