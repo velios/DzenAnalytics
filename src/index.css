@@ -95,32 +95,11 @@ body {
     @apply w-full bg-panel2 text-text placeholder:text-muted px-3 py-2 rounded-lg
            border border-border focus:outline-none focus:border-accent transition-colors;
   }
-  /* DateField: hide Chrome's English "dd.mm.yyyy" placeholder while the
-     field is empty (its format comes from the browser locale, not the
-     page, so it can't be localised) and overlay our Russian "дд.мм.гггг"
-     instead — kept even on focus so the English never flashes. The native
-     field reappears the moment a value is picked. Date pickers are the
-     primary way to fill these; the calendar icon is untouched. */
-  input[type="date"].date-empty::-webkit-datetime-edit {
-    color: transparent;
-  }
-  /* On focus Chrome auto-selects a segment and renders it in the selection
-     colour, which ignores `color: transparent` and bled the English "yyyy"
-     through the overlay. Make the empty field's selection transparent too. */
-  input[type="date"].date-empty::selection {
-    background: transparent;
-    color: transparent;
-  }
-  input[type="date"].date-empty::-webkit-datetime-edit-day-field::selection,
-  input[type="date"].date-empty::-webkit-datetime-edit-month-field::selection,
-  input[type="date"].date-empty::-webkit-datetime-edit-year-field::selection {
-    background: transparent;
-    color: transparent;
-  }
-  .date-ph {
-    @apply pointer-events-none absolute left-3 top-1/2 -translate-y-1/2
-           text-muted text-xs;
-  }
+  /* DateField hides the native <input type="date"> (opacity 0) and paints
+     its own Russian layer on top, so the browser's English "dd.mm.yyyy" is
+     never rendered. The native calendar-picker indicator is kept (invisible
+     under our own icon) so clicking the right edge still opens the picker
+     even if showPicker() isn't available. */
   .label {
     @apply text-xs uppercase tracking-wider text-muted font-medium;
   }
