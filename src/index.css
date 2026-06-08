@@ -104,6 +104,19 @@ body {
   input[type="date"].date-empty::-webkit-datetime-edit {
     color: transparent;
   }
+  /* On focus Chrome auto-selects a segment and renders it in the selection
+     colour, which ignores `color: transparent` and bled the English "yyyy"
+     through the overlay. Make the empty field's selection transparent too. */
+  input[type="date"].date-empty::selection {
+    background: transparent;
+    color: transparent;
+  }
+  input[type="date"].date-empty::-webkit-datetime-edit-day-field::selection,
+  input[type="date"].date-empty::-webkit-datetime-edit-month-field::selection,
+  input[type="date"].date-empty::-webkit-datetime-edit-year-field::selection {
+    background: transparent;
+    color: transparent;
+  }
   .date-ph {
     @apply pointer-events-none absolute left-3 top-1/2 -translate-y-1/2
            text-muted text-xs;
