@@ -69,7 +69,19 @@ export function CalendarPage() {
 
   const [kind, setKind] = useState<"expense" | "income">("expense");
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
+  // The calendar's own year selector IS the time axis here, so the global
+  // *date range* must not constrain it — otherwise the default "current
+  // month" filter collapses the heatmap to one month and locks the year
+  // arrows. Keep every other global filter (accounts/categories/currencies/
+  // search), just neutralise the date range.
+  const calendarFilters = useMemo(
+    () => ({ ...filters, preset: "all" as const, from: null, to: null }),
+    [filters]
+  );
+  const filtered = useMemo(
+    () => applyFilters(transactions, calendarFilters, monthStartDay),
+    [transactions, calendarFilters, monthStartDay]
+  );
   const dayMap = useMemo(() => dailyExpenseMap(filtered), [filtered]);
 
   const dates = useMemo(() => {
@@ -160,7 +172,7 @@ export function CalendarPage() {
           </div>
         }
       />
-      <GlobalFilters />
+      <GlobalFilters showDateRange={false} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card card-pad">

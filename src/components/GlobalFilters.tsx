@@ -99,7 +99,9 @@ function MultiSelect({
   );
 }
 
-export function GlobalFilters() {
+export function GlobalFilters({
+  showDateRange = true,
+}: { showDateRange?: boolean } = {}) {
   const transactions = useDataStore((s) => s.transactions);
   const f = useFiltersStore();
   const views = useSavedViewsStore((s) => s.views);
@@ -298,6 +300,8 @@ export function GlobalFilters() {
           )}
         </div>
 
+        {showDateRange && (
+        <>
         <div className="flex bg-panel2 rounded-lg p-1 border border-border">
           {PRESETS.map((p) => (
             <button
@@ -367,6 +371,8 @@ export function GlobalFilters() {
             wrapperClassName="w-36"
           />
         </div>
+        </>
+        )}
 
         <MultiSelect
           label="Счета"
