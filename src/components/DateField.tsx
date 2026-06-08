@@ -1,70 +1,388 @@
-import type { InputHTMLAttributes } from "react";
-import { Calendar } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 
 /**
- * A date field with a fully Russian display.
+ * A fully Russian date field. The native <input type="date"> and its
+ * calendar popup are rendered by the *browser* from its UI locale, not the
+ * page, so neither the "dd.mm.yyyy" placeholder nor the English month/day
+ * calendar can be localised. So we don't use the native control at all:
+ * the field is a button showing "дд.мм.гггг" / "01.05.2026", and clicking
+ * it opens our own Russian calendar popup.
  *
- * Chrome renders <input type="date"> from the *browser* locale, so its
- * "dd.mm.yyyy" placeholder (and the highlighted segment on focus) can't be
- * localised by CSS without the English bleeding through. Instead of fighting
- * that, we make the native input invisible (opacity 0) — it still receives
- * clicks, holds the value and opens the calendar picker — and paint our OWN
- * layer on top: either the formatted value "дд.мм.гггг" or the placeholder.
- * No native text is ever shown, so nothing can flash or overlap.
- *
- * Drop-in for `<input type="date" value=… onChange=… className=… />`;
- * onChange still receives a normal change event (`e.target.value` = ISO).
- * Width/layout that must size the box goes in `wrapperClassName`.
+ * Drop-in for the old date input: `value` is an ISO "YYYY-MM-DD" string and
+ * `onChange` still gets `{ target: { value } }`, so existing call sites
+ * (`onChange={(e) => …e.target.value}`) work unchanged.
  */
-function toDDMMYYYY(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : iso;
+
+const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const MONTHS = [
+  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+];
+const MONTHS_SHORT = [
+  "Янв", "Фев", "Мар", "Апр", "Май", "Июн",
+  "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек",
+];
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const toISO = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
+
+function parseISO(iso: string): { y: number; m: number; d: number } | null {
+  const x = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return x ? { y: +x[1], m: +x[2] - 1, d: +x[3] } : null;
 }
 
-interface Props extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
+function toDisplay(iso: string): string {
+  const p = parseISO(iso);
+  return p ? `${pad(p.d)}.${pad(p.m + 1)}.${p.y}` : "";
+}
+
+interface Props {
+  value?: string;
+  onChange?: (e: { target: { value: string } }) => void;
+  className?: string;
   wrapperClassName?: string;
+  placeholder?: string;
 }
 
 export function DateField({
+  value = "",
+  onChange,
   className = "",
   wrapperClassName = "",
   placeholder,
-  value,
-  ...rest
 }: Props) {
-  const iso = typeof value === "string" ? value : "";
-  const display = iso ? toDDMMYYYY(iso) : "";
-  const ph = typeof placeholder === "string" ? placeholder : "дд.мм.гггг";
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const display = value ? toDisplay(value) : "";
+  const ph = placeholder || "дд.мм.гггг";
+  const emit = (v: string) => onChange?.({ target: { value: v } });
 
   return (
     <div className={`relative ${wrapperClassName}`}>
-      {/* The real control — invisible, on top, so it gets the clicks. */}
-      <input
-        type="date"
-        value={value}
-        {...rest}
-        onClick={(e) => {
-          // Open the native picker on any click — keyboard typing of a
-          // date input is segment-based and not the primary flow here.
-          try {
-            e.currentTarget.showPicker?.();
-          } catch {
-            /* showPicker needs user activation / may already be open */
-          }
-        }}
-        aria-label={typeof placeholder === "string" ? placeholder : "Дата"}
-        className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-      />
-      {/* Our visible layer — pure Russian, never shows native text. */}
-      <div
-        aria-hidden
-        className={`${className} flex items-center justify-between gap-2 peer-focus:border-accent`}
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={placeholder || "Дата"}
+        className={`${className} flex items-center justify-between gap-2 text-left`}
       >
         <span className={`truncate ${display ? "" : "text-muted"}`}>
           {display || ph}
         </span>
         <Calendar className="w-4 h-4 shrink-0 text-muted" />
-      </div>
+      </button>
+      {open && (
+        <CalendarPopup
+          anchorRef={btnRef}
+          value={value}
+          onSelect={(v) => {
+            emit(v);
+            setOpen(false);
+          }}
+          onClear={() => {
+            emit("");
+            setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function computePos(anchor: HTMLElement | null) {
+  if (!anchor) return { left: 8, top: 8 };
+  const r = anchor.getBoundingClientRect();
+  const W = 268;
+  const H = 322;
+  let left = r.left;
+  let top = r.bottom + 4;
+  if (left + W > window.innerWidth - 8) left = window.innerWidth - W - 8;
+  if (left < 8) left = 8;
+  // Flip above the field if there's no room below.
+  if (top + H > window.innerHeight - 8 && r.top - H - 4 > 8) top = r.top - H - 4;
+  return { left, top };
+}
+
+function CalendarPopup({
+  anchorRef,
+  value,
+  onSelect,
+  onClear,
+  onClose,
+}: {
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  value: string;
+  onSelect: (iso: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const sel = value ? parseISO(value) : null;
+  const today = new Date();
+  const [view, setView] = useState(() =>
+    sel
+      ? { y: sel.y, m: sel.m }
+      : { y: today.getFullYear(), m: today.getMonth() }
+  );
+  // The header title drills up — "Июнь 2026" → month grid → decade grid —
+  // and tapping a cell drills back down, so a far-off month/year is two
+  // clicks away instead of dozens of ‹ › steps.
+  const [mode, setMode] = useState<"days" | "months" | "years">("days");
+  const [yearStart, setYearStart] = useState(view.y - 6); // 12-year grid origin
+  // Position against the anchor in a layout effect — reading the ref's
+  // .current during render is unsafe (and lint-flagged); a layout effect
+  // runs before paint so there's no flash at the default 8/8 spot.
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 8, top: 8 });
+  useLayoutEffect(() => {
+    setPos(computePos(anchorRef.current));
+  }, [anchorRef]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t)) return;
+      if (anchorRef.current?.contains(t)) return;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [anchorRef, onClose]);
+
+  const firstDow = (new Date(view.y, view.m, 1).getDay() + 6) % 7; // Mon = 0
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const prevMonth = () =>
+    setView((v) => (v.m === 0 ? { y: v.y - 1, m: 11 } : { y: v.y, m: v.m - 1 }));
+  const nextMonth = () =>
+    setView((v) => (v.m === 11 ? { y: v.y + 1, m: 0 } : { y: v.y, m: v.m + 1 }));
+
+  return createPortal(
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Выбор даты"
+      className="fixed z-[70] w-[268px] rounded-xl border border-border bg-panel shadow-xl p-3 animate-fade"
+      style={{ left: pos.left, top: pos.top }}
+    >
+      {mode === "days" && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <button
+              type="button"
+              onClick={() => setMode("months")}
+              className="font-semibold text-sm px-1.5 py-0.5 rounded-md hover:bg-panel2"
+            >
+              {MONTHS[view.m]} {view.y}
+            </button>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={prevMonth}
+                className="p-1 rounded-md text-muted hover:text-text hover:bg-panel2"
+                aria-label="Предыдущий месяц"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={nextMonth}
+                className="p-1 rounded-md text-muted hover:text-text hover:bg-panel2"
+                aria-label="Следующий месяц"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center">
+            {WEEKDAYS.map((w) => (
+              <div key={w} className="text-[11px] text-muted py-1">
+                {w}
+              </div>
+            ))}
+            {cells.map((d, i) =>
+              d === null ? (
+                <div key={i} />
+              ) : (
+                (() => {
+                  const isSel =
+                    sel && sel.y === view.y && sel.m === view.m && sel.d === d;
+                  const isToday =
+                    today.getFullYear() === view.y &&
+                    today.getMonth() === view.m &&
+                    today.getDate() === d;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => onSelect(toISO(view.y, view.m, d))}
+                      className={`h-8 rounded-md text-sm tabular-nums transition-colors ${
+                        isSel
+                          ? "bg-accent text-accent-fg font-semibold"
+                          : isToday
+                            ? "border border-accent/60 text-text"
+                            : "text-text hover:bg-panel2"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  );
+                })()
+              )
+            )}
+          </div>
+        </>
+      )}
+      {mode === "months" && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <button
+              type="button"
+              onClick={() => {
+                setYearStart(view.y - 6);
+                setMode("years");
+              }}
+              className="font-semibold text-sm px-1.5 py-0.5 rounded-md hover:bg-panel2"
+            >
+              {view.y}
+            </button>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => setView((v) => ({ ...v, y: v.y - 1 }))}
+                className="p-1 rounded-md text-muted hover:text-text hover:bg-panel2"
+                aria-label="Предыдущий год"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setView((v) => ({ ...v, y: v.y + 1 }))}
+                className="p-1 rounded-md text-muted hover:text-text hover:bg-panel2"
+                aria-label="Следующий год"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-1 text-center">
+            {MONTHS_SHORT.map((mname, mi) => {
+              const isSel = sel && sel.y === view.y && sel.m === mi;
+              const isCur =
+                today.getFullYear() === view.y && today.getMonth() === mi;
+              return (
+                <button
+                  key={mname}
+                  type="button"
+                  onClick={() => {
+                    setView((v) => ({ ...v, m: mi }));
+                    setMode("days");
+                  }}
+                  className={`h-10 rounded-md text-sm transition-colors ${
+                    isSel
+                      ? "bg-accent text-accent-fg font-semibold"
+                      : isCur
+                        ? "border border-accent/60 text-text"
+                        : "text-text hover:bg-panel2"
+                  }`}
+                >
+                  {mname}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {mode === "years" && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-semibold text-sm px-1.5 tabular-nums">
+              {yearStart} – {yearStart + 11}
+            </div>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => setYearStart((s) => s - 12)}
+                className="p-1 rounded-md text-muted hover:text-text hover:bg-panel2"
+                aria-label="Предыдущие годы"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setYearStart((s) => s + 12)}
+                className="p-1 rounded-md text-muted hover:text-text hover:bg-panel2"
+                aria-label="Следующие годы"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-1 text-center">
+            {Array.from({ length: 12 }, (_, i) => yearStart + i).map((yr) => {
+              const isSel = sel && sel.y === yr;
+              const isCur = today.getFullYear() === yr;
+              return (
+                <button
+                  key={yr}
+                  type="button"
+                  onClick={() => {
+                    setView((v) => ({ ...v, y: yr }));
+                    setMode("months");
+                  }}
+                  className={`h-10 rounded-md text-sm tabular-nums transition-colors ${
+                    isSel
+                      ? "bg-accent text-accent-fg font-semibold"
+                      : isCur
+                        ? "border border-accent/60 text-text"
+                        : "text-text hover:bg-panel2"
+                  }`}
+                >
+                  {yr}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-xs text-muted hover:text-text"
+        >
+          Очистить
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onSelect(
+              toISO(today.getFullYear(), today.getMonth(), today.getDate())
+            )
+          }
+          className="text-xs text-accent hover:underline"
+        >
+          Сегодня
+        </button>
+      </div>
+    </div>,
+    document.body
   );
 }
