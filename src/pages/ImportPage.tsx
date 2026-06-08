@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Upload,
   CheckCircle2,
@@ -278,7 +278,12 @@ export function ImportPage() {
   //   • CSV tab — if there's CSV-imported data and no token
   //   • API tab — for fresh installs (most users connect via API)
   type SourceTab = "api" | "csv";
+  const [searchParams] = useSearchParams();
   const [sourceTab, setSourceTab] = useState<SourceTab>(() => {
+    // The empty-state cards deep-link here with ?source=api|csv — honour
+    // that first so the user lands on the source they picked.
+    const q = searchParams.get("source");
+    if (q === "api" || q === "csv") return q;
     if (zenToken) return "api";
     if (meta?.source === "csv" && transactions.length > 0) return "csv";
     return "api";
