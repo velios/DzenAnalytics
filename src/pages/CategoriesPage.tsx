@@ -650,6 +650,11 @@ export function CategoriesPage() {
               />
               <Tooltip
                 {...chartTooltipProps}
+                // Bars are coloured per-category via <Cell>, so the Bar has no
+                // own fill and Recharts falls back to a dark item colour that's
+                // unreadable in dark theme. Pin the value line to the theme text
+                // colour (single series, so no per-series colour is lost).
+                itemStyle={{ color: "rgb(var(--c-text))" }}
                 formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
               <Bar
