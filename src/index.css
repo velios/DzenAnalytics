@@ -96,18 +96,17 @@ body {
            border border-border focus:outline-none focus:border-accent transition-colors;
   }
   /* DateField: hide Chrome's English "dd.mm.yyyy" placeholder while the
-     field is empty + unfocused, so our Russian "дд.мм.гггг" overlay shows
-     through. Native field comes back on focus (keyboard entry stays
-     visible) and once a value is picked. */
-  input[type="date"].date-empty:not(:focus)::-webkit-datetime-edit {
+     field is empty (its format comes from the browser locale, not the
+     page, so it can't be localised) and overlay our Russian "дд.мм.гггг"
+     instead — kept even on focus so the English never flashes. The native
+     field reappears the moment a value is picked. Date pickers are the
+     primary way to fill these; the calendar icon is untouched. */
+  input[type="date"].date-empty::-webkit-datetime-edit {
     color: transparent;
   }
   .date-ph {
     @apply pointer-events-none absolute left-3 top-1/2 -translate-y-1/2
            text-muted text-xs;
-  }
-  input[type="date"]:focus ~ .date-ph {
-    opacity: 0;
   }
   .label {
     @apply text-xs uppercase tracking-wider text-muted font-medium;
