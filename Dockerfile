@@ -1,6 +1,6 @@
 # build stage
 # --------------------
-FROM node:26-alpine AS build
+FROM node:22-alpine AS build
 
 WORKDIR /app/
 
@@ -8,8 +8,7 @@ COPY package*.json /app/
 
 RUN npm install
 
-# exclude nginx config so it wont cause rebuilds
-COPY --exclude=nginx.conf . /app/
+COPY . /app/
 
 RUN npm run build
 
