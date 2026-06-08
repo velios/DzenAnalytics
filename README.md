@@ -582,6 +582,34 @@ worker.
 > Учтите: SPA-роутинг требует rewrite всех путей на `index.html`.
 > Vercel и Netlify делают это сами; для GH Pages потребуется `404.html`-хак.
 
+### Запуск через Docker
+
+Для самостоятельного хостинга в репозитории есть готовый Docker-сетап
+(`Dockerfile` + `docker-compose.yaml` + `nginx.conf`). Multi-stage сборка:
+приложение собирается в Node, а раздаётся через nginx с SPA-фолбэком,
+security-заголовками и кэшированием статики.
+
+```bash
+docker compose up -d --build      # собрать и поднять → http://localhost:8000
+```
+
+Порт по умолчанию — `8000`, меняется переменной `LISTEN_PORT`:
+
+```bash
+LISTEN_PORT=3000 docker compose up -d --build   # → http://localhost:3000
+```
+
+Без compose:
+
+```bash
+docker build -t dzenanalytics .
+docker run -d -p 8000:8000 --restart unless-stopped dzenanalytics
+```
+
+> Хостинг лишь раздаёт статический фронтенд — данные по-прежнему остаются
+> в браузере каждого пользователя (IndexedDB) и никуда не уходят. Поднимать
+> можно хоть в локальной сети, хоть за reverse-proxy.
+
 ---
 
 ## Стек технологий
