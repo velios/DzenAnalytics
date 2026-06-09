@@ -289,6 +289,9 @@ export function TrendsPage() {
                 <YAxis stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
                 <Tooltip
                   {...chartTooltipProps}
+                  // Bars coloured per-point via <Cell> (no Bar fill), so pin the
+                  // tooltip value to the theme text colour for dark-theme readability.
+                  itemStyle={{ color: "rgb(var(--c-text))" }}
                   labelFormatter={(_, p) => (p?.[0]?.payload as { fullName?: string })?.fullName ?? ""}
                   formatter={(v: unknown, n: unknown) => [
                     formatMoney(toNum(v), base),

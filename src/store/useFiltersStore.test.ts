@@ -1,0 +1,245 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { applyFilters, presetToRange, useFiltersStore } from "./useFiltersStore";
+import { periodRange } from "../lib/period";
+import { tx } from "../test/fixtures";
+
+// applyFilters wants a full FiltersState (with action methods). We only
+// exercise the data fields, so start from the real store (gives us valid
+// no-op methods) and override every data field to a clean default, then
+// apply the per-test overrides on top.
+type FiltersState = Parameters<typeof applyFilters>[1];
+function filt(p: Partial<FiltersState> = {}): FiltersState {
+  return {
+    ...useFiltersStore.getState(),
+    preset: "all",
+    from: null,
+    to: null,
+    monthYM: null,
+    accounts: new Set<string>(),
+    categories: new Set<string>(),
+    currencies: new Set<string>(),
+    search: "",
+    excludeTransfers: false,
+    ...p,
+  };
+}
+
+const ids = (txs: { id: string }[]) => txs.map((t) => t.id).sort();
+
+describe("applyFilters — date window", () => {
+  it("preset 'all' keeps every transaction regardless of date", () => {
+    const txs = [
+      tx({ id: "a", date: "2020-01-01" }),
+      tx({ id: "b", date: "2026-06-15" }),
+    ];
+    expect(applyFilters(txs, filt({ preset: "all" }))).toHaveLength(2);
+  });
+
+  it("preset 'custom' filters to [from, to] inclusive on both ends", () => {
+    const txs = [
+      tx({ id: "before", date: "2026-02-28" }),
+      tx({ id: "from-edge", date: "2026-03-01" }),
+      tx({ id: "mid", date: "2026-03-15" }),
+      tx({ id: "to-edge", date: "2026-03-31" }),
+      tx({ id: "after", date: "2026-04-01" }),
+    ];
+    const out = applyFilters(
+      txs,
+      filt({ preset: "custom", from: "2026-03-01", to: "2026-03-31" })
+    );
+    expect(ids(out)).toEqual(["from-edge", "mid", "to-edge"]);
+  });
+
+  it("preset 'custom' with only `from` is an open-ended lower bound", () => {
+    const txs = [
+      tx({ id: "old", date: "2026-02-01" }),
+      tx({ id: "new", date: "2026-05-01" }),
+    ];
+    const out = applyFilters(txs, filt({ preset: "custom", from: "2026-03-01", to: null }));
+    expect(ids(out)).toEqual(["new"]);
+  });
+
+  it("preset 'month' (startDay=1) keeps only that calendar month", () => {
+    const txs = [
+      tx({ id: "feb", date: "2026-02-20" }),
+      tx({ id: "mar1", date: "2026-03-01" }),
+      tx({ id: "mar31", date: "2026-03-31" }),
+      tx({ id: "apr", date: "2026-04-02" }),
+    ];
+    const out = applyFilters(txs, filt({ preset: "month", monthYM: "2026-03" }), 1);
+    expect(ids(out)).toEqual(["mar1", "mar31"]);
+  });
+
+  it("preset 'month' respects a custom reporting startDay (e.g. 11)", () => {
+    // period 2026-03 with startDay 11 spans 2026-03-11 → 2026-04-10
+    const txs = [
+      tx({ id: "early-mar", date: "2026-03-05" }), // before the 11th → prev period
+      tx({ id: "mid-mar", date: "2026-03-15" }), // in
+      tx({ id: "early-apr", date: "2026-04-05" }), // in (≤ 10 Apr)
+      tx({ id: "mid-apr", date: "2026-04-15" }), // next period
+    ];
+    const out = applyFilters(txs, filt({ preset: "month", monthYM: "2026-03" }), 11);
+    expect(ids(out)).toEqual(["early-apr", "mid-mar"]);
+  });
+
+  it("relative presets anchor to the latest transaction date, not wall-clock", () => {
+    // maxDate = 2026-06-15 → a 30-day window ends there. Use wide margins
+    // so the assertion is robust to the runner's timezone.
+    const txs = [
+      tx({ id: "latest", date: "2026-06-15" }), // defines maxDate, in window
+      tx({ id: "inside", date: "2026-06-10" }), // ~5 days back, inside 30d
+      tx({ id: "outside", date: "2026-03-01" }), // months back, outside 30d
+    ];
+    const out = applyFilters(txs, filt({ preset: "30d" }));
+    expect(ids(out)).toEqual(["inside", "latest"]);
+  });
+
+  it("returns nothing for an empty transaction list", () => {
+    expect(applyFilters([], filt({ preset: "all" }))).toEqual([]);
+  });
+});
+
+describe("applyFilters — dimension filters", () => {
+  const txs = [
+    tx({ id: "eda-karta", category: "Еда", account: "Карта", currency: "RUB" }),
+    tx({ id: "eda-cash", category: "Еда", account: "Наличные", currency: "RUB" }),
+    tx({ id: "transport-karta", category: "Транспорт", account: "Карта", currency: "USD" }),
+  ];
+
+  it("filters by category set", () => {
+    const out = applyFilters(txs, filt({ categories: new Set(["Еда"]) }));
+    expect(ids(out)).toEqual(["eda-cash", "eda-karta"]);
+  });
+
+  it("filters by account set", () => {
+    const out = applyFilters(txs, filt({ accounts: new Set(["Карта"]) }));
+    expect(ids(out)).toEqual(["eda-karta", "transport-karta"]);
+  });
+
+  it("filters by currency set", () => {
+    const out = applyFilters(txs, filt({ currencies: new Set(["USD"]) }));
+    expect(ids(out)).toEqual(["transport-karta"]);
+  });
+
+  it("an empty set means 'no filter on that dimension'", () => {
+    expect(applyFilters(txs, filt({ categories: new Set() }))).toHaveLength(3);
+  });
+
+  it("combines dimensions with AND (category ∩ account)", () => {
+    const out = applyFilters(
+      txs,
+      filt({ categories: new Set(["Еда"]), accounts: new Set(["Карта"]) })
+    );
+    expect(ids(out)).toEqual(["eda-karta"]);
+  });
+
+  it("a set with no matches yields an empty result", () => {
+    expect(applyFilters(txs, filt({ accounts: new Set(["Депозит"]) }))).toEqual([]);
+  });
+});
+
+describe("applyFilters — search", () => {
+  const txs = [
+    tx({ id: "payee", payee: "Пятёрочка", comment: "", categoryFull: "Еда" }),
+    tx({ id: "comment", payee: "X", comment: "обед с Катей", categoryFull: "Еда" }),
+    tx({ id: "cat", payee: "Y", comment: "", categoryFull: "Транспорт / Такси" }),
+  ];
+
+  it("matches against payee, comment and categoryFull", () => {
+    expect(ids(applyFilters(txs, filt({ search: "пятёрочка" })))).toEqual(["payee"]);
+    expect(ids(applyFilters(txs, filt({ search: "катей" })))).toEqual(["comment"]);
+    expect(ids(applyFilters(txs, filt({ search: "такси" })))).toEqual(["cat"]);
+  });
+
+  it("is case-insensitive and trims surrounding whitespace", () => {
+    expect(ids(applyFilters(txs, filt({ search: "  ПЯТЁРОЧКА  " })))).toEqual(["payee"]);
+  });
+
+  it("an all-whitespace query is treated as no search", () => {
+    expect(applyFilters(txs, filt({ search: "   " }))).toHaveLength(3);
+  });
+});
+
+describe("applyFilters — excludeTransfers", () => {
+  const txs = [
+    tx({ id: "spend", kind: "expense" }),
+    tx({ id: "move", kind: "transfer" }),
+  ];
+
+  it("drops transfer rows when excludeTransfers is true", () => {
+    expect(ids(applyFilters(txs, filt({ excludeTransfers: true })))).toEqual(["spend"]);
+  });
+
+  it("keeps transfer rows when excludeTransfers is false", () => {
+    expect(applyFilters(txs, filt({ excludeTransfers: false }))).toHaveLength(2);
+  });
+});
+
+describe("presetToRange", () => {
+  it("'all' and 'custom' impose no range", () => {
+    expect(presetToRange("all", "2026-06-15")).toEqual({ from: null, to: null });
+    expect(presetToRange("custom", "2026-06-15")).toEqual({ from: null, to: null });
+  });
+
+  it("'month' delegates to periodRange for the given monthYM + startDay", () => {
+    expect(presetToRange("month", null, "2026-03", 11)).toEqual(
+      periodRange("2026-03", 11)
+    );
+  });
+
+  it("'month' without a monthYM imposes no range", () => {
+    expect(presetToRange("month", "2026-06-15", null)).toEqual({ from: null, to: null });
+  });
+
+  it("relative presets end at the anchor date and start earlier", () => {
+    const r = presetToRange("12m", "2026-06-15");
+    expect(r.to).toBe("2026-06-15");
+    expect(r.from).not.toBeNull();
+    expect(r.from! < r.to!).toBe(true);
+    expect(r.from!.startsWith("2025-06")).toBe(true);
+  });
+});
+
+describe("useFiltersStore reducers", () => {
+  beforeEach(() => useFiltersStore.getState().reset());
+
+  it("setRange switches the preset to 'custom'", () => {
+    useFiltersStore.getState().setRange("2026-01-01", "2026-02-01");
+    const s = useFiltersStore.getState();
+    expect(s.preset).toBe("custom");
+    expect(s.from).toBe("2026-01-01");
+    expect(s.to).toBe("2026-02-01");
+  });
+
+  it("setMonth switches to the 'month' preset with that monthYM", () => {
+    useFiltersStore.getState().setMonth("2026-04");
+    expect(useFiltersStore.getState().preset).toBe("month");
+    expect(useFiltersStore.getState().monthYM).toBe("2026-04");
+  });
+
+  it("toggleSet adds then removes a value", () => {
+    useFiltersStore.getState().toggleSet("categories", "Еда");
+    expect(useFiltersStore.getState().categories.has("Еда")).toBe(true);
+    useFiltersStore.getState().toggleSet("categories", "Еда");
+    expect(useFiltersStore.getState().categories.has("Еда")).toBe(false);
+  });
+
+  it("resetSet clears a whole dimension", () => {
+    useFiltersStore.getState().toggleSet("accounts", "Карта");
+    useFiltersStore.getState().toggleSet("accounts", "Наличные");
+    useFiltersStore.getState().resetSet("accounts");
+    expect(useFiltersStore.getState().accounts.size).toBe(0);
+  });
+
+  it("reset restores the default 'month' preset and clears filters", () => {
+    const s = useFiltersStore.getState();
+    s.setRange("2026-01-01", "2026-02-01");
+    s.toggleSet("categories", "Еда");
+    s.setSearch("foo");
+    s.reset();
+    const after = useFiltersStore.getState();
+    expect(after.preset).toBe("month");
+    expect(after.categories.size).toBe(0);
+    expect(after.search).toBe("");
+  });
+});

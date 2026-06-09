@@ -519,6 +519,9 @@ export function CashflowPage() {
                 />
                 <Tooltip
                   {...chartTooltipProps}
+                  // Bars coloured per-point via <Cell> (no Bar fill), so pin the
+                  // tooltip value to the theme text colour for dark-theme readability.
+                  itemStyle={{ color: "rgb(var(--c-text))" }}
                   formatter={(v: unknown, _n: unknown, p: { payload?: { expenseDeviationPct?: number; yearsSampled?: number } }) => {
                     const dev = p.payload?.expenseDeviationPct ?? 0;
                     const ys = p.payload?.yearsSampled ?? 0;
