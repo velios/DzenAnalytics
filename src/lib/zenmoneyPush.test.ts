@@ -3,6 +3,7 @@ import {
   buildDeletions,
   buildPushItems,
   buildResurrections,
+  detectConflicts,
   resurrectionId,
 } from "./zenmoneyPush";
 import type { ZenCache } from "./zenmoneyCache";
@@ -227,5 +228,105 @@ describe("buildPushItems — kind flips", () => {
     const { toPush, skipped } = pushOne(fullTx({ outcome: 100, opOutcome: 0 }), { kind: "income" });
     expect(skipped).toHaveLength(0);
     expect(toPush[0].zen.income).toBe(100);
+  });
+});
+
+// Multi-account / multi-currency cache: Карта & Наличные are both RUB
+// (instrument 2), Долларовый is USD (instrument 3).
+function multiCache(t: ZenTransaction): ZenCache {
+  return {
+    serverTimestamp: 0,
+    instruments: [
+      { id: 2, shortTitle: "RUB" } as ZenInstrument,
+      { id: 3, shortTitle: "USD" } as ZenInstrument,
+    ],
+    accounts: [
+      { id: "acc-1", title: "Карта", instrument: 2 } as ZenAccount,
+      { id: "acc-2", title: "Наличные", instrument: 2 } as ZenAccount,
+      { id: "acc-3", title: "Долларовый", instrument: 3 } as ZenAccount,
+    ],
+    tags: [],
+    merchants: [],
+    transactions: [t],
+    user: [],
+  };
+}
+const pushIn = (t: ZenTransaction, edit: TransactionEdit) =>
+  buildPushItems({ [t.id]: edit }, multiCache(t));
+
+describe("buildPushItems — account change", () => {
+  it("moves both legs to the new same-currency account", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), { account: "Наличные" });
+    expect(skipped).toHaveLength(0);
+    expect(toPush[0].zen.outcomeAccount).toBe("acc-2");
+    expect(toPush[0].zen.incomeAccount).toBe("acc-2");
+  });
+
+  it("skips a move to a different-currency account (cross-currency)", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), { account: "Долларовый" });
+    expect(toPush).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/валют/i);
+  });
+
+  it("skips an unknown account", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), { account: "Депозит" });
+    expect(toPush).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/не найден/i);
+  });
+
+  it("does not trigger when the account equals the original (no-op)", () => {
+    // Original is on Карта (acc-1); editing account back to «Карта» is a no-op.
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), { account: "Карта" });
+    expect(skipped).toHaveLength(0);
+    expect(toPush[0].zen.outcomeAccount).toBe("acc-1");
+  });
+
+  it("handles account change + kind flip together", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      kind: "income",
+      account: "Наличные",
+    });
+    expect(skipped).toHaveLength(0);
+    expect(toPush[0].zen.income).toBe(500);
+    expect(toPush[0].zen.outcome).toBe(0);
+    expect(toPush[0].zen.incomeAccount).toBe("acc-2");
+    expect(toPush[0].zen.outcomeAccount).toBe("acc-2");
+  });
+
+  it("handles account change + currency change together (RUB→USD account)", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      currency: "USD",
+      account: "Долларовый",
+    });
+    expect(skipped).toHaveLength(0);
+    expect(toPush[0].zen.outcomeInstrument).toBe(3);
+    expect(toPush[0].zen.outcomeAccount).toBe("acc-3");
+    expect(toPush[0].zen.incomeAccount).toBe("acc-3");
+  });
+});
+
+describe("detectConflicts", () => {
+  const c = cache([
+    { id: "a", changed: 100 } as ZenTransaction,
+    { id: "b", changed: 100 } as ZenTransaction,
+  ]);
+
+  it("flags an edited id whose cloud copy got newer", () => {
+    const fresh = [{ id: "a", changed: 200 } as ZenTransaction];
+    expect([...detectConflicts(["a"], c, fresh)]).toEqual(["a"]);
+  });
+
+  it("ignores an equal changed timestamp", () => {
+    const fresh = [{ id: "a", changed: 100 } as ZenTransaction];
+    expect(detectConflicts(["a"], c, fresh).size).toBe(0);
+  });
+
+  it("ignores ids absent from the fresh diff", () => {
+    expect(detectConflicts(["a"], c, []).size).toBe(0);
+  });
+
+  it("only considers edited ids, not every changed cloud row", () => {
+    const fresh = [{ id: "b", changed: 999 } as ZenTransaction];
+    expect(detectConflicts(["a"], c, fresh).size).toBe(0);
   });
 });

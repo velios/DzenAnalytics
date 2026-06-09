@@ -256,6 +256,14 @@ export function buildPushItems(
     cache.instruments.map((i) => [i.shortTitle, i])
   );
   const accountsById = new Map(cache.accounts.map((a) => [a.id, a]));
+  // Reverse map for resolving an edited account NAME back to its id (account
+  // changes push to cloud). Titles should be unique per user, but if two
+  // collide prefer the non-archived one — that's the account the user means.
+  const accountsByTitle = new Map<string, ZenAccount>();
+  for (const a of cache.accounts) {
+    const prev = accountsByTitle.get(a.title);
+    if (!prev || (prev.archive && !a.archive)) accountsByTitle.set(a.title, a);
+  }
   // Merchant dictionary indexed by title (case-insensitive trimmed key
   // for tolerance). `brand` edits get resolved to a merchant id through
   // this map. New brand titles (not in the dictionary) are refused —
@@ -332,14 +340,8 @@ export function buildPushItems(
         continue;
       }
     }
-    if (edit.account !== undefined && edit.account !== orig.account) {
-      skipped.push({
-        id,
-        reason:
-          "Phase 1 не поддерживает смену счёта операции. Отредактируйте в мобильном приложении.",
-      });
-      continue;
-    }
+    // (Account change for non-transfer rows is applied near the end, after
+    // the kind-flip / currency edits have settled the effective instrument.)
     // Side-fields `outcomeAccount` / `incomeAccount` only matter for
     // *transfers* — for income/expense/refund rows the canonical
     // account is `account`, and the side-fields are auxiliary. Pre-
@@ -515,16 +517,70 @@ export function buildPushItems(
       zen.tag = [resolved];
     }
 
+    // Account change (non-transfer rows). Runs last so the effective leg
+    // instrument already reflects any kind-flip and currency edit above —
+    // that keeps account+kind and account+currency combos correct. We only
+    // support a move to an account in the SAME currency; cross-currency
+    // would need op-amount (FX) handling, which is out of scope.
+    if (edit.account !== undefined && edit.account !== orig.account) {
+      const newAcc = accountsByTitle.get(edit.account);
+      if (!newAcc) {
+        skipped.push({ id, reason: `счёт "${edit.account}" не найден в Zenmoney` });
+        continue;
+      }
+      const effInstr =
+        targetLeg === "outcome" ? zen.outcomeInstrument : zen.incomeInstrument;
+      if (newAcc.instrument !== effInstr) {
+        skipped.push({
+          id,
+          reason:
+            "смена счёта на счёт в другой валюте (мультивалюта) пока не поддерживается — отредактируйте в приложении",
+        });
+        continue;
+      }
+      // Non-transfer invariant: both legs point at the same account.
+      zen.outcomeAccount = newAcc.id;
+      zen.incomeAccount = newAcc.id;
+    }
+
     // Server uses `changed` for last-write-wins conflict resolution.
     // Setting it to "now" ensures our edit wins over anything older on
-    // the server. (If the server has a newer copy, our push will lose
-    // — that's a Phase 1.1 conflict-detection concern.)
+    // the server. (Conflicts where the cloud changed since our last sync
+    // are caught pre-push by detectConflicts; see useZenmoneyStore.)
     zen.changed = Math.floor(Date.now() / 1000);
 
     toPush.push({ id, zen });
   }
 
   return { toPush, skipped };
+}
+
+/**
+ * Detect edits that would clobber a newer cloud version. Compares the
+ * `changed` timestamp we last synced (in `cache`) against a FRESH cloud
+ * diff fetched just before pushing. An edited id whose cloud `changed`
+ * advanced since our sync is a conflict — pushing it would overwrite a
+ * change made elsewhere (e.g. the phone app). Pure: callers fetch the
+ * diff and apply it afterwards.
+ *
+ * @param editedIds ids of transactions with a pending local edit
+ * @param cache     the PRE-merge cache (its `changed` = value at last sync)
+ * @param fresh     transactions from a fresh `fetchDiff` since last sync
+ * @returns set of ids that changed in the cloud since we synced
+ */
+export function detectConflicts(
+  editedIds: string[],
+  cache: ZenCache,
+  fresh: ZenTransaction[]
+): Set<string> {
+  const cached = new Map(cache.transactions.map((t) => [t.id, t.changed ?? 0]));
+  const freshChanged = new Map(fresh.map((t) => [t.id, t.changed ?? 0]));
+  const out = new Set<string>();
+  for (const id of editedIds) {
+    const f = freshChanged.get(id);
+    if (f !== undefined && f > (cached.get(id) ?? 0)) out.add(id);
+  }
+  return out;
 }
 
 /**

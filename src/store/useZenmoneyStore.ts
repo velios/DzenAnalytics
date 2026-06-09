@@ -19,6 +19,7 @@ import {
   buildPushItems,
   buildDeletions,
   buildResurrections,
+  detectConflicts,
   sendPush,
   type PushBuildResult,
 } from "../lib/zenmoneyPush";
@@ -559,14 +560,42 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       }
 
       // 2) Build push items from the current overlay.
-      const cache = await loadZenCache();
+      let cache = await loadZenCache();
       if (!cache) {
         const msg = "Локальный кэш Zenmoney пуст — сначала синхронизируйтесь";
         set({ pushStatus: "error", pushError: msg });
         throw new Error(msg);
       }
       const edits = useEditsStore.getState().edits;
-      const { toPush, skipped } = buildPushItems(edits, cache);
+
+      // 2a) Conflict detection. Pull a fresh diff since our last sync and
+      //     check whether any transaction we're about to edit was changed
+      //     in the cloud meanwhile (e.g. on the phone). Such edits would
+      //     clobber a newer remote version, so we skip them (and keep the
+      //     local edit for a retry after the user reviews). Best-effort:
+      //     if the fetch fails we fall back to pushing against the cache.
+      let conflicts = new Set<string>();
+      try {
+        const fresh = await fetchDiff(token, cache.serverTimestamp);
+        conflicts = detectConflicts(Object.keys(edits), cache, fresh.transaction);
+        cache = applyDiff(cache, fresh); // adopt fresh cloud truth
+        await saveZenCache(cache);
+        set({ serverTimestamp: fresh.serverTimestamp });
+        await db.saveJSON(TIMESTAMP_KEY, fresh.serverTimestamp);
+      } catch {
+        /* best-effort — push against the (possibly stale) cached state */
+      }
+
+      const built = buildPushItems(edits, cache);
+      const conflictSkips = built.toPush
+        .filter((i) => conflicts.has(i.id))
+        .map((i) => ({
+          id: i.id,
+          reason:
+            "операция изменена в облаке после последней синхронизации — обновите и повторите",
+        }));
+      const toPush = built.toPush.filter((i) => !conflicts.has(i.id));
+      const skipped = [...built.skipped, ...conflictSkips];
       // Locally-deleted transactions → cloud `deletion` entries. Only
       // ids still present in cache produce a deletion (see buildDeletions).
       const deletions = buildDeletions(
@@ -703,7 +732,12 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       if (resurrections.length > 0)
         parts.push(`Восстановлено в облаке: ${formatNum(resurrections.length)}`);
       if (skipped.length > 0)
-        parts.push(`Пропущено: ${formatNum(skipped.length)}`);
+        parts.push(
+          `Пропущено: ${formatNum(skipped.length)}` +
+            (conflictSkips.length > 0
+              ? ` (конфликтов: ${formatNum(conflictSkips.length)})`
+              : "")
+        );
       void useSyncLogStore.getState().append({
         kind: "push",
         status: skipped.length > 0 ? "partial" : "ok",
