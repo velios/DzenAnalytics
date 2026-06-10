@@ -197,7 +197,11 @@ export function TagsPage() {
                   {n.income > 0 ? formatMoney(n.income, base) : "—"}
                 </td>
                 <td className="table-td text-right text-muted">{n.count}</td>
-                <td className="table-td" />
+                <td className="table-td text-right tabular-nums text-muted">
+                  {totalExpense > 0 && n.expense > 0
+                    ? formatPct(n.expense / totalExpense, 1)
+                    : "—"}
+                </td>
               </tr>,
               ...n.subs.map((s) => (
                 <tr
@@ -213,7 +217,11 @@ export function TagsPage() {
                     {s.income > 0 ? formatMoney(s.income, base) : "—"}
                   </td>
                   <td className="table-td text-right">{s.count}</td>
-                  <td className="table-td" />
+                  <td className="table-td text-right tabular-nums">
+                    {totalExpense > 0 && s.expense > 0
+                      ? formatPct(s.expense / totalExpense, 1)
+                      : "—"}
+                  </td>
                 </tr>
               )),
             ]);
