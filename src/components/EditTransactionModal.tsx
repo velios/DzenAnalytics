@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2 } from "lucide-react";
+import { Pencil, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, Hash } from "lucide-react";
+import { extractHashtags } from "../lib/aggregations";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
@@ -200,6 +201,60 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   // for what the bank actually printed.
   const [payee, setPayee] = useState(tx.brand?.trim() || tx.payee || "");
   const [comment, setComment] = useState(tx.comment);
+
+  // Hashtag autocomplete for the comment field: typing «#» offers the tags
+  // already used across the account, filtered by what's typed after «#».
+  const commentRef = useRef<HTMLTextAreaElement>(null);
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of allTransactions)
+      for (const h of extractHashtags(t.comment)) set.add(h);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [allTransactions]);
+  const [tagOpen, setTagOpen] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagStart, setTagStart] = useState(0);
+  const [tagIndex, setTagIndex] = useState(0);
+  const tagSuggestions = useMemo(() => {
+    if (!tagOpen) return [];
+    const q = tagQuery.toLowerCase();
+    return allTags.filter((t) => t.toLowerCase().startsWith(q)).slice(0, 8);
+  }, [tagOpen, tagQuery, allTags]);
+
+  /** Recompute the active «#fragment» under the caret and open/close the menu. */
+  function syncTagState(value: string, caret: number) {
+    const upto = value.slice(0, caret);
+    const hashIdx = upto.lastIndexOf("#");
+    const between = hashIdx === -1 ? "" : upto.slice(hashIdx + 1);
+    // Open only while the text right after «#» is a valid tag fragment
+    // (letters/digits/_/-, no spaces) — same charset as the hashtag regex.
+    if (hashIdx !== -1 && /^[\p{L}\p{N}_-]*$/u.test(between)) {
+      setTagStart(hashIdx);
+      if (between !== tagQuery) setTagIndex(0); // keep highlight on arrow nav
+      setTagQuery(between);
+      setTagOpen(true);
+    } else {
+      setTagOpen(false);
+    }
+  }
+
+  /** Replace the active «#fragment» with the chosen tag and re-place the caret. */
+  function pickTag(tag: string) {
+    const before = comment.slice(0, tagStart);
+    const after = comment.slice(tagStart + 1 + tagQuery.length);
+    const insert = `#${tag}`;
+    const sep = after.startsWith(" ") ? "" : " ";
+    setComment(before + insert + sep + after);
+    setTagOpen(false);
+    const caret = (before + insert + sep).length;
+    requestAnimationFrame(() => {
+      const el = commentRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      }
+    });
+  }
   const [amount, setAmount] = useState(String(tx.amount));
   const [currency, setCurrency] = useState(tx.currency);
   const [account, setAccount] = useState(tx.account);
@@ -604,15 +659,77 @@ export function EditTransactionModal({ tx, onClose }: Props) {
             </Field>
           )}
           <Field label="Комментарий">
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              rows={1}
-              // Single row by default; user can drag taller. min-h
-              // matches one line + the input's vertical padding so it
-              // can never shrink below a single readable row.
-              className="input text-sm w-full resize-y min-h-[2.5rem]"
-            />
+            <div className="relative">
+              <textarea
+                ref={commentRef}
+                value={comment}
+                onChange={(e) => {
+                  setComment(e.target.value);
+                  syncTagState(
+                    e.target.value,
+                    e.target.selectionStart ?? e.target.value.length
+                  );
+                }}
+                onClick={(e) =>
+                  syncTagState(
+                    e.currentTarget.value,
+                    e.currentTarget.selectionStart ?? 0
+                  )
+                }
+                onKeyUp={(e) =>
+                  syncTagState(
+                    e.currentTarget.value,
+                    e.currentTarget.selectionStart ?? 0
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (!tagOpen || tagSuggestions.length === 0) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setTagIndex((i) => (i + 1) % tagSuggestions.length);
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setTagIndex(
+                      (i) => (i - 1 + tagSuggestions.length) % tagSuggestions.length
+                    );
+                  } else if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    pickTag(tagSuggestions[tagIndex]);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setTagOpen(false);
+                  }
+                }}
+                onBlur={() => setTagOpen(false)}
+                rows={1}
+                // Single row by default; user can drag taller. min-h
+                // matches one line + the input's vertical padding so it
+                // can never shrink below a single readable row.
+                className="input text-sm w-full resize-y min-h-[2.5rem]"
+              />
+              {tagOpen && tagSuggestions.length > 0 && (
+                <div className="absolute z-30 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-border bg-panel shadow-lg">
+                  {tagSuggestions.map((t, i) => (
+                    <button
+                      key={t}
+                      type="button"
+                      // mousedown (not click) fires before the textarea blur,
+                      // so the menu is still open when we insert the tag.
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        pickTag(t);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-1.5 ${
+                        i === tagIndex ? "bg-accent/10 text-accent" : "hover:bg-panel2"
+                      }`}
+                    >
+                      <Hash className="w-3 h-3 text-accent shrink-0" />
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </Field>
         </div>
         <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
