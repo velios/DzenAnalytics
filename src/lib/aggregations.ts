@@ -1115,6 +1115,66 @@ export function groupByHashtag(txs: Transaction[]): TagBucket[] {
   return Array.from(map.values()).sort((a, b) => b.expense + b.income - (a.expense + a.income));
 }
 
+export interface TagCatSub {
+  name: string;
+  total: number;
+  count: number;
+}
+export interface TagCatNode {
+  category: string;
+  total: number;
+  count: number;
+  subs: TagCatSub[];
+}
+
+/**
+ * For each hashtag, an EXPENSE breakdown by category → subcategory with sums,
+ * so the Hashtags page can show «#тег → Категория ХХХ → Подкатегория ХХХ».
+ * Refunds shrink the relevant bucket (`expenseDelta` is signed); income is
+ * excluded. Categories and their subs come back sorted by amount, descending.
+ */
+export function hashtagCategoryTrees(
+  txs: Transaction[]
+): Map<string, TagCatNode[]> {
+  const byTag = new Map<string, Map<string, TagCatNode>>();
+  for (const t of txs) {
+    if (!affectsExpense(t.kind)) continue;
+    const tags = extractHashtags(t.comment);
+    if (tags.length === 0) continue;
+    const delta = expenseDelta(t);
+    for (const tag of tags) {
+      let cats = byTag.get(tag);
+      if (!cats) {
+        cats = new Map();
+        byTag.set(tag, cats);
+      }
+      let node = cats.get(t.category);
+      if (!node) {
+        node = { category: t.category, total: 0, count: 0, subs: [] };
+        cats.set(t.category, node);
+      }
+      node.total += delta;
+      node.count++;
+      if (t.subcategory) {
+        let sub = node.subs.find((s) => s.name === t.subcategory);
+        if (!sub) {
+          sub = { name: t.subcategory, total: 0, count: 0 };
+          node.subs.push(sub);
+        }
+        sub.total += delta;
+        sub.count++;
+      }
+    }
+  }
+  const out = new Map<string, TagCatNode[]>();
+  for (const [tag, cats] of byTag) {
+    const nodes = Array.from(cats.values()).sort((a, b) => b.total - a.total);
+    for (const n of nodes) n.subs.sort((a, b) => b.total - a.total);
+    out.set(tag, nodes);
+  }
+  return out;
+}
+
 export interface DayCell {
   date: string;
   expense: number;

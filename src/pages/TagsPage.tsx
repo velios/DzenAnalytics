@@ -1,10 +1,15 @@
-import { useMemo } from "react";
-import { Hash, MousePointerClick } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Hash, MousePointerClick, ChevronRight, ChevronDown } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
-import { groupByHashtag, extractHashtags, type TagBucket } from "../lib/aggregations";
+import {
+  groupByHashtag,
+  extractHashtags,
+  hashtagCategoryTrees,
+  type TagBucket,
+} from "../lib/aggregations";
 import { formatMoney, formatPct } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
@@ -20,6 +25,16 @@ export function TagsPage() {
 
   const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const tags = useMemo(() => groupByHashtag(filtered), [filtered]);
+  // Per-tag expense breakdown by category → subcategory.
+  const catTrees = useMemo(() => hashtagCategoryTrees(filtered), [filtered]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (tag: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
 
   const totalExpense = tags.reduce((s, t) => s + t.expense, 0);
   const taggedCount = useMemo(
@@ -159,6 +174,68 @@ export function TagsPage() {
             ] as Column<TagBucket>[]
           }
         />
+      </div>
+
+      {/* Per-tag expense breakdown by category → subcategory. */}
+      <div className="card card-pad">
+        <div className="font-semibold mb-3">Расходы по категориям</div>
+        <div className="space-y-1">
+          {tags.map((t) => {
+            const nodes = catTrees.get(t.tag);
+            if (!nodes || nodes.length === 0) return null;
+            const isOpen = expanded.has(t.tag);
+            const tagTotal = nodes.reduce((s, n) => s + n.total, 0);
+            return (
+              <div key={t.tag} className="border-b border-border/50 last:border-0">
+                <button
+                  type="button"
+                  onClick={() => toggle(t.tag)}
+                  className="w-full flex items-center gap-2 py-2 px-1 text-left rounded-md hover:bg-panel2/50"
+                >
+                  {isOpen ? (
+                    <ChevronDown className="w-4 h-4 text-muted shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-muted shrink-0" />
+                  )}
+                  <Hash className="w-3 h-3 text-accent shrink-0" />
+                  <span className="font-medium">{t.tag}</span>
+                  <span className="ml-auto tabular-nums text-expense">
+                    {formatMoney(tagTotal, base)}
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="pb-2 pl-7 pr-1 space-y-1">
+                    {nodes.map((n) => (
+                      <div key={n.category}>
+                        <div className="flex items-center gap-2 py-0.5 text-sm">
+                          <span>{n.category}</span>
+                          <span className="ml-auto tabular-nums text-muted">
+                            {formatMoney(n.total, base)}
+                          </span>
+                        </div>
+                        {n.subs.length > 0 && (
+                          <div className="pl-4 space-y-0.5">
+                            {n.subs.map((s) => (
+                              <div
+                                key={s.name}
+                                className="flex items-center gap-2 py-0.5 text-xs text-muted"
+                              >
+                                <span>{s.name}</span>
+                                <span className="ml-auto tabular-nums">
+                                  {formatMoney(s.total, base)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

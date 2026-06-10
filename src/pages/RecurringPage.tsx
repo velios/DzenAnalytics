@@ -26,14 +26,29 @@ export function RecurringPage() {
   const allCandidates = useMemo(() => detectRecurring(transactions), [transactions]);
   const [cadenceFilter, setCadenceFilter] = useState<CadenceFilter>("all");
   const [onlyPriceUp, setOnlyPriceUp] = useState(false);
+  // "Активные" = последний платёж не старше года. Прячет давно умершие
+  // подписки (последний раз, скажем, в 2020-м), которые всё ещё подходят
+  // под паттерн регулярного, но фактически больше не повторяются.
+  const [onlyActive, setOnlyActive] = useState(false);
+  const activeCutoff = useMemo(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().slice(0, 10);
+  }, []);
 
   const candidates = useMemo(() => {
     return allCandidates.filter((c) => {
       if (cadenceFilter !== "all" && c.cadence !== cadenceFilter) return false;
       if (onlyPriceUp && c.priceTrend.priceFlag !== "up") return false;
+      if (onlyActive && c.lastDate < activeCutoff) return false;
       return true;
     });
-  }, [allCandidates, cadenceFilter, onlyPriceUp]);
+  }, [allCandidates, cadenceFilter, onlyPriceUp, onlyActive, activeCutoff]);
+
+  const activeCount = useMemo(
+    () => allCandidates.filter((c) => c.lastDate >= activeCutoff).length,
+    [allCandidates, activeCutoff]
+  );
 
   const priceUpCount = allCandidates.filter(
     (c) => c.priceTrend.priceFlag === "up"
@@ -143,6 +158,20 @@ export function RecurringPage() {
               </button>
             );
           })}
+          <span className="text-border">·</span>
+          <button
+            type="button"
+            onClick={() => setOnlyActive((v) => !v)}
+            title="Скрыть давно не повторявшиеся (последний платёж больше года назад)"
+            className={`px-3 py-1 rounded-full border transition-colors ${
+              onlyActive
+                ? "bg-accent/10 border-accent/40 text-accent"
+                : "border-border text-muted hover:text-text"
+            }`}
+          >
+            Только активные
+            <span className="ml-1.5 opacity-60">{activeCount}</span>
+          </button>
           {onlyPriceUp && (
             <button
               type="button"
