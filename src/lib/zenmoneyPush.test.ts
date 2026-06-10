@@ -7,7 +7,7 @@ import {
   resurrectionId,
 } from "./zenmoneyPush";
 import type { ZenCache } from "./zenmoneyCache";
-import type { ZenAccount, ZenInstrument, ZenTransaction } from "./zenmoney";
+import type { ZenAccount, ZenInstrument, ZenTag, ZenTransaction } from "./zenmoney";
 import type { TransactionEdit } from "../store/useEditsStore";
 
 /** Minimal ZenTransaction — buildDeletions only reads id/user/deleted. */
@@ -211,10 +211,11 @@ describe("buildPushItems — kind flips", () => {
     expect(toPush[0].zen.income).toBe(0);
   });
 
-  it("refuses a flip to «transfer»", () => {
+  it("refuses a flip to «transfer» with no second account (same account)", () => {
+    // flipCache has a single account, so source === destination.
     const { toPush, skipped } = pushOne(fullTx({ outcome: 100 }), { kind: "transfer" });
     expect(toPush).toHaveLength(0);
-    expect(skipped[0].reason).toMatch(/Перевод/);
+    expect(skipped[0].reason).toMatch(/невозможен|тот же/i);
   });
 
   it("refuses a flip on an FX row (non-zero op-amount)", () => {
@@ -245,7 +246,7 @@ function multiCache(t: ZenTransaction): ZenCache {
       { id: "acc-2", title: "Наличные", instrument: 2 } as ZenAccount,
       { id: "acc-3", title: "Долларовый", instrument: 3 } as ZenAccount,
     ],
-    tags: [],
+    tags: [{ id: "tag-eda", title: "Еда" } as ZenTag],
     merchants: [],
     transactions: [t],
     user: [],
@@ -253,6 +254,28 @@ function multiCache(t: ZenTransaction): ZenCache {
 }
 const pushIn = (t: ZenTransaction, edit: TransactionEdit) =>
   buildPushItems({ [t.id]: edit }, multiCache(t));
+
+/** A single-currency transfer (acc-1 → acc-2, both RUB / instrument 2). */
+function transferTx(p: Partial<ZenTransaction> = {}): ZenTransaction {
+  return {
+    id: "t1",
+    user: 1,
+    deleted: false,
+    changed: 100,
+    outcome: 500,
+    income: 500,
+    outcomeAccount: "acc-1",
+    incomeAccount: "acc-2",
+    outcomeInstrument: 2,
+    incomeInstrument: 2,
+    opOutcome: 0,
+    opIncome: 0,
+    outcomeBankID: null,
+    incomeBankID: null,
+    tag: null,
+    ...p,
+  } as ZenTransaction;
+}
 
 describe("buildPushItems — account change", () => {
   it("moves both legs to the new same-currency account", () => {
@@ -302,6 +325,131 @@ describe("buildPushItems — account change", () => {
     expect(toPush[0].zen.outcomeInstrument).toBe(3);
     expect(toPush[0].zen.outcomeAccount).toBe("acc-3");
     expect(toPush[0].zen.incomeAccount).toBe("acc-3");
+  });
+});
+
+describe("buildPushItems — flip to transfer", () => {
+  it("builds both legs for a single-currency transfer (expense → transfer)", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      kind: "transfer",
+      account: "Карта",
+      outcomeAccount: "Карта",
+      incomeAccount: "Наличные",
+    });
+    expect(skipped).toHaveLength(0);
+    const z = toPush[0].zen;
+    expect(z.outcome).toBe(500);
+    expect(z.income).toBe(500);
+    expect(z.outcomeAccount).toBe("acc-1");
+    expect(z.incomeAccount).toBe("acc-2");
+    expect(z.outcomeInstrument).toBe(2);
+    expect(z.incomeInstrument).toBe(2);
+    expect(z.tag).toBeNull();
+    expect(z.opOutcome).toBe(0);
+    expect(z.opIncome).toBe(0);
+  });
+
+  it("takes the amount from the income leg (income → transfer)", () => {
+    const { toPush } = pushIn(fullTx({ income: 300 }), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Наличные",
+    });
+    expect(toPush[0].zen.outcome).toBe(300);
+    expect(toPush[0].zen.income).toBe(300);
+  });
+
+  it("applies a new transfer amount to both legs", () => {
+    const { toPush } = pushIn(transferTx(), { amount: 777 });
+    expect(toPush[0].zen.outcome).toBe(777);
+    expect(toPush[0].zen.income).toBe(777);
+  });
+
+  it("skips a cross-currency transfer", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Долларовый",
+    });
+    expect(toPush).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/валют/i);
+  });
+
+  it("skips a transfer to the same account", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Карта",
+    });
+    expect(toPush).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/невозможен|тот же/i);
+  });
+
+  it("skips when an account is not found", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Депозит",
+    });
+    expect(toPush).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/не найден/i);
+  });
+
+  it("skips a flip to transfer on an FX row", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 900, opOutcome: 10 }), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Наличные",
+    });
+    expect(toPush).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/валют/i);
+  });
+
+  it("edits the accounts of an existing transfer (transfer → transfer)", () => {
+    // Swap source/destination — both RUB, so it's allowed.
+    const { toPush, skipped } = pushIn(transferTx(), {
+      outcomeAccount: "Наличные",
+      incomeAccount: "Карта",
+    });
+    expect(skipped).toHaveLength(0);
+    expect(toPush[0].zen.outcomeAccount).toBe("acc-2");
+    expect(toPush[0].zen.incomeAccount).toBe("acc-1");
+  });
+});
+
+describe("buildPushItems — transfer collapse", () => {
+  it("collapses transfer → expense onto the outcome leg", () => {
+    const { toPush, skipped } = pushIn(transferTx(), { kind: "expense" });
+    expect(skipped).toHaveLength(0);
+    const z = toPush[0].zen;
+    expect(z.outcome).toBe(500);
+    expect(z.income).toBe(0);
+    expect(z.outcomeAccount).toBe("acc-1");
+    expect(z.incomeAccount).toBe("acc-1");
+  });
+
+  it("collapses transfer → income onto the income leg", () => {
+    const { toPush } = pushIn(transferTx(), { kind: "income" });
+    const z = toPush[0].zen;
+    expect(z.income).toBe(500);
+    expect(z.outcome).toBe(0);
+    expect(z.outcomeAccount).toBe("acc-2");
+    expect(z.incomeAccount).toBe("acc-2");
+  });
+
+  it("collapses to a chosen account (transfer → expense + account)", () => {
+    const { toPush } = pushIn(transferTx(), { kind: "expense", account: "Наличные" });
+    expect(toPush[0].zen.outcomeAccount).toBe("acc-2");
+    expect(toPush[0].zen.incomeAccount).toBe("acc-2");
+  });
+
+  it("resolves a category when collapsing transfer → expense", () => {
+    const { toPush, skipped } = pushIn(transferTx(), {
+      kind: "expense",
+      category: "Еда",
+    });
+    expect(skipped).toHaveLength(0);
+    expect(toPush[0].zen.tag).toEqual(["tag-eda"]);
   });
 });
 

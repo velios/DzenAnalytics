@@ -20,17 +20,19 @@
  *                          account (or, for income↔refund, stays put and
  *                          only the category flavour changes).
  *
+ * Supported now: kind change expense↔income↔refund, kind change to/from
+ * «Перевод» and editing a transfer's accounts (single-currency only), and
+ * account change for single-leg rows (same currency).
+ *
  * The following are deliberately NOT supported yet (the edit stays in
  * the local overlay; user gets a clear "skipped" reason):
  *
- *   • kind change to/from
- *     «Перевод»          — requires a second account
- *   • kind change on an
- *     FX row             — non-zero opIncome/opOutcome; flipping legs
- *                          would need to re-map operational instruments
- *   • account change     — legs must stay consistent
- *   • outcomeAccount /
- *     incomeAccount      — used together with kind=transfer changes
+ *   • FX rows            — non-zero opIncome/opOutcome (currency differs
+ *                          from the account); re-mapping operational
+ *                          instruments is out of scope
+ *   • cross-currency     — moving a row to an account in another currency,
+ *                          or a transfer between accounts of different
+ *                          currencies (needs op-amounts)
  *
  * Brand handling: Zenmoney has two counterparty fields on a transaction
  * — `merchant` (id-ref into the merchant dictionary, the curated brand
@@ -114,6 +116,148 @@ function classifyOriginal(
     kind = "refund";
   }
   return { kind, account: inAcc, outAcc, inAcc };
+}
+
+/** Apply the always-safe scalar edits (date, comment) onto a built patch. */
+function applyDateComment(zen: ZenTransaction, edit: TransactionEdit): void {
+  if (edit.date !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(edit.date)) {
+    zen.date = edit.date;
+  }
+  if (edit.comment !== undefined) {
+    zen.comment = edit.comment || null;
+  }
+}
+
+/**
+ * Build a TRANSFER ZenTransaction (Branch A): money leaves `outcomeAccount`
+ * and lands on `incomeAccount`. Single-currency only — both accounts must
+ * share an instrument (the UI offers one amount field). Returns a skip
+ * reason for FX rows, missing/same accounts, or a cross-currency pair.
+ * The accounts come from the edit overlay (titles) and fall back to the
+ * original's legs so editing only the amount/comment of an existing
+ * transfer still works.
+ */
+function buildTransferTarget(
+  original: ZenTransaction,
+  edit: TransactionEdit,
+  orig: { outAcc: string; inAcc: string },
+  accountsByTitle: Map<string, ZenAccount>
+): { zen?: ZenTransaction; skip?: string } {
+  if ((original.opIncome || 0) > 0 || (original.opOutcome || 0) > 0) {
+    return {
+      skip: "перевод с операцией в другой валюте (мультивалюта) пока не поддерживается — отредактируйте в приложении",
+    };
+  }
+  const srcTitle = edit.outcomeAccount ?? orig.outAcc;
+  const dstTitle = edit.incomeAccount ?? orig.inAcc;
+  const src = accountsByTitle.get(srcTitle);
+  const dst = accountsByTitle.get(dstTitle);
+  if (!src) return { skip: `счёт-источник "${srcTitle}" не найден в Zenmoney` };
+  if (!dst) return { skip: `счёт-получатель "${dstTitle}" не найден в Zenmoney` };
+  if (src.id === dst.id) {
+    return { skip: "перевод между одним и тем же счётом невозможен" };
+  }
+  if (src.instrument !== dst.instrument) {
+    return {
+      skip: "мультивалютный перевод (разные валюты счетов) пока не поддерживается — отредактируйте в приложении",
+    };
+  }
+  const amount = edit.amount ?? (original.outcome || original.income);
+  const zen: ZenTransaction = {
+    ...original,
+    outcome: amount,
+    income: amount,
+    outcomeAccount: src.id,
+    incomeAccount: dst.id,
+    outcomeInstrument: src.instrument,
+    incomeInstrument: dst.instrument,
+    opOutcome: 0,
+    opIncome: 0,
+    opOutcomeInstrument: null,
+    opIncomeInstrument: null,
+    // The source leg keeps any existing bank-reconciliation id; the
+    // freshly-synthesised destination leg has none.
+    outcomeBankID: original.outcome > 0 ? original.outcomeBankID : original.incomeBankID,
+    incomeBankID: null,
+    tag: null, // a transfer has no category in Zenmoney
+    merchant: null,
+    payee: null, // a transfer has no counterparty
+  };
+  return { zen };
+}
+
+/**
+ * Collapse a TRANSFER onto a single account (Branch B): transfer →
+ * expense keeps the outcome leg; transfer → income/refund keeps the
+ * income leg. The result account comes from the edit (else the kept
+ * leg's account); same-currency only. Category is resolved from the
+ * edit when present, otherwise the row goes untagged (a refund without
+ * an expense tag round-trips as plain income — acceptable).
+ */
+function collapseTransfer(
+  original: ZenTransaction,
+  edit: TransactionEdit,
+  orig: { outAcc: string; inAcc: string },
+  targetKind: TxKind,
+  accountsByTitle: Map<string, ZenAccount>,
+  tagsByTitle: Map<string, ZenTag[]>,
+  tagsById: Map<string, ZenTag>
+): { zen?: ZenTransaction; skip?: string } {
+  if ((original.opIncome || 0) > 0 || (original.opOutcome || 0) > 0) {
+    return {
+      skip: "перевод с операцией в другой валюте (мультивалюта) пока не поддерживается — отредактируйте в приложении",
+    };
+  }
+  const keepLeg: "outcome" | "income" =
+    targetKind === "expense" ? "outcome" : "income";
+  const keepInstr =
+    keepLeg === "outcome" ? original.outcomeInstrument : original.incomeInstrument;
+  const wantTitle = edit.account ?? (keepLeg === "outcome" ? orig.outAcc : orig.inAcc);
+  const acc = accountsByTitle.get(wantTitle);
+  if (!acc) return { skip: `счёт "${wantTitle}" не найден в Zenmoney` };
+  if (acc.instrument !== keepInstr) {
+    return {
+      skip: "смена счёта на счёт в другой валюте (мультивалюта) пока не поддерживается — отредактируйте в приложении",
+    };
+  }
+  const amount =
+    edit.amount ?? (keepLeg === "outcome" ? original.outcome : original.income);
+  const zen: ZenTransaction = { ...original };
+  if (keepLeg === "outcome") {
+    zen.outcome = amount;
+    zen.income = 0;
+    zen.outcomeBankID = original.outcomeBankID;
+    zen.incomeBankID = null;
+  } else {
+    zen.income = amount;
+    zen.outcome = 0;
+    zen.incomeBankID = original.incomeBankID;
+    zen.outcomeBankID = null;
+  }
+  // Single-leg invariant: both legs name the same account & instrument.
+  zen.outcomeAccount = acc.id;
+  zen.incomeAccount = acc.id;
+  zen.outcomeInstrument = keepInstr;
+  zen.incomeInstrument = keepInstr;
+  zen.opOutcome = 0;
+  zen.opIncome = 0;
+  zen.opOutcomeInstrument = null;
+  zen.opIncomeInstrument = null;
+  if (edit.category && !SYNTHETIC_CATEGORIES.has(edit.category)) {
+    const resolved = resolveTagId(
+      edit.category,
+      edit.subcategory ?? null,
+      tagsByTitle,
+      tagsById
+    );
+    if (!resolved) {
+      return { skip: `категория "${edit.category}" не найдена в тегах Zenmoney` };
+    }
+    zen.tag = [resolved];
+  } else {
+    zen.tag = null;
+  }
+  return { zen };
 }
 
 /**
@@ -303,73 +447,68 @@ export function buildPushItems(
     const orig = classifyOriginal(original, accountsById, tagsById);
     const targetKind: TxKind = (edit.kind as TxKind | undefined) ?? orig.kind;
 
-    // ── Kind transition (Phase 2: expense ↔ income ↔ refund) ──────────
-    // These three are single-leg, same-account flips: the money moves
-    // between the income and outcome legs of the SAME account, or (for
-    // income↔refund) stays put and only the category flavour differs.
-    // `origLeg` / `targetLeg` say which leg holds the money before/after.
-    // Transfers (need a 2nd account) and FX rows (operational op-amounts)
-    // are still out of scope — they're refused below.
+    const origIsTransfer = orig.kind === "transfer";
+    const targetIsTransfer = targetKind === "transfer";
+
+    // ── Branch A: target is a transfer ────────────────────────────────
+    // Covers flip → transfer AND editing the accounts/amount of an
+    // existing transfer (transfer → transfer). Both legs are rebuilt by
+    // buildTransferTarget; single-currency only, FX is refused inside.
+    if (targetIsTransfer) {
+      const built = buildTransferTarget(original, edit, orig, accountsByTitle);
+      if (built.skip) {
+        skipped.push({ id, reason: built.skip });
+        continue;
+      }
+      const zen = built.zen!;
+      applyDateComment(zen, edit);
+      zen.changed = Math.floor(Date.now() / 1000);
+      toPush.push({ id, zen });
+      continue;
+    }
+
+    // ── Branch B: transfer → single-leg (expense/income/refund) ───────
+    // Collapse the two legs onto one account; FX refused inside.
+    if (origIsTransfer) {
+      const built = collapseTransfer(
+        original,
+        edit,
+        orig,
+        targetKind,
+        accountsByTitle,
+        tagsByTitle,
+        tagsById
+      );
+      if (built.skip) {
+        skipped.push({ id, reason: built.skip });
+        continue;
+      }
+      const zen = built.zen!;
+      applyDateComment(zen, edit);
+      zen.changed = Math.floor(Date.now() / 1000);
+      toPush.push({ id, zen });
+      continue;
+    }
+
+    // ── Branch C: neither side is a transfer (expense ↔ income ↔ refund)
+    // Single-leg, same-account flips: the money moves between the income
+    // and outcome legs of the SAME account, or (income↔refund) stays put
+    // and only the category flavour differs.
     const origLeg: "income" | "outcome" =
       orig.kind === "expense" ? "outcome" : "income";
     const targetLeg: "income" | "outcome" =
       targetKind === "expense" ? "outcome" : "income";
     if (targetKind !== orig.kind) {
-      if (orig.kind === "transfer" || targetKind === "transfer") {
-        skipped.push({
-          id,
-          reason:
-            "Смена типа на «Перевод» или с него пока не поддерживается — отредактируйте в мобильном приложении.",
-        });
-        continue;
-      }
       // FX guard: a NON-ZERO operational amount means the transaction's
       // currency differs from the account's (op-amount is the foreign
       // value). Note Zenmoney stores 0 (not null) for the unused leg of
       // a plain same-currency row, so we must test `> 0`, not non-null —
       // otherwise every ordinary expense (opOutcome: 0) would be skipped.
-      if (
-        (original.opIncome || 0) > 0 ||
-        (original.opOutcome || 0) > 0
-      ) {
+      if ((original.opIncome || 0) > 0 || (original.opOutcome || 0) > 0) {
         skipped.push({
           id,
           reason:
             "Операция в валюте, отличной от счёта (мультивалютная) — смену типа пока не поддерживаем.",
-        });
-        continue;
-      }
-    }
-    // (Account change for non-transfer rows is applied near the end, after
-    // the kind-flip / currency edits have settled the effective instrument.)
-    // Side-fields `outcomeAccount` / `incomeAccount` only matter for
-    // *transfers* — for income/expense/refund rows the canonical
-    // account is `account`, and the side-fields are auxiliary. Pre-
-    // bugfix overlays sometimes stashed those side-fields with noise
-    // values (e.g. "" for the "unused" side of an expense), which
-    // would falsely look like an account change here. Skip the
-    // comparison unless the effective kind is "transfer".
-    const effectiveKind = (edit.kind as TxKind | undefined) ?? orig.kind;
-    if (effectiveKind === "transfer") {
-      if (
-        edit.outcomeAccount !== undefined &&
-        edit.outcomeAccount !== orig.outAcc
-      ) {
-        skipped.push({
-          id,
-          reason:
-            "Phase 1 не поддерживает смену счёта-источника. Отредактируйте в мобильном приложении.",
-        });
-        continue;
-      }
-      if (
-        edit.incomeAccount !== undefined &&
-        edit.incomeAccount !== orig.inAcc
-      ) {
-        skipped.push({
-          id,
-          reason:
-            "Phase 1 не поддерживает смену счёта-получателя. Отредактируйте в мобильном приложении.",
         });
         continue;
       }
