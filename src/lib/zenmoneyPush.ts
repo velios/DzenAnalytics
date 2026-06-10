@@ -20,19 +20,16 @@
  *                          account (or, for income↔refund, stays put and
  *                          only the category flavour changes).
  *
- * Supported now: kind change expense↔income↔refund, kind change to/from
- * «Перевод» and editing a transfer's accounts (single-currency only), and
- * account change for single-leg rows (same currency).
+ * Supported now: kind change expense↔income↔refund and to/from «Перевод»,
+ * editing a transfer's accounts, account change for single-leg rows, AND
+ * cross-currency cases — a kind flip on an FX row carries its op-amounts;
+ * a transfer between accounts of different currencies takes a destination
+ * amount; moving a row onto an account in another currency turns it into an
+ * FX row (original sum becomes the op side).
  *
- * The following are deliberately NOT supported yet (the edit stays in
- * the local overlay; user gets a clear "skipped" reason):
- *
- *   • FX rows            — non-zero opIncome/opOutcome (currency differs
- *                          from the account); re-mapping operational
- *                          instruments is out of scope
- *   • cross-currency     — moving a row to an account in another currency,
- *                          or a transfer between accounts of different
- *                          currencies (needs op-amounts)
+ * The only thing still NOT supported (skipped with a clear reason): moving
+ * an ALREADY-FX row onto yet another different-currency account (a rare
+ * triple-currency reshuffle that would need a fresh operational amount).
  *
  * Brand handling: Zenmoney has two counterparty fields on a transaction
  * — `merchant` (id-ref into the merchant dictionary, the curated brand
@@ -157,16 +154,27 @@ function buildTransferTarget(
   if (src.id === dst.id) {
     return { skip: "перевод между одним и тем же счётом невозможен" };
   }
-  if (src.instrument !== dst.instrument) {
-    return {
-      skip: "мультивалютный перевод (разные валюты счетов) пока не поддерживается — отредактируйте в приложении",
-    };
+  // Amount on the source leg (in the source account's currency).
+  const outcome = edit.amount ?? (original.outcome || original.income);
+  // Amount on the destination leg. Same currency → both legs equal (the UI
+  // shows one amount field). Different currencies → the two legs hold
+  // different sums in their own currencies, so we NEED the destination
+  // amount; we never invent an exchange rate.
+  let income: number;
+  if (src.instrument === dst.instrument) {
+    income = outcome;
+  } else {
+    income = edit.incomeAmount ?? original.income;
+    if (!income) {
+      return {
+        skip: "для перевода между счетами разной валюты укажите сумму зачисления — отредактируйте в приложении",
+      };
+    }
   }
-  const amount = edit.amount ?? (original.outcome || original.income);
   const zen: ZenTransaction = {
     ...original,
-    outcome: amount,
-    income: amount,
+    outcome,
+    income,
     outcomeAccount: src.id,
     incomeAccount: dst.id,
     outcomeInstrument: src.instrument,
@@ -498,21 +506,6 @@ export function buildPushItems(
       orig.kind === "expense" ? "outcome" : "income";
     const targetLeg: "income" | "outcome" =
       targetKind === "expense" ? "outcome" : "income";
-    if (targetKind !== orig.kind) {
-      // FX guard: a NON-ZERO operational amount means the transaction's
-      // currency differs from the account's (op-amount is the foreign
-      // value). Note Zenmoney stores 0 (not null) for the unused leg of
-      // a plain same-currency row, so we must test `> 0`, not non-null —
-      // otherwise every ordinary expense (opOutcome: 0) would be skipped.
-      if ((original.opIncome || 0) > 0 || (original.opOutcome || 0) > 0) {
-        skipped.push({
-          id,
-          reason:
-            "Операция в валюте, отличной от счёта (мультивалютная) — смену типа пока не поддерживаем.",
-        });
-        continue;
-      }
-    }
 
     // Refuse synthetic-category edits — Zen has no tag with that name.
     if (edit.category && SYNTHETIC_CATEGORIES.has(edit.category)) {
@@ -527,26 +520,35 @@ export function buildPushItems(
     const zen: ZenTransaction = { ...original };
 
     // Apply a kind flip by moving the money between legs of the SAME
-    // account (verified above: non-transfer rows have
-    // incomeAccount === outcomeAccount, no FX op-amounts). The account
-    // ids stay as-is (both already point to the same account); we move
-    // the amount, the instrument and the bank-reconciliation id onto the
-    // target leg and zero the source leg. income↔refund don't move legs
-    // (origLeg === targetLeg) — only the category tag flavour differs,
-    // handled by the category edit below.
+    // account. The account ids stay as-is (both already point to the same
+    // account); we move the amount, the instrument and the bank id onto the
+    // target leg and zero the source leg. For an FX row we also carry the
+    // operational pair (opOutcome/opOutcomeInstrument — the foreign-currency
+    // side) so a "spent $10 from a RUB card" row keeps its $10 when flipped
+    // to income. For a plain row the op fields are 0/null and move as no-ops.
+    // income↔refund don't move legs (origLeg === targetLeg) — only the
+    // category flavour differs, handled by the category edit below.
     if (targetKind !== orig.kind && origLeg !== targetLeg) {
       if (targetLeg === "income") {
         zen.income = original.outcome;
         zen.incomeInstrument = original.outcomeInstrument;
         zen.incomeBankID = original.outcomeBankID;
+        zen.opIncome = original.opOutcome;
+        zen.opIncomeInstrument = original.opOutcomeInstrument;
         zen.outcome = 0;
         zen.outcomeBankID = null;
+        zen.opOutcome = 0;
+        zen.opOutcomeInstrument = null;
       } else {
         zen.outcome = original.income;
         zen.outcomeInstrument = original.incomeInstrument;
         zen.outcomeBankID = original.incomeBankID;
+        zen.opOutcome = original.opIncome;
+        zen.opOutcomeInstrument = original.opIncomeInstrument;
         zen.income = 0;
         zen.incomeBankID = null;
+        zen.opIncome = 0;
+        zen.opIncomeInstrument = null;
       }
     }
 
@@ -658,9 +660,7 @@ export function buildPushItems(
 
     // Account change (non-transfer rows). Runs last so the effective leg
     // instrument already reflects any kind-flip and currency edit above —
-    // that keeps account+kind and account+currency combos correct. We only
-    // support a move to an account in the SAME currency; cross-currency
-    // would need op-amount (FX) handling, which is out of scope.
+    // that keeps account+kind and account+currency combos correct.
     if (edit.account !== undefined && edit.account !== orig.account) {
       const newAcc = accountsByTitle.get(edit.account);
       if (!newAcc) {
@@ -670,12 +670,45 @@ export function buildPushItems(
       const effInstr =
         targetLeg === "outcome" ? zen.outcomeInstrument : zen.incomeInstrument;
       if (newAcc.instrument !== effInstr) {
-        skipped.push({
-          id,
-          reason:
-            "смена счёта на счёт в другой валюте (мультивалюта) пока не поддерживается — отредактируйте в приложении",
-        });
-        continue;
+        // Cross-currency move → the row becomes an FX operation: the sum on
+        // the leg is now in the NEW account's currency (edit.amount), while
+        // the ORIGINAL sum/currency becomes the operational (op) side. We
+        // never invent a rate — the user must supply the new-currency amount.
+        if ((original.opOutcome || 0) > 0 || (original.opIncome || 0) > 0) {
+          skipped.push({
+            id,
+            reason:
+              "перенос мультивалютной (FX) операции на счёт другой валюты пока не поддерживается — отредактируйте в приложении",
+          });
+          continue;
+        }
+        if (edit.amount === undefined) {
+          skipped.push({
+            id,
+            reason:
+              "перенос на счёт в другой валюте: укажите сумму в валюте нового счёта — отредактируйте в приложении",
+          });
+          continue;
+        }
+        const origAmt =
+          targetLeg === "outcome" ? original.outcome : original.income;
+        const origInstr =
+          targetLeg === "outcome"
+            ? original.outcomeInstrument
+            : original.incomeInstrument;
+        if (targetLeg === "outcome") {
+          zen.outcomeInstrument = newAcc.instrument;
+          zen.opOutcome = origAmt;
+          zen.opOutcomeInstrument = origInstr;
+          zen.opIncome = 0;
+          zen.opIncomeInstrument = null;
+        } else {
+          zen.incomeInstrument = newAcc.instrument;
+          zen.opIncome = origAmt;
+          zen.opIncomeInstrument = origInstr;
+          zen.opOutcome = 0;
+          zen.opOutcomeInstrument = null;
+        }
       }
       // Non-transfer invariant: both legs point at the same account.
       zen.outcomeAccount = newAcc.id;

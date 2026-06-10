@@ -32,7 +32,11 @@ export type EditableField =
   // misclassified expense/income/transfer rows; the two side-fields
   | "outcomeAccount"
   // are required to keep both legs of a transfer in sync.
-  | "incomeAccount";
+  | "incomeAccount"
+  // Destination-leg amount/currency — only meaningful for a cross-currency
+  // transfer, where the two legs hold different sums in their own currencies.
+  | "incomeAmount"
+  | "incomeCurrency";
 
 export type TransactionEdit = Partial<Pick<Transaction, EditableField>>;
 

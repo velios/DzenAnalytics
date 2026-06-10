@@ -218,17 +218,37 @@ describe("buildPushItems — kind flips", () => {
     expect(skipped[0].reason).toMatch(/невозможен|тот же/i);
   });
 
-  it("refuses a flip on an FX row (non-zero op-amount)", () => {
-    const fx = fullTx({ outcome: 900, opOutcome: 10 });
+  it("carries the op-amount when flipping an FX row (expense → income)", () => {
+    // "spent $10 from a RUB card": outcome=900 RUB, opOutcome=10 USD (instr 3).
+    const fx = fullTx({ outcome: 900, opOutcome: 10, opOutcomeInstrument: 3 });
     const { toPush, skipped } = pushOne(fx, { kind: "income" });
-    expect(toPush).toHaveLength(0);
-    expect(skipped[0].reason).toMatch(/валют/i);
+    expect(skipped).toHaveLength(0);
+    const z = toPush[0].zen;
+    expect(z.income).toBe(900);
+    expect(z.incomeInstrument).toBe(2);
+    expect(z.opIncome).toBe(10);
+    expect(z.opIncomeInstrument).toBe(3);
+    expect(z.outcome).toBe(0);
+    expect(z.opOutcome).toBe(0);
+    expect(z.opOutcomeInstrument).toBeNull();
+  });
+
+  it("carries the op-amount when flipping an FX row (income → expense)", () => {
+    const fx = fullTx({ income: 900, opIncome: 10, opIncomeInstrument: 3 });
+    const { toPush } = pushOne(fx, { kind: "expense" });
+    const z = toPush[0].zen;
+    expect(z.outcome).toBe(900);
+    expect(z.opOutcome).toBe(10);
+    expect(z.opOutcomeInstrument).toBe(3);
+    expect(z.income).toBe(0);
+    expect(z.opIncome).toBe(0);
   });
 
   it("does not falsely treat an ordinary expense (opOutcome: 0) as FX", () => {
     const { toPush, skipped } = pushOne(fullTx({ outcome: 100, opOutcome: 0 }), { kind: "income" });
     expect(skipped).toHaveLength(0);
     expect(toPush[0].zen.income).toBe(100);
+    expect(toPush[0].zen.opIncome).toBe(0);
   });
 });
 
@@ -285,10 +305,26 @@ describe("buildPushItems — account change", () => {
     expect(toPush[0].zen.incomeAccount).toBe("acc-2");
   });
 
-  it("skips a move to a different-currency account (cross-currency)", () => {
+  it("builds an FX row when moving to a different-currency account", () => {
+    // RUB expense 500 → USD account, new sum 6 USD. Original 500 RUB becomes
+    // the operational (op) side.
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      account: "Долларовый",
+      amount: 6,
+    });
+    expect(skipped).toHaveLength(0);
+    const z = toPush[0].zen;
+    expect(z.outcome).toBe(6);
+    expect(z.outcomeInstrument).toBe(3); // USD (new account)
+    expect(z.outcomeAccount).toBe("acc-3");
+    expect(z.opOutcome).toBe(500); // original sum
+    expect(z.opOutcomeInstrument).toBe(2); // RUB (original)
+  });
+
+  it("skips a cross-currency move with no new-currency amount", () => {
     const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), { account: "Долларовый" });
     expect(toPush).toHaveLength(0);
-    expect(skipped[0].reason).toMatch(/валют/i);
+    expect(skipped[0].reason).toMatch(/сумму в валюте нового счёта/i);
   });
 
   it("skips an unknown account", () => {
@@ -365,14 +401,32 @@ describe("buildPushItems — flip to transfer", () => {
     expect(toPush[0].zen.income).toBe(777);
   });
 
-  it("skips a cross-currency transfer", () => {
+  it("builds a cross-currency transfer when the destination amount is given", () => {
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Долларовый",
+      incomeAmount: 5,
+      incomeCurrency: "USD",
+    });
+    expect(skipped).toHaveLength(0);
+    const z = toPush[0].zen;
+    expect(z.outcome).toBe(500);
+    expect(z.outcomeInstrument).toBe(2); // RUB
+    expect(z.income).toBe(5);
+    expect(z.incomeInstrument).toBe(3); // USD
+    expect(z.opOutcome).toBe(0);
+    expect(z.opIncome).toBe(0);
+  });
+
+  it("skips a cross-currency transfer with no destination amount", () => {
     const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), {
       kind: "transfer",
       outcomeAccount: "Карта",
       incomeAccount: "Долларовый",
     });
     expect(toPush).toHaveLength(0);
-    expect(skipped[0].reason).toMatch(/валют/i);
+    expect(skipped[0].reason).toMatch(/сумму зачисления/i);
   });
 
   it("skips a transfer to the same account", () => {

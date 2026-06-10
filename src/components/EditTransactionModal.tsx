@@ -4,7 +4,11 @@ import { Pencil, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
-import { getBrandTitlesFromCache, useZenmoneyStore } from "../store/useZenmoneyStore";
+import {
+  getBrandTitlesFromCache,
+  getLiveAccountsFromCache,
+  useZenmoneyStore,
+} from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { Combobox } from "./Combobox";
 import { DateField } from "./DateField";
@@ -121,6 +125,22 @@ export function EditTransactionModal({ tx, onClose }: Props) {
       cancelled = true;
     };
   }, []);
+  // Account → native currency, from the live Zenmoney cache. Lets us detect
+  // a cross-currency transfer (legs in different currencies) and ask for the
+  // second amount. Null in CSV mode → we never show the second field there.
+  const [accountCurrency, setAccountCurrency] = useState<Map<string, string>>(
+    new Map()
+  );
+  useEffect(() => {
+    let cancelled = false;
+    getLiveAccountsFromCache().then((list) => {
+      if (cancelled || !list) return;
+      setAccountCurrency(new Map(list.map((a) => [a.title, a.currency])));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const payeeGroups = useMemo(() => {
     const brandSet = new Set<string>();
     if (cachedBrands) for (const b of cachedBrands) brandSet.add(b);
@@ -187,7 +207,27 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   // hide these and rely on the single `account` field above.
   const [outAcc, setOutAcc] = useState(tx.outcomeAccount || tx.account);
   const [inAcc, setInAcc] = useState(tx.incomeAccount || "");
+  // Destination-leg amount, only used for a cross-currency transfer.
+  const [inAmount, setInAmount] = useState(
+    tx.incomeAmount ? String(tx.incomeAmount) : ""
+  );
   const [saving, setSaving] = useState(false);
+
+  // Cross-currency transfer: both accounts known and in different currencies.
+  // Only then do we need (and show) a separate destination amount/currency.
+  const inAccCurrency = accountCurrency.get(inAcc.trim());
+  const isCrossCurrencyTransfer =
+    kind === "transfer" &&
+    !!accountCurrency.get(outAcc.trim()) &&
+    !!inAccCurrency &&
+    accountCurrency.get(outAcc.trim()) !== inAccCurrency;
+  // Non-transfer moved onto an account whose native currency differs from the
+  // operation currency → it becomes an FX row on push. Hint the user that the
+  // amount should be in the new account's currency.
+  const accountNativeCurrency =
+    kind !== "transfer" ? accountCurrency.get(account.trim()) : undefined;
+  const isCrossCurrencyMove =
+    !!accountNativeCurrency && accountNativeCurrency !== currency;
 
   // Tracks whether the most recent mousedown landed on the backdrop. Used
   // by the click handler to decide whether to close — drags that started
@@ -262,14 +302,31 @@ export function EditTransactionModal({ tx, onClose }: Props) {
         // change worth refusing.
         const src = outAcc.trim() || tx.outcomeAccount || tx.account;
         const dst = inAcc.trim() || tx.incomeAccount || "";
-        if (
+        const accountsChanged =
           changed(src, tx.outcomeAccount) ||
           changed(dst, tx.incomeAccount) ||
-          changed(src, tx.account)
-        ) {
+          changed(src, tx.account);
+        if (accountsChanged) {
           patch.outcomeAccount = src;
           patch.incomeAccount = dst;
           patch.account = src; // mapper convention: transfer rows live under source
+        }
+        // Cross-currency: carry the destination amount (in the destination
+        // account's currency) so the push can build the second leg. Only
+        // when it actually changed, or the row just became a transfer / its
+        // accounts moved — a no-op edit must stay a no-op.
+        if (isCrossCurrencyTransfer) {
+          const inNum = Number(inAmount.replace(",", "."));
+          const safeIn =
+            Number.isFinite(inNum) && inNum > 0 ? inNum : tx.incomeAmount;
+          if (
+            safeIn !== tx.incomeAmount ||
+            kind !== tx.kind ||
+            accountsChanged
+          ) {
+            patch.incomeAmount = safeIn;
+            patch.incomeCurrency = inAccCurrency;
+          }
         }
       } else {
         const nextAccount = account.trim() || tx.account;
@@ -491,6 +548,27 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               </select>
             </Field>
           </div>
+          {/* Cross-currency transfer: the destination leg holds a different
+              sum in its own currency. We never guess a rate — the user enters
+              the credited amount; its currency is the destination account's. */}
+          {isCrossCurrencyTransfer && (
+            <Field label={`Сумма зачисления (${inAccCurrency})`}>
+              <input
+                value={inAmount}
+                onChange={(e) => setInAmount(e.target.value)}
+                inputMode="decimal"
+                placeholder={`Сколько пришло на счёт в ${inAccCurrency}`}
+                className="input text-sm w-full font-mono tabular-nums"
+              />
+            </Field>
+          )}
+          {isCrossCurrencyMove && (
+            <p className="text-xs text-muted -mt-1">
+              Счёт в {accountNativeCurrency}: укажите «Сумму» в{" "}
+              {accountNativeCurrency}. Исходная сумма ({tx.amount} {currency})
+              сохранится как операционная (мультивалютная операция).
+            </p>
+          )}
           {/* Single "Получатель" field — autocompletes from the
               Zenmoney merchant dictionary plus historical raw-payee
               strings. Hidden for transfers (counterparty there is the
