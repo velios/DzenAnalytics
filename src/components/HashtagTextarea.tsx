@@ -69,7 +69,11 @@ export function HashtagTextarea({
       const estH = Math.min(suggestions.length * ITEM_H + 8, MAX_H);
       const below = window.innerHeight - r.bottom - 8;
       const above = r.top - 8;
-      const flipUp = below < estH && above > below;
+      // Open toward the side with more room. For a field low on the screen
+      // (the comment box sits just above the footer buttons) that's upward,
+      // so the menu floats over the fields above instead of covering the
+      // actions below. Only flip up when the menu actually fits there.
+      const flipUp = above > below && above >= Math.min(estH, ITEM_H + 8);
       next = flipUp
         ? {
             left: r.left,
