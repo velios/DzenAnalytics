@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { ArrowUpDown, Download } from "lucide-react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { ArrowUpDown, Download, ChevronRight, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 
 export type SortDir = "asc" | "desc";
@@ -28,6 +28,15 @@ interface Props<T> {
   className?: string;
   exportName?: string;
   exportable?: boolean;
+  /**
+   * Expandable rows. When `renderExpanded` is set, a leading chevron column
+   * appears, clicking a row toggles it (via `onToggleExpand`), and the
+   * returned node renders in a full-width row underneath. `onRowClick` is
+   * ignored in this mode — the click drives the expansion instead.
+   */
+  renderExpanded?: (row: T) => ReactNode;
+  isExpanded?: (row: T) => boolean;
+  onToggleExpand?: (row: T) => void;
 }
 
 function csvEscape(v: unknown): string {
@@ -56,7 +65,11 @@ export function SortableTable<T>({
   className,
   exportName,
   exportable = true,
+  renderExpanded,
+  isExpanded,
+  onToggleExpand,
 }: Props<T>) {
+  const expandable = !!renderExpanded;
   const [sortKey, setSortKey] = useState<string | undefined>(defaultSortKey);
   const [sortDir, setSortDir] = useState<SortDir>(defaultSortDir);
 
@@ -138,6 +151,7 @@ export function SortableTable<T>({
         <table className="w-full text-sm">
           <thead>
             <tr>
+              {expandable && <th className="table-th w-8" aria-hidden />}
               {columns.map((c) => {
                 const sortable = c.sortable !== false && !!c.sortValue;
                 const active = sortKey === c.key;
@@ -172,31 +186,62 @@ export function SortableTable<T>({
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="table-td text-center text-muted py-6">
+                <td
+                  colSpan={columns.length + (expandable ? 1 : 0)}
+                  className="table-td text-center text-muted py-6"
+                >
                   {emptyText}
                 </td>
               </tr>
             ) : (
-              visible.map((row, i) => (
-                <tr
-                  key={rowKey(row, i)}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={clsx(
-                    "align-top",
-                    onRowClick && "hover:bg-panel2/50 cursor-pointer",
-                    rowClassName?.(row)
-                  )}
-                >
-                  {columns.map((c) => (
-                    <td
-                      key={c.key}
-                      className={clsx("table-td", c.align === "right" && "text-right")}
+              visible.map((row, i) => {
+                const open = expandable && !!isExpanded?.(row);
+                const handleClick = expandable
+                  ? () => onToggleExpand?.(row)
+                  : onRowClick
+                    ? () => onRowClick(row)
+                    : undefined;
+                return (
+                  <Fragment key={rowKey(row, i)}>
+                    <tr
+                      onClick={handleClick}
+                      className={clsx(
+                        "align-top",
+                        (expandable || onRowClick) && "hover:bg-panel2/50 cursor-pointer",
+                        rowClassName?.(row)
+                      )}
                     >
-                      {c.render(row, i)}
-                    </td>
-                  ))}
-                </tr>
-              ))
+                      {expandable && (
+                        <td className="table-td">
+                          {open ? (
+                            <ChevronDown className="w-4 h-4 text-muted" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-muted" />
+                          )}
+                        </td>
+                      )}
+                      {columns.map((c) => (
+                        <td
+                          key={c.key}
+                          className={clsx("table-td", c.align === "right" && "text-right")}
+                        >
+                          {c.render(row, i)}
+                        </td>
+                      ))}
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td
+                          colSpan={columns.length + 1}
+                          className="table-td bg-panel2/30 pl-8"
+                        >
+                          {renderExpanded!(row)}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
