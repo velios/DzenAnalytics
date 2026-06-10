@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Search,
   X,
@@ -41,6 +42,8 @@ function MultiSelect({
   onToggle: (v: string) => void;
   onReset: () => void;
 }) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const summary =
     selected.size === 0
@@ -49,9 +52,69 @@ function MultiSelect({
         ? Array.from(selected)[0]
         : `Выбрано ${selected.size}`;
 
+  // The menu renders in a portal (position: fixed) so it floats above the
+  // table below — `absolute` left it under a later stacking context. Its
+  // left edge lines up with the button; it flips up if there's more room
+  // above (and the menu fits there).
+  type MenuPos = {
+    left: number;
+    width: number;
+    top?: number;
+    bottom?: number;
+    maxHeight: number;
+  };
+  const [pos, setPos] = useState<MenuPos | null>(null);
+  const MENU_W = 288;
+
+  useLayoutEffect(() => {
+    const el = btnRef.current;
+    let next: MenuPos | null = null;
+    if (open && el) {
+      const r = el.getBoundingClientRect();
+      const width = Math.max(r.width, MENU_W);
+      const estH = Math.min(options.length * 32 + 44, 340);
+      const below = window.innerHeight - r.bottom - 8;
+      const above = r.top - 8;
+      const flipUp = above > below && above >= Math.min(estH, 48);
+      next = flipUp
+        ? {
+            left: r.left,
+            width,
+            bottom: window.innerHeight - r.top + 4,
+            maxHeight: Math.min(estH, above),
+          }
+        : {
+            left: r.left,
+            width,
+            top: r.bottom + 4,
+            maxHeight: Math.min(estH, below),
+          };
+    }
+    setPos(next);
+  }, [open, options.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (menuRef.current && t instanceof Node && menuRef.current.contains(t)) {
+        return;
+      }
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open]);
+
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         onClick={() => setOpen((o) => !o)}
         className={clsx(
           "btn-ghost text-sm w-full justify-between",
@@ -63,38 +126,51 @@ function MultiSelect({
         </span>
         <ChevronDown className="w-4 h-4 shrink-0" />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 w-72 max-h-80 overflow-auto card p-2 right-0">
-            <div className="flex items-center justify-between px-2 py-1 mb-1">
-              <span className="text-xs text-muted">{options.length} вариантов</span>
-              {selected.size > 0 && (
-                <button
-                  onClick={onReset}
-                  className="text-xs text-accent hover:underline"
+      {open &&
+        pos &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
+            <div
+              ref={menuRef}
+              className="fixed z-[80] overflow-auto card p-2"
+              style={{
+                left: pos.left,
+                width: pos.width,
+                top: pos.top,
+                bottom: pos.bottom,
+                maxHeight: pos.maxHeight,
+              }}
+            >
+              <div className="flex items-center justify-between px-2 py-1 mb-1">
+                <span className="text-xs text-muted">{options.length} вариантов</span>
+                {selected.size > 0 && (
+                  <button
+                    onClick={onReset}
+                    className="text-xs text-accent hover:underline"
+                  >
+                    сбросить
+                  </button>
+                )}
+              </div>
+              {options.map((opt) => (
+                <label
+                  key={opt}
+                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm"
                 >
-                  сбросить
-                </button>
-              )}
+                  <input
+                    type="checkbox"
+                    checked={selected.has(opt)}
+                    onChange={() => onToggle(opt)}
+                    className="accent-accent"
+                  />
+                  <span className="truncate">{opt}</span>
+                </label>
+              ))}
             </div>
-            {options.map((opt) => (
-              <label
-                key={opt}
-                className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(opt)}
-                  onChange={() => onToggle(opt)}
-                  className="accent-accent"
-                />
-                <span className="truncate">{opt}</span>
-              </label>
-            ))}
-          </div>
-        </>
-      )}
+          </>,
+          document.body
+        )}
     </div>
   );
 }
