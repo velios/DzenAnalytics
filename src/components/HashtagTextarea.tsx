@@ -27,8 +27,8 @@ interface Props {
 }
 
 const ITEM_H = 34; // px per row, for height estimation
-const MAX_H = 240;
-const MAX_ITEMS = 8;
+const MAX_H = 240; // menu caps here and scrolls; nav keeps the active item in view
+const MAX_ITEMS = 50;
 
 export function HashtagTextarea({
   value,
@@ -39,6 +39,7 @@ export function HashtagTextarea({
   placeholder,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [start, setStart] = useState(0);
@@ -89,14 +90,38 @@ export function HashtagTextarea({
   // A moved/resized viewport invalidates the fixed coords — just close.
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
+    // Close when the page/containers scroll (fixed coords go stale) — but NOT
+    // when the scroll happens inside the menu itself (the user is browsing it).
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (menuRef.current && t instanceof Node && menuRef.current.contains(t)) {
+        return;
+      }
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
   }, [open]);
+
+  // Keep the highlighted item visible when navigating a long list with the
+  // keyboard. Scroll only the menu (not the page), so it can't trigger the
+  // page-scroll close above.
+  useEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    const item = menu?.children[index] as HTMLElement | undefined;
+    if (!menu || !item) return;
+    const mt = menu.scrollTop;
+    if (item.offsetTop < mt) menu.scrollTop = item.offsetTop;
+    else if (item.offsetTop + item.offsetHeight > mt + menu.clientHeight) {
+      menu.scrollTop = item.offsetTop + item.offsetHeight - menu.clientHeight;
+    }
+  }, [index, open]);
 
   /** Recompute the active «#fragment» under the caret and open/close the menu. */
   function sync(next: string, caret: number) {
@@ -174,6 +199,7 @@ export function HashtagTextarea({
         suggestions.length > 0 &&
         createPortal(
           <div
+            ref={menuRef}
             className="fixed z-[80] overflow-auto rounded-lg border border-border bg-panel shadow-xl"
             style={{
               left: pos.left,
