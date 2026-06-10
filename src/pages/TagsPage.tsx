@@ -178,40 +178,45 @@ export function TagsPage() {
             const nodes = catTrees.get(t.tag);
             if (!nodes || nodes.length === 0) {
               return (
-                <span className="text-xs text-muted">
-                  Нет расходов по категориям
-                </span>
+                <tr className="bg-panel2/20">
+                  <td className="table-td" />
+                  <td className="table-td text-xs text-muted" colSpan={5}>
+                    Нет операций по категориям
+                  </td>
+                </tr>
               );
             }
-            return (
-              <div className="space-y-1 py-1">
-                {nodes.map((n) => (
-                  <div key={n.category}>
-                    <div className="flex items-center gap-2 py-0.5 text-sm">
-                      <span>{n.category}</span>
-                      <span className="ml-auto tabular-nums text-muted">
-                        {formatMoney(n.total, base)}
-                      </span>
-                    </div>
-                    {n.subs.length > 0 && (
-                      <div className="pl-4 space-y-0.5">
-                        {n.subs.map((s) => (
-                          <div
-                            key={s.name}
-                            className="flex items-center gap-2 py-0.5 text-xs text-muted"
-                          >
-                            <span>{s.name}</span>
-                            <span className="ml-auto tabular-nums">
-                              {formatMoney(s.total, base)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            );
+            return nodes.flatMap((n) => [
+              <tr key={`${t.tag}:${n.category}`} className="bg-panel2/20">
+                <td className="table-td" />
+                <td className="table-td pl-6">{n.category}</td>
+                <td className="table-td text-right tabular-nums text-expense">
+                  {n.expense > 0 ? formatMoney(n.expense, base) : "—"}
+                </td>
+                <td className="table-td text-right tabular-nums text-income">
+                  {n.income > 0 ? formatMoney(n.income, base) : "—"}
+                </td>
+                <td className="table-td text-right text-muted">{n.count}</td>
+                <td className="table-td" />
+              </tr>,
+              ...n.subs.map((s) => (
+                <tr
+                  key={`${t.tag}:${n.category}:${s.name}`}
+                  className="bg-panel2/10 text-xs text-muted"
+                >
+                  <td className="table-td" />
+                  <td className="table-td pl-10">{s.name}</td>
+                  <td className="table-td text-right tabular-nums">
+                    {s.expense > 0 ? formatMoney(s.expense, base) : "—"}
+                  </td>
+                  <td className="table-td text-right tabular-nums">
+                    {s.income > 0 ? formatMoney(s.income, base) : "—"}
+                  </td>
+                  <td className="table-td text-right">{s.count}</td>
+                  <td className="table-td" />
+                </tr>
+              )),
+            ]);
           }}
         />
       </div>

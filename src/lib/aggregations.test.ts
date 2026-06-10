@@ -10,7 +10,7 @@ import {
 import { tx } from "../test/fixtures";
 
 describe("hashtagCategoryTrees", () => {
-  it("builds a per-tag category → subcategory expense tree", () => {
+  it("builds a per-tag category → subcategory tree with expense/income/count", () => {
     const trees = hashtagCategoryTrees([
       tx({ comment: "обед #катя", category: "Еда", subcategory: "Кафе", kind: "expense", amountBase: 100 }),
       tx({ comment: "ужин #катя", category: "Еда", subcategory: "Кафе", kind: "expense", amountBase: 50 }),
@@ -18,23 +18,24 @@ describe("hashtagCategoryTrees", () => {
       tx({ comment: "#другой", category: "Еда", subcategory: null, kind: "expense", amountBase: 999 }),
     ]);
     const katya = trees.get("катя")!;
-    // Sorted by amount desc: Транспорт (200) before Еда (150).
+    // Sorted by expense+income desc: Транспорт (200) before Еда (150).
     expect(katya.map((n) => n.category)).toEqual(["Транспорт", "Еда"]);
     const eda = katya.find((n) => n.category === "Еда")!;
-    expect(eda.total).toBe(150);
-    expect(eda.subs).toEqual([{ name: "Кафе", total: 150, count: 2 }]);
+    expect(eda).toMatchObject({ expense: 150, income: 0, count: 2 });
+    expect(eda.subs).toEqual([{ name: "Кафе", expense: 150, income: 0, count: 2 }]);
     expect(trees.has("другой")).toBe(true);
   });
 
-  it("excludes income and lets refunds shrink the bucket", () => {
+  it("tracks income in its own bucket and lets refunds shrink expense", () => {
     const trees = hashtagCategoryTrees([
       tx({ comment: "#x", category: "Еда", kind: "expense", amountBase: 500 }),
       tx({ comment: "#x", category: "Еда", kind: "refund", amountBase: 200 }),
       tx({ comment: "#x", category: "Зарплата", kind: "income", amountBase: 9999 }),
     ]);
     const x = trees.get("x")!;
-    expect(x).toHaveLength(1);
-    expect(x[0]).toMatchObject({ category: "Еда", total: 300 });
+    expect(x).toHaveLength(2);
+    expect(x.find((n) => n.category === "Еда")).toMatchObject({ expense: 300, income: 0, count: 2 });
+    expect(x.find((n) => n.category === "Зарплата")).toMatchObject({ expense: 0, income: 9999, count: 1 });
   });
 });
 

@@ -30,9 +30,10 @@ interface Props<T> {
   exportable?: boolean;
   /**
    * Expandable rows. When `renderExpanded` is set, a leading chevron column
-   * appears, clicking a row toggles it (via `onToggleExpand`), and the
-   * returned node renders in a full-width row underneath. `onRowClick` is
-   * ignored in this mode — the click drives the expansion instead.
+   * appears and clicking a row toggles it (via `onToggleExpand`). The function
+   * must return table ROWS (`<tr>` fragments) inserted right after the row, so
+   * their cells line up with the columns — start each `<tr>` with an empty
+   * `<td>` for the chevron column. `onRowClick` is ignored in this mode.
    */
   renderExpanded?: (row: T) => ReactNode;
   isExpanded?: (row: T) => boolean;
@@ -229,16 +230,7 @@ export function SortableTable<T>({
                         </td>
                       ))}
                     </tr>
-                    {open && (
-                      <tr>
-                        <td
-                          colSpan={columns.length + 1}
-                          className="table-td bg-panel2/30 pl-8"
-                        >
-                          {renderExpanded!(row)}
-                        </td>
-                      </tr>
-                    )}
+                    {open && renderExpanded!(row)}
                   </Fragment>
                 );
               })

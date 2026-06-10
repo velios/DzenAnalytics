@@ -1117,31 +1117,38 @@ export function groupByHashtag(txs: Transaction[]): TagBucket[] {
 
 export interface TagCatSub {
   name: string;
-  total: number;
+  expense: number;
+  income: number;
   count: number;
 }
 export interface TagCatNode {
   category: string;
-  total: number;
+  expense: number;
+  income: number;
   count: number;
   subs: TagCatSub[];
 }
 
 /**
- * For each hashtag, an EXPENSE breakdown by category → subcategory with sums,
- * so the Hashtags page can show «#тег → Категория ХХХ → Подкатегория ХХХ».
- * Refunds shrink the relevant bucket (`expenseDelta` is signed); income is
- * excluded. Categories and their subs come back sorted by amount, descending.
+ * For each hashtag, a breakdown by category → subcategory with expense,
+ * income and operation count — so the Hashtags page can show each tag's
+ * «Категория → Подкатегория» rows aligned with the table's columns.
+ * Refunds shrink the expense bucket (same convention as groupByHashtag);
+ * income lands in its own bucket. Sorted by expense+income, descending.
  */
 export function hashtagCategoryTrees(
   txs: Transaction[]
 ): Map<string, TagCatNode[]> {
+  const add = (b: { expense: number; income: number }, t: Transaction) => {
+    if (t.kind === "income") b.income += t.amountBase;
+    else if (t.kind === "refund") b.expense -= t.amountBase;
+    else b.expense += t.amountBase;
+  };
   const byTag = new Map<string, Map<string, TagCatNode>>();
   for (const t of txs) {
-    if (!affectsExpense(t.kind)) continue;
+    if (t.kind === "transfer") continue;
     const tags = extractHashtags(t.comment);
     if (tags.length === 0) continue;
-    const delta = expenseDelta(t);
     for (const tag of tags) {
       let cats = byTag.get(tag);
       if (!cats) {
@@ -1150,26 +1157,27 @@ export function hashtagCategoryTrees(
       }
       let node = cats.get(t.category);
       if (!node) {
-        node = { category: t.category, total: 0, count: 0, subs: [] };
+        node = { category: t.category, expense: 0, income: 0, count: 0, subs: [] };
         cats.set(t.category, node);
       }
-      node.total += delta;
+      add(node, t);
       node.count++;
       if (t.subcategory) {
         let sub = node.subs.find((s) => s.name === t.subcategory);
         if (!sub) {
-          sub = { name: t.subcategory, total: 0, count: 0 };
+          sub = { name: t.subcategory, expense: 0, income: 0, count: 0 };
           node.subs.push(sub);
         }
-        sub.total += delta;
+        add(sub, t);
         sub.count++;
       }
     }
   }
+  const score = (b: { expense: number; income: number }) => b.expense + b.income;
   const out = new Map<string, TagCatNode[]>();
   for (const [tag, cats] of byTag) {
-    const nodes = Array.from(cats.values()).sort((a, b) => b.total - a.total);
-    for (const n of nodes) n.subs.sort((a, b) => b.total - a.total);
+    const nodes = Array.from(cats.values()).sort((a, b) => score(b) - score(a));
+    for (const n of nodes) n.subs.sort((a, b) => score(b) - score(a));
     out.set(tag, nodes);
   }
   return out;
