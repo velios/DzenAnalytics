@@ -1243,7 +1243,11 @@ export interface RecurringCandidate {
   priceTrend: { changePct: number; priceFlag: "up" | "down" | "flat" };
 }
 
-export function detectRecurring(txs: Transaction[], minOccurrences = 3): RecurringCandidate[] {
+export function detectRecurring(
+  txs: Transaction[],
+  minOccurrences = 3,
+  now = Date.now()
+): RecurringCandidate[] {
   const groups = new Map<string, Transaction[]>();
   for (const t of txs) {
     if (t.kind !== "expense") continue;
@@ -1290,8 +1294,18 @@ export function detectRecurring(txs: Transaction[], minOccurrences = 3): Recurri
     if (months.size < 2) continue;
 
     const last = list[list.length - 1];
-    const nextDate = new Date(last.date);
-    nextDate.setDate(nextDate.getDate() + Math.round(meanInterval));
+    const intervalMs = Math.round(meanInterval) * 86400000;
+    const lastMs = +new Date(last.date);
+    let nextMs = lastMs + intervalMs;
+    // "Next expected" should never sit in the past for a payment that's still
+    // alive — project it forward by whole cycles to the first date ≥ today.
+    // Long-dead ones (last seen over a year ago) keep their past projection,
+    // so they don't masquerade as upcoming in the list or the "expected" feed.
+    const ALIVE_MS = 365 * 86400000;
+    if (nextMs < now && intervalMs > 0 && now - lastMs < ALIVE_MS) {
+      nextMs += Math.ceil((now - nextMs) / intervalMs) * intervalMs;
+    }
+    const nextDate = new Date(nextMs);
 
     const totalSpent = list.reduce((s, t) => s + t.amount, 0);
     const cats: Record<string, number> = {};

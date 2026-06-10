@@ -26,10 +26,10 @@ export function RecurringPage() {
   const allCandidates = useMemo(() => detectRecurring(transactions), [transactions]);
   const [cadenceFilter, setCadenceFilter] = useState<CadenceFilter>("all");
   const [onlyPriceUp, setOnlyPriceUp] = useState(false);
-  // "Активные" = последний платёж не старше года. Прячет давно умершие
-  // подписки (последний раз, скажем, в 2020-м), которые всё ещё подходят
-  // под паттерн регулярного, но фактически больше не повторяются.
-  const [onlyActive, setOnlyActive] = useState(false);
+  // "Активные" = последний платёж не старше года. ON by default: a payment
+  // last seen in, say, 2020 isn't really "recurring" anymore, so we hide
+  // those unless the user explicitly asks to see the full history.
+  const [onlyActive, setOnlyActive] = useState(true);
   const activeCutoff = useMemo(() => {
     const d = new Date();
     d.setFullYear(d.getFullYear() - 1);

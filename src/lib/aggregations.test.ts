@@ -6,8 +6,30 @@ import {
   extractHashtags,
   detectDuplicates,
   hashtagCategoryTrees,
+  detectRecurring,
 } from "./aggregations";
 import { tx } from "../test/fixtures";
+
+describe("detectRecurring — nextExpected projection", () => {
+  const NOW = +new Date("2026-06-15T12:00:00Z");
+  const monthly = (payee: string, dates: string[]) =>
+    dates.map((d) => tx({ payee, kind: "expense", amount: 500, date: d }));
+
+  it("projects «next expected» into the future for a live payment", () => {
+    const txs = monthly("Netflix", ["2026-03-10", "2026-04-10", "2026-05-10"]);
+    const [c] = detectRecurring(txs, 3, NOW);
+    expect(c.payee).toBe("Netflix");
+    // last + 1 interval would be ~2026-06-10 (already past NOW) → rolled forward.
+    expect(c.nextExpected >= "2026-06-15").toBe(true);
+  });
+
+  it("leaves «next expected» in the past for a long-dead payment", () => {
+    const txs = monthly("Старый", ["2020-01-10", "2020-02-10", "2020-03-10"]);
+    const [c] = detectRecurring(txs, 3, NOW);
+    expect(c.lastDate).toBe("2020-03-10");
+    expect(c.nextExpected.startsWith("2020")).toBe(true);
+  });
+});
 
 describe("hashtagCategoryTrees", () => {
   it("builds a per-tag category → subcategory tree with expense/income/count", () => {
