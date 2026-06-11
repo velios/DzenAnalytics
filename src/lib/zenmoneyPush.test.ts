@@ -449,14 +449,35 @@ describe("buildPushItems — flip to transfer", () => {
     expect(skipped[0].reason).toMatch(/не найден/i);
   });
 
-  it("skips a flip to transfer on an FX row", () => {
-    const { toPush, skipped } = pushIn(fullTx({ outcome: 900, opOutcome: 10 }), {
-      kind: "transfer",
-      outcomeAccount: "Карта",
-      incomeAccount: "Наличные",
-    });
+  it("flips an FX (op-amount) row to a transfer, dropping the op pair", () => {
+    // The old single-leg op-amounts are irrelevant once it's a transfer —
+    // both legs live in their accounts' currencies. So it builds, op = 0.
+    const { toPush, skipped } = pushIn(
+      fullTx({ outcome: 900, opOutcome: 10, opOutcomeInstrument: 3 }),
+      {
+        kind: "transfer",
+        account: "Карта",
+        outcomeAccount: "Карта",
+        incomeAccount: "Наличные",
+      }
+    );
+    expect(skipped).toHaveLength(0);
+    const z = toPush[0].zen;
+    expect(z.outcome).toBe(900);
+    expect(z.income).toBe(900);
+    expect(z.opOutcome).toBe(0);
+    expect(z.opIncome).toBe(0);
+    expect(z.opOutcomeInstrument).toBeNull();
+  });
+
+  it("still refuses editing an EXISTING transfer that carries op-amounts", () => {
+    // Op-amounts on a real transfer carry per-leg FX info we don't rebuild.
+    const { toPush, skipped } = pushIn(
+      transferTx({ opOutcome: 5, opOutcomeInstrument: 3 }),
+      { amount: 600 }
+    );
     expect(toPush).toHaveLength(0);
-    expect(skipped[0].reason).toMatch(/валют/i);
+    expect(skipped[0].reason).toMatch(/мультивалют|валют/i);
   });
 
   it("edits the accounts of an existing transfer (transfer → transfer)", () => {

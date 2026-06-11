@@ -138,9 +138,19 @@ function buildTransferTarget(
   original: ZenTransaction,
   edit: TransactionEdit,
   orig: { outAcc: string; inAcc: string },
-  accountsByTitle: Map<string, ZenAccount>
+  accountsByTitle: Map<string, ZenAccount>,
+  origIsTransfer: boolean
 ): { zen?: ZenTransaction; skip?: string } {
-  if ((original.opIncome || 0) > 0 || (original.opOutcome || 0) > 0) {
+  // Op-amounts (operation currency ≠ account currency) only matter when we're
+  // EDITING an existing transfer — there they carry real per-leg FX info we
+  // don't rebuild, so we still refuse. But when FLIPPING a regular operation
+  // into a transfer, the op-amounts belong to the old single-leg record and
+  // are irrelevant: both transfer legs live in their accounts' currencies
+  // («Отправлено» / «Получено»), so we drop the op pair and build cleanly.
+  if (
+    origIsTransfer &&
+    ((original.opIncome || 0) > 0 || (original.opOutcome || 0) > 0)
+  ) {
     return {
       skip: "перевод с операцией в другой валюте (мультивалюта) пока не поддерживается — отредактируйте в приложении",
     };
@@ -463,7 +473,13 @@ export function buildPushItems(
     // existing transfer (transfer → transfer). Both legs are rebuilt by
     // buildTransferTarget; single-currency only, FX is refused inside.
     if (targetIsTransfer) {
-      const built = buildTransferTarget(original, edit, orig, accountsByTitle);
+      const built = buildTransferTarget(
+        original,
+        edit,
+        orig,
+        accountsByTitle,
+        origIsTransfer
+      );
       if (built.skip) {
         skipped.push({ id, reason: built.skip });
         continue;
