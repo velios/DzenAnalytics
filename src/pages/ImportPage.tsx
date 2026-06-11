@@ -478,8 +478,10 @@ export function ImportPage() {
         rates: await db.loadRates(),
         importMeta: await db.loadImportMeta(),
         budgets: await db.loadJSON("budgets"),
+        budgetsV2: await db.loadJSON("budgetsV2"),
         goals: await db.loadJSON("goals"),
         calibration: await db.loadJSON("calibration"),
+        fireExcludedAccounts: await db.loadJSON("fireExcludedAccounts"),
         savedViews: await db.loadJSON("savedViews"),
         annotations: await db.loadJSON("annotations"),
         categoryFlags: await db.loadJSON("categoryFlags"),
@@ -522,7 +524,7 @@ export function ImportPage() {
       if (dump.transactions) await db.saveTransactions(dump.transactions as never);
       if (dump.rates) await db.saveRates(dump.rates as never);
       if (dump.importMeta) await db.saveImportMeta(dump.importMeta as never);
-      const keys = ["budgets", "goals", "calibration", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping", "payeeAliases", "reportPeriod"];
+      const keys = ["budgets", "budgetsV2", "goals", "calibration", "fireExcludedAccounts", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping", "payeeAliases", "reportPeriod"];
       for (const k of keys) {
         if (dump[k] !== undefined) await db.saveJSON(k, dump[k]);
       }

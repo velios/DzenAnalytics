@@ -16,9 +16,14 @@ export interface BackupPayload {
   transactions: unknown;
   rates: unknown;
   importMeta: unknown;
+  /** Legacy flat budgets (Record<category, number>). Kept for old backups. */
   budgets: unknown;
+  /** New plan/fact budget lines (BudgetLine[]). */
+  budgetsV2: unknown;
   goals: unknown;
   calibration: unknown;
+  /** FIRE dashboard: account titles excluded from the capital total. */
+  fireExcludedAccounts: unknown;
   savedViews: unknown;
   annotations: unknown;
   categoryFlags: unknown;
@@ -35,8 +40,10 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     rates: await db.loadRates(),
     importMeta: await db.loadImportMeta(),
     budgets: await db.loadJSON("budgets"),
+    budgetsV2: await db.loadJSON("budgetsV2"),
     goals: await db.loadJSON("goals"),
     calibration: await db.loadJSON("calibration"),
+    fireExcludedAccounts: await db.loadJSON("fireExcludedAccounts"),
     savedViews: await db.loadJSON("savedViews"),
     annotations: await db.loadJSON("annotations"),
     categoryFlags: await db.loadJSON("categoryFlags"),
