@@ -26,6 +26,8 @@ import {
 import { loadSnapshotIndex, takeSnapshot } from "../lib/cloudSnapshots";
 import { useDataStore } from "./useDataStore";
 import { useCalibrationStore } from "./useCalibrationStore";
+import { useOffBalanceStore } from "./useOffBalanceStore";
+import { toBase } from "../lib/csv";
 import { useCategoryMetaStore } from "./useCategoryMetaStore";
 import { useEditsStore } from "./useEditsStore";
 import { useDeletedStore } from "./useDeletedStore";
@@ -151,6 +153,28 @@ export async function getBrandTitlesFromCache(): Promise<string[] | null> {
     .map((m) => m.title.trim())
     .filter((t) => t.length > 0)
     .sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+/**
+ * Sum the current balances (in base currency) of the live accounts in cache,
+ * honouring the global "include off-balance" setting. Archived accounts never
+ * count. Used to anchor the net-worth calibration on sync and whenever the
+ * off-balance setting changes.
+ */
+export async function recalcBalanceCalibration(): Promise<void> {
+  const cache = await loadZenCache();
+  if (!cache) return; // CSV mode — no live balances, manual calibration stays
+  const include = useOffBalanceStore.getState().includeOffBalance;
+  const rates = useDataStore.getState().rates;
+  const instrById = new Map(cache.instruments.map((i) => [i.id, i]));
+  const total = cache.accounts
+    .filter((a) => !a.archive && (include || a.inBalance))
+    .reduce((s, a) => {
+      const cur = instrById.get(a.instrument)?.shortTitle || rates.base;
+      return s + toBase(a.balance || 0, cur, rates);
+    }, 0);
+  const today = new Date().toISOString().slice(0, 10);
+  await useCalibrationStore.getState().set({ date: today, amount: Math.round(total) });
 }
 
 export interface SyncResult {
@@ -403,15 +427,10 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       await useDataStore.getState().setTransactions(mapped.transactions, meta);
 
       // Auto-calibration: the API exposes current real balance per account,
-      // which CSV lacks. Set calibration to today + current total so the
-      // "Совокупный баланс" chart and KPIs show real values without manual
-      // entry. We overwrite any existing calibration since the API value is
-      // authoritative.
-      const today = new Date().toISOString().slice(0, 10);
-      await useCalibrationStore.getState().set({
-        date: today,
-        amount: Math.round(mapped.currentBalanceTotal),
-      });
+      // which CSV lacks. Anchor the "Совокупный баланс" chart/KPIs to the real
+      // total (respecting the global "include off-balance" setting). Overwrites
+      // any existing calibration since the API value is authoritative.
+      await recalcBalanceCalibration();
 
       const now = new Date().toISOString();
       await db.saveJSON(TIMESTAMP_KEY, diff.serverTimestamp);

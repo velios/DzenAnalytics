@@ -42,6 +42,7 @@ import { useDeletedStore } from "./store/useDeletedStore";
 import { useDeletedPayloadsStore } from "./store/useDeletedPayloadsStore";
 import { useDisplayStore } from "./store/useDisplayStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
+import { useOffBalanceStore } from "./store/useOffBalanceStore";
 import { useFiltersStore } from "./store/useFiltersStore";
 
 /**
@@ -81,6 +82,7 @@ function App() {
     useDeletedStore.getState().hydrate();
     useDeletedPayloadsStore.getState().hydrate();
     useDisplayStore.getState().hydrate();
+    useOffBalanceStore.getState().hydrate();
     hydrate();
     backupHydrate();
     reportPeriodHydrate();

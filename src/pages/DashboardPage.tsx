@@ -36,6 +36,7 @@ import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { currentPeriod, periodKey } from "../lib/period";
 import {
   groupByMonth,
@@ -319,8 +320,8 @@ export function DashboardPage() {
   const [hideZero, setHideZero] = useState(true);
   const [hideArchived, setHideArchived] = useState(true);
   // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage) are
-  // hidden by default, matching Zenmoney's own balance view; this reveals them.
-  const [showOffBalance, setShowOffBalance] = useState(false);
+  // shown only when the global setting (Настройки → Обработка) is on.
+  const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
   // PNG-export state. Declared here (with the other hooks) rather than
   // lower down — they must run before the early `return <EmptyState />`
   // so hook order stays stable across renders (rules-of-hooks).
@@ -330,7 +331,7 @@ export function DashboardPage() {
     if (liveAccounts && liveAccounts.length > 0) {
       // Convert to base currency and sort by |balance| desc.
       return liveAccounts
-        .filter((a) => (showOffBalance ? true : a.inBalance))
+        .filter((a) => (includeOffBalance ? true : a.inBalance))
         .filter((a) => (hideArchived ? !a.archive : true))
         .filter((a) => (hideZero ? Math.abs(a.balance) > 0.005 : true))
         .map((a) => ({
@@ -358,9 +359,8 @@ export function DashboardPage() {
         archive: false,
         offBalance: false,
       }));
-  }, [liveAccounts, transactions, base, baseRates, hideZero, hideArchived, showOffBalance]);
+  }, [liveAccounts, transactions, base, baseRates, hideZero, hideArchived, includeOffBalance]);
   const hasArchived = !!liveAccounts?.some((a) => a.archive && a.inBalance);
-  const hasOffBalance = !!liveAccounts?.some((a) => !a.inBalance && !a.archive);
 
   // Top-10 categories of the CURRENT month (replaces all-time top-7).
   const currentYM = useMemo(
@@ -784,19 +784,6 @@ export function DashboardPage() {
                 title={hideArchived ? "Архивные сейчас скрыты — клик чтобы показать" : "Архивные сейчас показаны — клик чтобы скрыть"}
               >
                 {hideArchived ? "Без архивных" : "С архивными"}
-              </button>
-            )}
-            {hasOffBalance && (
-              <button
-                onClick={() => setShowOffBalance((v) => !v)}
-                className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${
-                  showOffBalance
-                    ? "bg-accent/10 border-accent/40 text-accent"
-                    : "bg-panel2 border-border text-muted hover:text-text"
-                }`}
-                title={showOffBalance ? "Счета вне баланса показаны — клик чтобы скрыть" : "Счета вне баланса (накопительные и т.п.) скрыты — клик чтобы показать"}
-              >
-                {showOffBalance ? "С вне баланса" : "Без вне баланса"}
               </button>
             )}
             <span className="text-[11px] text-muted ml-auto tabular-nums">

@@ -24,6 +24,8 @@ export interface BackupPayload {
   calibration: unknown;
   /** FIRE dashboard: account titles excluded from the capital total. */
   fireExcludedAccounts: unknown;
+  /** Global "include off-balance accounts" setting. */
+  includeOffBalance: unknown;
   savedViews: unknown;
   annotations: unknown;
   categoryFlags: unknown;
@@ -44,6 +46,7 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     goals: await db.loadJSON("goals"),
     calibration: await db.loadJSON("calibration"),
     fireExcludedAccounts: await db.loadJSON("fireExcludedAccounts"),
+    includeOffBalance: await db.loadJSON("includeOffBalance"),
     savedViews: await db.loadJSON("savedViews"),
     annotations: await db.loadJSON("annotations"),
     categoryFlags: await db.loadJSON("categoryFlags"),

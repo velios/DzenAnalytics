@@ -30,6 +30,7 @@ import { useCalibrationStore } from "../store/useCalibrationStore";
 import { confirm } from "../store/useConfirmStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { getLiveAccountsFromCache } from "../store/useZenmoneyStore";
+import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import type { LiveAccount } from "../store/useZenmoneyStore";
 import {
   balancesByAccount,
@@ -78,10 +79,9 @@ export function AccountsPage() {
   const [view, setView] = useState<View>("stacked");
   const [scope, setScope] = useState<Scope>("all");
   const [accountsView, setAccountsView] = useState<AccountsView>("cards");
-  // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage the user
-  // hides from their day-to-day balance) are excluded from the list by default.
-  // This toggle surfaces them so their (often sizeable) balances are visible.
-  const [showOffBalance, setShowOffBalance] = useState(false);
+  // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage) are
+  // shown only when the global setting (Настройки → Обработка) is on.
+  const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
 
   // Real per-account balances (API mode only). CSV mode → null, we fall back
   // to the flow-derived delta and label it honestly.
@@ -158,8 +158,8 @@ export function AccountsPage() {
     for (const a of accounts) titles.add(a.account);
     for (const a of liveList) {
       if (a.archive) continue; // archived = closed, never in the list
-      // Off-balance accounts only when the user opted in via the toggle.
-      if (!a.inBalance && !showOffBalance) continue;
+      // Off-balance accounts only when the global setting opts them in.
+      if (!a.inBalance && !includeOffBalance) continue;
       // Skip dormant zero-balance accounts with no activity — they'd be noise.
       if (Math.abs(a.balance) <= 0.005 && !txByTitle.has(a.title)) continue;
       titles.add(a.title);
@@ -187,13 +187,7 @@ export function AccountsPage() {
     // Sort by real balance when we have it, otherwise by the flow delta.
     rows.sort((x, y) => (y.balanceBase ?? y.delta) - (x.balanceBase ?? x.delta));
     return rows;
-  }, [accounts, liveAccounts, base, rates, showOffBalance]);
-
-  // Are there any off-balance accounts in the cache worth offering a toggle for?
-  const hasOffBalance = useMemo(
-    () => (liveAccounts ?? []).some((a) => !a.inBalance && !a.archive),
-    [liveAccounts]
-  );
+  }, [accounts, liveAccounts, base, rates, includeOffBalance]);
 
   // True when at least one account carries a real (API) balance — drives the
   // headline ("Баланс" vs "Изменение") and the table's column labels.
@@ -621,17 +615,6 @@ export function AccountsPage() {
             <Wallet className="w-4 h-4" />
             Счета ({accountRows.length})
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-          {hasOffBalance && (
-            <button
-              onClick={() => setShowOffBalance((v) => !v)}
-              aria-pressed={showOffBalance}
-              className={`btn-ghost text-xs ${showOffBalance ? "border-accent2 text-accent2" : ""}`}
-              title="Показать счета, помеченные в Дзен-мани как «вне баланса» (накопительные и т.п.)"
-            >
-              {showOffBalance ? "Скрыть вне баланса" : "Показать вне баланса"}
-            </button>
-          )}
           <div
             role="group"
             aria-label="Вид списка счетов"
@@ -657,7 +640,6 @@ export function AccountsPage() {
               <TableIcon className="w-3 h-3" />
               Таблица
             </button>
-          </div>
           </div>
         </div>
         <div className="text-xs text-muted mb-3">

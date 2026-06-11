@@ -23,6 +23,7 @@ import {
   Unlink,
   Clock,
   CalendarRange,
+  Wallet,
   Settings,
   History,
   CloudDownload,
@@ -42,7 +43,8 @@ import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
-import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { useZenmoneyStore, recalcBalanceCalibration } from "../store/useZenmoneyStore";
+import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { confirm } from "../store/useConfirmStore";
@@ -155,6 +157,8 @@ export function ImportPage() {
   const inflationLoaded = useInflationStore((s) => s.loaded);
   const fractionDigits = useDisplayStore((s) => s.fractionDigits);
   const setFractionDigits = useDisplayStore((s) => s.setFractionDigits);
+  const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
+  const setIncludeOffBalance = useOffBalanceStore((s) => s.setIncludeOffBalance);
   const setInflEnabled = useInflationStore((s) => s.setEnabled);
   const setInflBaseYear = useInflationStore((s) => s.setBaseYear);
   const setInflRate = useInflationStore((s) => s.setRate);
@@ -482,6 +486,7 @@ export function ImportPage() {
         goals: await db.loadJSON("goals"),
         calibration: await db.loadJSON("calibration"),
         fireExcludedAccounts: await db.loadJSON("fireExcludedAccounts"),
+        includeOffBalance: await db.loadJSON("includeOffBalance"),
         savedViews: await db.loadJSON("savedViews"),
         annotations: await db.loadJSON("annotations"),
         categoryFlags: await db.loadJSON("categoryFlags"),
@@ -524,7 +529,7 @@ export function ImportPage() {
       if (dump.transactions) await db.saveTransactions(dump.transactions as never);
       if (dump.rates) await db.saveRates(dump.rates as never);
       if (dump.importMeta) await db.saveImportMeta(dump.importMeta as never);
-      const keys = ["budgets", "budgetsV2", "goals", "calibration", "fireExcludedAccounts", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping", "payeeAliases", "reportPeriod"];
+      const keys = ["budgets", "budgetsV2", "goals", "calibration", "fireExcludedAccounts", "includeOffBalance", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping", "payeeAliases", "reportPeriod"];
       for (const k of keys) {
         if (dump[k] !== undefined) await db.saveJSON(k, dump[k]);
       }
@@ -539,6 +544,7 @@ export function ImportPage() {
         hydrateInflation(),
         aliasesHydrate(),
         reportPeriodHydrate(),
+        useOffBalanceStore.getState().hydrate(),
       ]);
       const restoredCount = Array.isArray(dump.transactions)
         ? dump.transactions.length
@@ -1368,6 +1374,46 @@ export function ImportPage() {
           каждом месяце). Год к году и сезонность остаются по календарю — там
           месяц имеет смысл только как календарный.
         </p>
+      </div>
+
+      {/* Счета вне баланса — глобальный переключатель. Влияет на списки счетов
+          (Дашборд, Счета) и на «Совокупный баланс» / net-worth. */}
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <Wallet className="w-5 h-5 text-accent2" />
+          <span className="font-medium">Счета вне баланса</span>
+        </div>
+        <p className="text-xs text-muted mb-3">
+          В Дзен-мани счёт можно пометить как «вне баланса» (накопительные,
+          брокерские — деньги, которые вы не держите в повседневном балансе). По
+          умолчанию такие счета скрыты в списках и не входят в «Совокупный
+          баланс». Включите, чтобы учитывать их везде.
+        </p>
+        <label className="flex items-center gap-3 p-3 bg-panel2 rounded-lg border border-border cursor-pointer">
+          <input
+            type="checkbox"
+            checked={includeOffBalance}
+            onChange={async (e) => {
+              await setIncludeOffBalance(e.target.checked);
+              // Re-anchor the net-worth calibration so «Совокупный баланс»
+              // updates immediately (API mode only; no-op for CSV).
+              await recalcBalanceCalibration();
+            }}
+            className="accent-accent w-4 h-4"
+          />
+          <div className="flex-1">
+            <div className="font-medium text-sm">
+              {includeOffBalance
+                ? "Счета вне баланса учитываются"
+                : "Счета вне баланса скрыты"}
+            </div>
+            <div className="text-xs text-muted">
+              Влияет на списки счетов (Дашборд, «Счета») и на «Совокупный
+              баланс» / график net-worth. Цель FIRE настраивается отдельно
+              своим выбором счетов.
+            </div>
+          </div>
+        </label>
       </div>
 
       {/* Группировка получателей — единый блок: авто-нормализация +
