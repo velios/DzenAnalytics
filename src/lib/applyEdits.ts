@@ -28,6 +28,16 @@ export function applyEdits(
       merged.subcategory = sub;
       merged.categoryFull = full;
     }
+    // A flip TO transfer drops the old category — a transfer between the user's
+    // own accounts has no real spending/income category. Label it "Перевод"
+    // (synthetic, matches the forward mapper). Only triggered when the edit
+    // itself changed the kind to transfer, so mapper-native "Долг" rows (debt
+    // transfers, no kind patch) keep their "Долг" label.
+    if (patch.kind === "transfer") {
+      merged.category = "Перевод";
+      merged.subcategory = null;
+      merged.categoryFull = "Перевод";
+    }
     // Recompute base amount only if amount or currency changed.
     if (patch.amount !== undefined || patch.currency !== undefined) {
       merged.amountBase = toBase(merged.amount, merged.currency, rates);
