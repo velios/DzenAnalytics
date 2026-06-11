@@ -48,6 +48,7 @@ import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { confirm } from "../store/useConfirmStore";
+import { pluralRu } from "../lib/plural";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
@@ -2248,16 +2249,19 @@ export function ImportPage() {
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-warn" />
                     <div className="flex-1">
                       <div>
-                        <strong>{orphanEditIds.length}</strong> правок зависли — у их
-                        операций нет соответствия в данных (обычно остаются после
-                        перехода с CSV на API, когда меняются id). Они не применяются
-                        и не уходят в облако, ре-синк их не убирает.
+                        <strong>{orphanEditIds.length}</strong>{" "}
+                        {pluralRu(orphanEditIds.length, ["правка", "правки", "правок"])}{" "}
+                        {pluralRu(orphanEditIds.length, ["зависла", "зависли", "зависли"])}{" "}
+                        — подходящей операции в данных нет. Обычно остаётся после
+                        перехода с CSV на API (меняются id): такие правки не
+                        применяются и не уходят в облако, а ре-синк их не убирает.
                       </div>
                       <button
                         onClick={async () => {
+                          const n = orphanEditIds.length;
                           const ok = await confirm({
                             title: "Убрать зависшие правки?",
-                            message: `${orphanEditIds.length} правок без подходящей операции будут удалены из локального оверлея. На облако не влияет.`,
+                            message: `${n} ${pluralRu(n, ["правка", "правки", "правок"])} без подходящей операции ${pluralRu(n, ["будет удалена", "будут удалены", "будут удалены"])} из локального оверлея. На облако не влияет.`,
                             confirmLabel: "Убрать",
                             tone: "danger",
                           });
@@ -2268,7 +2272,9 @@ export function ImportPage() {
                         className="btn-ghost text-xs mt-2 !py-1 text-warn hover:text-expense"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                        Убрать {orphanEditIds.length} зависших
+                        Убрать {orphanEditIds.length}{" "}
+                        {pluralRu(orphanEditIds.length, ["зависшую", "зависшие", "зависших"])}{" "}
+                        {pluralRu(orphanEditIds.length, ["правку", "правки", "правок"])}
                       </button>
                     </div>
                   </div>
