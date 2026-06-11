@@ -233,7 +233,7 @@ export function GoalsPage() {
                     <span className={`flex-1 truncate ${on ? "" : "text-muted line-through"}`}>
                       {a.title}
                       {!a.inBalance && (
-                        <span className="ml-1.5 text-[10px] pill align-middle">накопит.</span>
+                        <span className="ml-1.5 text-[10px] pill align-middle">вне баланса</span>
                       )}
                     </span>
                     <span className="tabular-nums text-muted shrink-0">
@@ -244,7 +244,8 @@ export function GoalsPage() {
               })}
               <p className="text-[11px] text-muted pt-1">
                 По умолчанию учитываются все активные счета, включая помеченные в Zen-мани как
-                накопительные / вне баланса. Снимите галочку, чтобы исключить счёт из капитала FIRE.
+                «вне баланса» (накопительные, брокерские и т.п.). Снимите галочку, чтобы
+                исключить счёт из капитала FIRE.
               </p>
             </div>
           )}
