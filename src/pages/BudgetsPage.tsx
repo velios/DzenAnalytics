@@ -243,33 +243,31 @@ export function BudgetsPage() {
         </button>
       </div>
 
-      {/* Summary: расходы / доходы / дельта — каждый план и факт */}
+      {/* Summary: расходы / доходы / дельта — у каждого явные «Факт» и «План» */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="card card-pad">
-          <div className="label mb-1">Общий план расходов</div>
-          <div className="stat-num text-expense">{formatMoney(expFact, base)}</div>
-          <div className="text-xs text-muted mt-1">
-            факт · план {formatMoney(expPlan, base)}
-            {expPlan > 0 ? ` · ${((expFact / expPlan) * 100).toFixed(0)}%` : ""}
-          </div>
-        </div>
-        <div className="card card-pad">
-          <div className="label mb-1">Общий план доходов</div>
-          <div className="stat-num text-income">{formatMoney(incFact, base)}</div>
-          <div className="text-xs text-muted mt-1">
-            факт · план {formatMoney(incPlan, base)}
-            {incPlan > 0 ? ` · ${((incFact / incPlan) * 100).toFixed(0)}%` : ""}
-          </div>
-        </div>
-        <div className="card card-pad">
-          <div className="label mb-1">Дельта (доходы − расходы)</div>
-          <div className={`stat-num ${factDelta >= 0 ? "text-income" : "text-expense"}`}>
-            {formatMoney(factDelta, base, { signed: true })}
-          </div>
-          <div className="text-xs text-muted mt-1">
-            факт · план {formatMoney(planDelta, base, { signed: true })}
-          </div>
-        </div>
+        <PlanFactCard
+          title="Общий план расходов"
+          fact={expFact}
+          plan={expPlan}
+          factClass="text-expense"
+          base={base}
+        />
+        <PlanFactCard
+          title="Общий план доходов"
+          fact={incFact}
+          plan={incPlan}
+          factClass="text-income"
+          base={base}
+        />
+        <PlanFactCard
+          title="Дельта (доходы − расходы)"
+          fact={factDelta}
+          plan={planDelta}
+          factClass={factDelta >= 0 ? "text-income" : "text-expense"}
+          signed
+          showPct={false}
+          base={base}
+        />
       </div>
 
       {/* Add form */}
@@ -399,6 +397,49 @@ export function BudgetsPage() {
             />
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Summary card showing «Факт» (prominent, coloured) and «План» side by side. */
+function PlanFactCard({
+  title,
+  fact,
+  plan,
+  factClass,
+  base,
+  signed = false,
+  showPct = true,
+}: {
+  title: string;
+  fact: number;
+  plan: number;
+  factClass: string;
+  base: string;
+  signed?: boolean;
+  showPct?: boolean;
+}) {
+  const pct = plan > 0 ? Math.round((fact / plan) * 100) : null;
+  return (
+    <div className="card card-pad">
+      <div className="label mb-2">{title}</div>
+      <div className="flex items-end justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-wide text-muted mb-0.5">Факт</div>
+          <div className={`stat-num ${factClass}`}>
+            {formatMoney(fact, base, { signed })}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-[11px] uppercase tracking-wide text-muted mb-0.5">План</div>
+          <div className="text-xl font-semibold tabular-nums">
+            {formatMoney(plan, base, { signed })}
+          </div>
+        </div>
+      </div>
+      {showPct && pct !== null && (
+        <div className="text-xs text-muted mt-1.5">{pct}% от плана</div>
       )}
     </div>
   );
