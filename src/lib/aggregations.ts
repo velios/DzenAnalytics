@@ -1222,6 +1222,18 @@ export interface RecurringCandidate {
   consistency: number;
   lastDate: string;
   nextExpected: string;
+  /** Whole days between `lastDate` and "now". Drives the staleness test. */
+  daysSinceLast: number;
+  /**
+   * True when the payment has gone silent for more than ~2 cadence cycles
+   * (plus a grace) — a monthly plan unpaid for 2.5+ months, a weekly one for
+   * a month, etc. Such a payment is almost certainly cancelled, so the UI
+   * hides it from "active" recurring payments by default and never projects
+   * its "next expected" into the future. Cadence-aware, unlike a flat
+   * "older than a year" cutoff, so recently-dropped subscriptions are caught
+   * long before a year passes.
+   */
+  stale: boolean;
   totalSpent: number;
   txIds: string[];
   /**
@@ -1296,13 +1308,19 @@ export function detectRecurring(
     const last = list[list.length - 1];
     const intervalMs = Math.round(meanInterval) * 86400000;
     const lastMs = +new Date(last.date);
+    const daysSinceLast = Math.floor((now - lastMs) / 86400000);
+    // "Stale" = silent for more than ~2 cadence cycles (+ 2-week grace for
+    // late charges). Cadence-aware: ~75 days for a monthly plan, ~4 weeks for
+    // a weekly one, ~half a year for a quarterly one. Far sharper than a flat
+    // "older than a year" rule, which let a monthly sub linger for months
+    // after it was clearly cancelled.
+    const stale = daysSinceLast > Math.round(meanInterval) * 2 + 14;
     let nextMs = lastMs + intervalMs;
     // "Next expected" should never sit in the past for a payment that's still
     // alive — project it forward by whole cycles to the first date ≥ today.
-    // Long-dead ones (last seen over a year ago) keep their past projection,
-    // so they don't masquerade as upcoming in the list or the "expected" feed.
-    const ALIVE_MS = 365 * 86400000;
-    if (nextMs < now && intervalMs > 0 && now - lastMs < ALIVE_MS) {
+    // Stale (dead) ones keep their past projection, so they don't masquerade
+    // as upcoming in the list or the "expected" feed.
+    if (!stale && nextMs < now && intervalMs > 0) {
       nextMs += Math.ceil((now - nextMs) / intervalMs) * intervalMs;
     }
     const nextDate = new Date(nextMs);
@@ -1351,6 +1369,8 @@ export function detectRecurring(
       consistency,
       lastDate: last.date,
       nextExpected: nextDate.toISOString().slice(0, 10),
+      daysSinceLast,
+      stale,
       totalSpent,
       txIds: list.map((t) => t.id),
       cadence,

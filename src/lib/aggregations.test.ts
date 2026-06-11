@@ -28,6 +28,23 @@ describe("detectRecurring — nextExpected projection", () => {
     const [c] = detectRecurring(txs, 3, NOW);
     expect(c.lastDate).toBe("2020-03-10");
     expect(c.nextExpected.startsWith("2020")).toBe(true);
+    expect(c.stale).toBe(true);
+  });
+
+  it("marks a monthly plan silent for a few months as stale (not just >1 year)", () => {
+    // Last paid 2026-01-10 → ~5 months before NOW (2026-06-15). Cadence-aware
+    // staleness flags it well under a year, and the projection stays in the past.
+    const txs = monthly("Заброшенный", ["2025-11-10", "2025-12-10", "2026-01-10"]);
+    const [c] = detectRecurring(txs, 3, NOW);
+    expect(c.lastDate).toBe("2026-01-10");
+    expect(c.stale).toBe(true);
+    expect(c.nextExpected < "2026-06-15").toBe(true);
+  });
+
+  it("keeps a recently-charged monthly plan active (not stale)", () => {
+    const txs = monthly("Живой", ["2026-03-10", "2026-04-10", "2026-05-10"]);
+    const [c] = detectRecurring(txs, 3, NOW);
+    expect(c.stale).toBe(false);
   });
 });
 

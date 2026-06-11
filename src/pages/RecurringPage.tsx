@@ -26,28 +26,26 @@ export function RecurringPage() {
   const allCandidates = useMemo(() => detectRecurring(transactions), [transactions]);
   const [cadenceFilter, setCadenceFilter] = useState<CadenceFilter>("all");
   const [onlyPriceUp, setOnlyPriceUp] = useState(false);
-  // "Активные" = последний платёж не старше года. ON by default: a payment
-  // last seen in, say, 2020 isn't really "recurring" anymore, so we hide
-  // those unless the user explicitly asks to see the full history.
+  // "Активные" = платёж не «протух» (пропущено не больше ~2 циклов с учётом
+  // периодичности). ON by default: a subscription cancelled a few months ago
+  // isn't really "recurring" anymore, so we hide those unless the user
+  // explicitly asks to see the full history. The staleness test is
+  // cadence-aware (see `detectRecurring`), so a monthly plan unpaid for a
+  // couple of months is hidden long before the old flat "older than a year".
   const [onlyActive, setOnlyActive] = useState(true);
-  const activeCutoff = useMemo(() => {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() - 1);
-    return d.toISOString().slice(0, 10);
-  }, []);
 
   const candidates = useMemo(() => {
     return allCandidates.filter((c) => {
       if (cadenceFilter !== "all" && c.cadence !== cadenceFilter) return false;
       if (onlyPriceUp && c.priceTrend.priceFlag !== "up") return false;
-      if (onlyActive && c.lastDate < activeCutoff) return false;
+      if (onlyActive && c.stale) return false;
       return true;
     });
-  }, [allCandidates, cadenceFilter, onlyPriceUp, onlyActive, activeCutoff]);
+  }, [allCandidates, cadenceFilter, onlyPriceUp, onlyActive]);
 
   const activeCount = useMemo(
-    () => allCandidates.filter((c) => c.lastDate >= activeCutoff).length,
-    [allCandidates, activeCutoff]
+    () => allCandidates.filter((c) => !c.stale).length,
+    [allCandidates]
   );
 
   const priceUpCount = allCandidates.filter(
@@ -162,7 +160,7 @@ export function RecurringPage() {
           <button
             type="button"
             onClick={() => setOnlyActive((v) => !v)}
-            title="Скрыть давно не повторявшиеся (последний платёж больше года назад)"
+            title="Скрыть протухшие — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
             className={`px-3 py-1 rounded-full border transition-colors ${
               onlyActive
                 ? "bg-accent/10 border-accent/40 text-accent"
@@ -345,8 +343,16 @@ export function RecurringPage() {
                   label: "Последний",
                   sortValue: (c) => c.lastDate,
                   render: (c) => (
-                    <span className="text-muted whitespace-nowrap">
-                      {formatDate(c.lastDate, "short")}
+                    <span className="whitespace-nowrap inline-flex items-center gap-1.5">
+                      <span className="text-muted">{formatDate(c.lastDate, "short")}</span>
+                      {c.stale && (
+                        <span
+                          className="text-[10px] pill text-muted"
+                          title={`Протух: нет платежа ${c.daysSinceLast} дн. при периоде ~${c.avgIntervalDays} дн.`}
+                        >
+                          протух
+                        </span>
+                      )}
                     </span>
                   ),
                 },
