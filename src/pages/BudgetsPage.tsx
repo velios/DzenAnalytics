@@ -151,19 +151,20 @@ export function BudgetsPage() {
   const rows = useMemo<Row[]>(
     () =>
       lines
+        // A line belongs to a month only while it's inside its validity window
+        // [startMonth, endMonth]. A budget that starts in June must NOT appear
+        // in May/April, even if that category had spending then. Within the
+        // window every month is shown (quarterly/yearly off-months read as
+        // план 0), so the line stays visible across its whole life.
+        .filter(
+          (line) =>
+            ym >= line.startMonth && (!line.endMonth || ym <= line.endMonth)
+        )
         .map((line) => ({
           line,
           planned: plannedFor(line, ym),
           fact: factFor(line, transactions, ym),
-        }))
-        // Show a line in a month while it's within its validity window, or if
-        // it has any actual activity that month (e.g. spend in an off-period).
-        .filter((r) => {
-          const inWindow =
-            ym >= r.line.startMonth &&
-            (!r.line.endMonth || ym <= r.line.endMonth);
-          return inWindow || r.fact !== 0;
-        }),
+        })),
     [lines, ym, transactions]
   );
   const expenseRows = rows.filter((r) => r.line.kind === "expense");
