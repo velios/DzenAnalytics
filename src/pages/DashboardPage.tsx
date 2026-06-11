@@ -318,6 +318,9 @@ export function DashboardPage() {
   // ergonomic switches matching the toggles the user sees in Zenmoney itself.
   const [hideZero, setHideZero] = useState(true);
   const [hideArchived, setHideArchived] = useState(true);
+  // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage) are
+  // hidden by default, matching Zenmoney's own balance view; this reveals them.
+  const [showOffBalance, setShowOffBalance] = useState(false);
   // PNG-export state. Declared here (with the other hooks) rather than
   // lower down — they must run before the early `return <EmptyState />`
   // so hook order stays stable across renders (rules-of-hooks).
@@ -327,7 +330,7 @@ export function DashboardPage() {
     if (liveAccounts && liveAccounts.length > 0) {
       // Convert to base currency and sort by |balance| desc.
       return liveAccounts
-        .filter((a) => a.inBalance)
+        .filter((a) => (showOffBalance ? true : a.inBalance))
         .filter((a) => (hideArchived ? !a.archive : true))
         .filter((a) => (hideZero ? Math.abs(a.balance) > 0.005 : true))
         .map((a) => ({
@@ -340,6 +343,7 @@ export function DashboardPage() {
           nativeCurrency: a.currency,
           type: a.type,
           archive: a.archive,
+          offBalance: !a.inBalance,
         }))
         .sort((a, b) => Math.abs(b.balanceBase) - Math.abs(a.balanceBase));
     }
@@ -352,9 +356,11 @@ export function DashboardPage() {
         nativeCurrency: base,
         type: "",
         archive: false,
+        offBalance: false,
       }));
-  }, [liveAccounts, transactions, base, baseRates, hideZero, hideArchived]);
+  }, [liveAccounts, transactions, base, baseRates, hideZero, hideArchived, showOffBalance]);
   const hasArchived = !!liveAccounts?.some((a) => a.archive && a.inBalance);
+  const hasOffBalance = !!liveAccounts?.some((a) => !a.inBalance && !a.archive);
 
   // Top-10 categories of the CURRENT month (replaces all-time top-7).
   const currentYM = useMemo(
@@ -780,6 +786,19 @@ export function DashboardPage() {
                 {hideArchived ? "Без архивных" : "С архивными"}
               </button>
             )}
+            {hasOffBalance && (
+              <button
+                onClick={() => setShowOffBalance((v) => !v)}
+                className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${
+                  showOffBalance
+                    ? "bg-accent/10 border-accent/40 text-accent"
+                    : "bg-panel2 border-border text-muted hover:text-text"
+                }`}
+                title={showOffBalance ? "Счета вне баланса показаны — клик чтобы скрыть" : "Счета вне баланса (накопительные и т.п.) скрыты — клик чтобы показать"}
+              >
+                {showOffBalance ? "С вне баланса" : "Без вне баланса"}
+              </button>
+            )}
             <span className="text-[11px] text-muted ml-auto tabular-nums">
               {accountRows.length} счетов
             </span>
@@ -822,6 +841,9 @@ export function DashboardPage() {
                           </td>
                           <td className="py-2 pr-2 text-xs text-muted whitespace-nowrap">
                             {accountTypeLabel(a.type)}
+                            {a.offBalance && (
+                              <span className="ml-1 text-accent2">· вне баланса</span>
+                            )}
                           </td>
                           <td className="py-2 text-right whitespace-nowrap">
                             <div
