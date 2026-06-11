@@ -1,10 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { Target, Plus, Trash2, Flame, Calendar, TrendingUp } from "lucide-react";
+import {
+  Target,
+  Plus,
+  Trash2,
+  Flame,
+  Calendar,
+  TrendingUp,
+  Wallet,
+  ChevronDown,
+  Check,
+} from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useGoalsStore } from "../store/useGoalsStore";
+import { useFireStore } from "../store/useFireStore";
 import { confirm } from "../store/useConfirmStore";
 import { groupByMonth } from "../lib/aggregations";
+import { toBase } from "../lib/csv";
 import { formatMoney, formatDate } from "../lib/format";
+import {
+  getLiveAccountsFromCache,
+  type LiveAccount,
+} from "../store/useZenmoneyStore";
 import { EmptyState } from "../components/EmptyState";
 import { DateField } from "../components/DateField";
 
@@ -16,7 +32,8 @@ function monthsBetween(fromIso: string, toIso: string): number {
 
 export function GoalsPage() {
   const transactions = useDataStore((s) => s.transactions);
-  const base = useDataStore((s) => s.rates.base);
+  const rates = useDataStore((s) => s.rates);
+  const base = rates.base;
   const goals = useGoalsStore((s) => s.goals);
   const addGoal = useGoalsStore((s) => s.add);
   const updateGoal = useGoalsStore((s) => s.update);
@@ -24,9 +41,31 @@ export function GoalsPage() {
   const hydrate = useGoalsStore((s) => s.hydrate);
   const loaded = useGoalsStore((s) => s.loaded);
 
+  // FIRE capital = the account balances the user counts toward financial
+  // independence. The selection (which accounts) lives in useFireStore.
+  const excluded = useFireStore((s) => s.excluded);
+  const toggleExcluded = useFireStore((s) => s.toggle);
+  const fireHydrate = useFireStore((s) => s.hydrate);
+  const fireLoaded = useFireStore((s) => s.loaded);
+  const [accounts, setAccounts] = useState<LiveAccount[] | null>(null);
+  const [showAccounts, setShowAccounts] = useState(false);
+
   useEffect(() => {
     if (!loaded) hydrate();
-  }, [loaded, hydrate]);
+    if (!fireLoaded) fireHydrate();
+  }, [loaded, hydrate, fireLoaded, fireHydrate]);
+
+  // Pull the live per-account snapshot once (and whenever the data set
+  // changes — a fresh sync replaces balances). Null in CSV-only mode.
+  useEffect(() => {
+    let alive = true;
+    getLiveAccountsFromCache().then((a) => {
+      if (alive) setAccounts(a);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [transactions]);
 
   const months = useMemo(() => groupByMonth(transactions), [transactions]);
   const recent = months.slice(-6);
@@ -40,7 +79,40 @@ export function GoalsPage() {
   const savingsRate = avgIncome > 0 ? avgSavings / avgIncome : 0;
   const annualExpense = avgExpense * 12;
   const fireTarget = annualExpense * 25;
-  const yearsToFire = avgSavings > 0 ? (fireTarget - 0) / (avgSavings * 12) : Infinity;
+
+  // Accounts eligible for the capital selector: non-archived only (archived =
+  // closed). Each carries its balance converted into the base currency.
+  const capitalAccounts = useMemo(() => {
+    if (!accounts) return [];
+    return accounts
+      .filter((a) => !a.archive)
+      .map((a) => ({
+        ...a,
+        balanceBase: toBase(a.balance, a.currency, rates),
+      }))
+      .sort((a, b) => b.balanceBase - a.balanceBase);
+  }, [accounts, rates]);
+
+  // Current capital = Σ balances of the selected (non-excluded) accounts.
+  const capital = useMemo(
+    () =>
+      capitalAccounts
+        .filter((a) => !excluded.includes(a.title))
+        .reduce((s, a) => s + a.balanceBase, 0),
+    [capitalAccounts, excluded]
+  );
+
+  // How far the accumulated capital already covers the FIRE target.
+  const capitalProgress = fireTarget > 0 ? capital / fireTarget : 0;
+  const fireAchieved = fireTarget > 0 && capital >= fireTarget;
+  const remainingToFire = Math.max(fireTarget - capital, 0);
+  // Years to FIRE now starts from real capital, not zero. Already there → 0;
+  // otherwise need positive savings to ever close the remaining gap.
+  const yearsToFire = fireAchieved
+    ? 0
+    : avgSavings > 0
+      ? remainingToFire / (avgSavings * 12)
+      : Infinity;
 
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -93,16 +165,102 @@ export function GoalsPage() {
         <p className="text-xs text-muted mb-4">
           «Magic number» = годовой расход × 25 (правило 4%). Когда накопления достигнут этого уровня,
           доход с инвестиций (~4% годовых) покроет ваши расходы, и работать ради денег уже не обязательно.
-          Считается на основе средних за последние 6 мес.
+          Темп считается по средним за последние 6 мес, а до цели остаётся разница между целевым
+          капиталом и тем, что уже накоплено на счетах.
         </p>
+
+        {/* Накопленный капитал → целевой. Прогресс-бар + переключатель того,
+            какие счета входят в капитал (включая накопительные вне баланса). */}
+        <div className="card card-pad bg-panel2 mb-4">
+          <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-accent" />
+              <span className="font-medium text-sm">Текущий капитал</span>
+            </div>
+            <div className="text-sm tabular-nums">
+              <span className={fireAchieved ? "text-income font-semibold" : "font-semibold"}>
+                {formatMoney(capital, base)}
+              </span>
+              <span className="text-muted">
+                {" "}из {formatMoney(fireTarget, base)} ·{" "}
+                {(capitalProgress * 100).toFixed(capitalProgress >= 1 ? 0 : 1)}%
+              </span>
+            </div>
+          </div>
+          <div className="h-2.5 bg-bg rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full ${fireAchieved ? "bg-income" : "bg-accent"}`}
+              style={{ width: `${Math.min(capitalProgress, 1) * 100}%` }}
+            />
+          </div>
+          {capitalAccounts.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowAccounts((v) => !v)}
+              className="mt-2 text-xs text-muted hover:text-text flex items-center gap-1"
+            >
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform ${showAccounts ? "rotate-180" : ""}`}
+              />
+              Счета в капитале:{" "}
+              {capitalAccounts.filter((a) => !excluded.includes(a.title)).length}
+              {" / "}
+              {capitalAccounts.length}
+            </button>
+          ) : (
+            <div className="mt-2 text-xs text-muted">
+              Подключите Zen-мани, чтобы капитал считался автоматически по балансам счетов.
+            </div>
+          )}
+          {showAccounts && capitalAccounts.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-border space-y-1">
+              {capitalAccounts.map((a) => {
+                const on = !excluded.includes(a.title);
+                return (
+                  <button
+                    key={a.title}
+                    type="button"
+                    onClick={() => toggleExcluded(a.title)}
+                    className="w-full flex items-center gap-2 py-1 text-left text-sm hover:bg-bg/50 rounded px-1"
+                  >
+                    <span
+                      className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                        on ? "bg-accent border-accent" : "border-border"
+                      }`}
+                    >
+                      {on && <Check className="w-3 h-3 text-white" />}
+                    </span>
+                    <span className={`flex-1 truncate ${on ? "" : "text-muted line-through"}`}>
+                      {a.title}
+                      {!a.inBalance && (
+                        <span className="ml-1.5 text-[10px] pill align-middle">накопит.</span>
+                      )}
+                    </span>
+                    <span className="tabular-nums text-muted shrink-0">
+                      {formatMoney(a.balanceBase, base)}
+                    </span>
+                  </button>
+                );
+              })}
+              <p className="text-[11px] text-muted pt-1">
+                По умолчанию учитываются все активные счета, включая помеченные в Zen-мани как
+                накопительные / вне баланса. Снимите галочку, чтобы исключить счёт из капитала FIRE.
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="card card-pad bg-panel2">
+          <div
+            className="card card-pad bg-panel2"
+            title="Норма сбережений = (доходы − расходы) / доходы за последние 6 мес. Переводы между своими счетами не считаются ни доходом, ни расходом, поэтому пополнение накопительных счетов уже учтено как сохранённые деньги."
+          >
             <div className="label mb-1">Норма сбережений</div>
             <div className={`stat-num ${savingsRate > 0 ? "text-income" : "text-expense"}`}>
               {(savingsRate * 100).toFixed(0)}%
             </div>
             <div className="text-xs text-muted mt-1">
-              {avgSavings > 0
+              {avgSavings >= 0
                 ? `+${formatMoney(avgSavings, base)}/мес`
                 : `−${formatMoney(-avgSavings, base)}/мес`}
             </div>
@@ -121,23 +279,35 @@ export function GoalsPage() {
           </div>
           <div className="card card-pad bg-panel2">
             <div className="label mb-1">Лет до FIRE</div>
-            <div className="stat-num text-warn">
-              {Number.isFinite(yearsToFire) && yearsToFire > 0
-                ? yearsToFire.toFixed(1)
-                : "—"}
+            <div className={`stat-num ${fireAchieved ? "text-income" : "text-warn"}`}>
+              {fireAchieved
+                ? "0"
+                : Number.isFinite(yearsToFire) && yearsToFire > 0
+                  ? yearsToFire.toFixed(1)
+                  : "∞"}
             </div>
-            <div className="text-xs text-muted mt-1">от текущего нуля</div>
+            <div className="text-xs text-muted mt-1">
+              {fireAchieved
+                ? "капитал уже достигнут 🎉"
+                : Number.isFinite(yearsToFire)
+                  ? "с учётом капитала"
+                  : "темп сбережений ≤ 0"}
+            </div>
           </div>
         </div>
 
         <div className="mt-4 pt-4 border-t border-border">
           <div className="text-xs text-muted mb-2">
-            Сценарии при изменении нормы сбережений:
+            Сценарии при изменении нормы сбережений (с учётом уже накопленного капитала):
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[0.1, 0.2, 0.3, 0.5].map((rate) => {
               const monthly = avgIncome * rate;
-              const years = monthly > 0 ? fireTarget / (monthly * 12) : Infinity;
+              const years = fireAchieved
+                ? 0
+                : monthly > 0
+                  ? remainingToFire / (monthly * 12)
+                  : Infinity;
               return (
                 <div
                   key={rate}
