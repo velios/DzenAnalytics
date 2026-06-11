@@ -222,6 +222,10 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   const [inAmount, setInAmount] = useState(
     tx.incomeAmount ? String(tx.incomeAmount) : ""
   );
+  // Did the user hand-edit the received amount? While false we keep it in sync
+  // with the FX rate; once they type, we stop overwriting (they exchanged at
+  // their own rate). The «↻ по курсу» link flips it back to auto.
+  const [manualIn, setManualIn] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Cross-currency transfer: both accounts known and in different currencies.
@@ -232,6 +236,36 @@ export function EditTransactionModal({ tx, onClose }: Props) {
     !!accountCurrency.get(outAcc.trim()) &&
     !!inAccCurrency &&
     accountCurrency.get(outAcc.trim()) !== inAccCurrency;
+
+  // Auto-convert the received amount using the rates that came with the last
+  // sync (rates.rates[cur] = units of `cur` per 1 base). sent·r_src/r_dst.
+  const sentNum = Number(amount.replace(",", "."));
+  const rSrc = rates.rates[currency.trim()];
+  const rDst = inAccCurrency ? rates.rates[inAccCurrency] : undefined;
+  const suggestedIn =
+    isCrossCurrencyTransfer && Number.isFinite(sentNum) && rSrc && rDst
+      ? Math.round((sentNum * rSrc) / rDst * 100) / 100
+      : null;
+  // What the «Получено» field shows / saves: the user's manual value, else the
+  // live FX suggestion.
+  const inAmountValue =
+    manualIn || suggestedIn === null ? inAmount : String(suggestedIn);
+
+  // Preserve an existing cross-currency received amount on open: mark it manual
+  // once account currencies have loaded, so re-saving (e.g. just a comment)
+  // never silently overwrites the user's real exchanged sum. Runs once.
+  const inInitRef = useRef(false);
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (inInitRef.current || accountCurrency.size === 0) return;
+    inInitRef.current = true;
+    const oc = accountCurrency.get((tx.outcomeAccount || tx.account).trim());
+    const ic = accountCurrency.get((tx.incomeAccount || "").trim());
+    if (tx.kind === "transfer" && tx.incomeAmount > 0 && oc && ic && oc !== ic) {
+      setManualIn(true);
+    }
+  }, [accountCurrency, tx]);
+  /* eslint-enable react-hooks/set-state-in-effect */
   // Non-transfer moved onto an account whose native currency differs from the
   // operation currency → it becomes an FX row on push. Hint the user that the
   // amount should be in the new account's currency.
@@ -327,7 +361,7 @@ export function EditTransactionModal({ tx, onClose }: Props) {
         // when it actually changed, or the row just became a transfer / its
         // accounts moved — a no-op edit must stay a no-op.
         if (isCrossCurrencyTransfer) {
-          const inNum = Number(inAmount.replace(",", "."));
+          const inNum = Number(inAmountValue.replace(",", "."));
           const safeIn =
             Number.isFinite(inNum) && inNum > 0 ? inNum : tx.incomeAmount;
           if (
@@ -464,43 +498,47 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               className="input text-sm w-full"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            {/* Category / Subcategory — picker-only. Free-form text
-                is blocked (`allowCustom={false}`) so we can never end
-                up with a value that doesn't exist in Zenmoney's tag
-                dictionary — that'd just get rejected by the push
-                transformer with a "tag not found" error anyway. */}
-            <Field label="Категория">
-              <Combobox
-                value={category}
-                options={categoryOptions}
-                allowCustom={false}
-                maxHeight={DROPDOWN_MAX}
-                onChange={(next) => {
-                  setCategory(next);
-                  if (
-                    subcategory &&
-                    !subcatByCategory.get(next)?.has(subcategory)
-                  ) {
-                    setSubcategory("");
-                  }
-                }}
-              />
-            </Field>
-            <Field label="Подкатегория">
-              <Combobox
-                value={subcategory}
-                options={Array.from(subcatByCategory.get(category) || []).sort(
-                  (a, b) => a.localeCompare(b, "ru")
-                )}
-                allowCustom={false}
-                clearable
-                onChange={setSubcategory}
-                placeholder="—"
-                maxHeight={DROPDOWN_MAX}
-              />
-            </Field>
-          </div>
+          {/* Category / Subcategory — not shown for transfers: a transfer is
+              just money moving between the user's own accounts, it has no
+              spending/income category. */}
+          {kind !== "transfer" && (
+            <div className="grid grid-cols-2 gap-3">
+              {/* Picker-only. Free-form text is blocked (`allowCustom={false}`)
+                  so we can never end up with a value that doesn't exist in
+                  Zenmoney's tag dictionary — that'd just get rejected by the
+                  push transformer with a "tag not found" error anyway. */}
+              <Field label="Категория">
+                <Combobox
+                  value={category}
+                  options={categoryOptions}
+                  allowCustom={false}
+                  maxHeight={DROPDOWN_MAX}
+                  onChange={(next) => {
+                    setCategory(next);
+                    if (
+                      subcategory &&
+                      !subcatByCategory.get(next)?.has(subcategory)
+                    ) {
+                      setSubcategory("");
+                    }
+                  }}
+                />
+              </Field>
+              <Field label="Подкатегория">
+                <Combobox
+                  value={subcategory}
+                  options={Array.from(subcatByCategory.get(category) || []).sort(
+                    (a, b) => a.localeCompare(b, "ru")
+                  )}
+                  allowCustom={false}
+                  clearable
+                  onChange={setSubcategory}
+                  placeholder="—"
+                  maxHeight={DROPDOWN_MAX}
+                />
+              </Field>
+            </div>
+          )}
           {/* Account(s): one field for income/expense, two for transfer.
               Placed right under category — it's the second-most
               identifying attribute of a transaction after the category. */}
@@ -537,7 +575,7 @@ export function EditTransactionModal({ tx, onClose }: Props) {
             </Field>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Сумма">
+            <Field label={kind === "transfer" ? "Отправлено" : "Сумма"}>
               <input
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
@@ -560,17 +598,37 @@ export function EditTransactionModal({ tx, onClose }: Props) {
             </Field>
           </div>
           {/* Cross-currency transfer: the destination leg holds a different
-              sum in its own currency. We never guess a rate — the user enters
-              the credited amount; its currency is the destination account's. */}
+              sum in its own currency. Pre-filled from the synced FX rate, but
+              the user can override it (they may have exchanged at another rate). */}
           {isCrossCurrencyTransfer && (
-            <Field label={`Сумма зачисления (${inAccCurrency})`}>
+            <Field label={`Получено (${inAccCurrency})`}>
               <input
-                value={inAmount}
-                onChange={(e) => setInAmount(e.target.value)}
+                value={inAmountValue}
+                onChange={(e) => {
+                  setInAmount(e.target.value);
+                  setManualIn(true);
+                }}
                 inputMode="decimal"
                 placeholder={`Сколько пришло на счёт в ${inAccCurrency}`}
                 className="input text-sm w-full font-mono tabular-nums"
               />
+              <div className="text-[10px] text-muted mt-1 flex items-center gap-2 flex-wrap">
+                {manualIn ? (
+                  <span>Сумма указана вручную.</span>
+                ) : (
+                  <span>Пересчитано по курсу синхронизации — можно поправить.</span>
+                )}
+                {manualIn && suggestedIn !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setManualIn(false)}
+                    className="text-accent hover:underline"
+                    title={`По курсу: ≈ ${suggestedIn.toLocaleString("ru-RU")} ${inAccCurrency}`}
+                  >
+                    ↻ пересчитать по курсу
+                  </button>
+                )}
+              </div>
             </Field>
           )}
           {isCrossCurrencyMove && (
