@@ -112,6 +112,9 @@ export interface LiveAccount {
   archive: boolean;
   /** Whether Zenmoney itself includes this account in the user's net worth. */
   inBalance: boolean;
+  /** True when the user marked this account as a savings account in Zenmoney.
+   *  Independent of `inBalance` — a savings account can be in or out of balance. */
+  savings: boolean;
 }
 
 /**
@@ -130,6 +133,7 @@ export async function getLiveAccountsFromCache(): Promise<LiveAccount[] | null> 
     type: a.type,
     archive: a.archive,
     inBalance: a.inBalance,
+    savings: a.savings,
   }));
 }
 

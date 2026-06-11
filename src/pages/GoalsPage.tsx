@@ -232,6 +232,9 @@ export function GoalsPage() {
                     </span>
                     <span className={`flex-1 truncate ${on ? "" : "text-muted line-through"}`}>
                       {a.title}
+                      {a.savings && (
+                        <span className="ml-1.5 text-[10px] pill align-middle">накопит.</span>
+                      )}
                       {!a.inBalance && (
                         <span className="ml-1.5 text-[10px] pill align-middle">вне баланса</span>
                       )}
