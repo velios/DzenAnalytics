@@ -78,6 +78,10 @@ export function AccountsPage() {
   const [view, setView] = useState<View>("stacked");
   const [scope, setScope] = useState<Scope>("all");
   const [accountsView, setAccountsView] = useState<AccountsView>("cards");
+  // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage the user
+  // hides from their day-to-day balance) are excluded from the list by default.
+  // This toggle surfaces them so their (often sizeable) balances are visible.
+  const [showOffBalance, setShowOffBalance] = useState(false);
 
   // Real per-account balances (API mode only). CSV mode → null, we fall back
   // to the flow-derived delta and label it honestly.
@@ -153,7 +157,9 @@ export function AccountsPage() {
     const titles = new Set<string>();
     for (const a of accounts) titles.add(a.account);
     for (const a of liveList) {
-      if (!a.inBalance || a.archive) continue; // not part of net worth / archived
+      if (a.archive) continue; // archived = closed, never in the list
+      // Off-balance accounts only when the user opted in via the toggle.
+      if (!a.inBalance && !showOffBalance) continue;
       // Skip dormant zero-balance accounts with no activity — they'd be noise.
       if (Math.abs(a.balance) <= 0.005 && !txByTitle.has(a.title)) continue;
       titles.add(a.title);
@@ -173,12 +179,21 @@ export function AccountsPage() {
         nativeCurrency: live ? live.currency : null,
         type: live?.type ?? "",
         archive: live?.archive ?? false,
+        // Only treat as off-balance when the cache actually knows the account;
+        // CSV/unknown accounts default to "in balance" (no badge).
+        offBalance: live ? !live.inBalance : false,
       };
     });
     // Sort by real balance when we have it, otherwise by the flow delta.
     rows.sort((x, y) => (y.balanceBase ?? y.delta) - (x.balanceBase ?? x.delta));
     return rows;
-  }, [accounts, liveAccounts, base, rates]);
+  }, [accounts, liveAccounts, base, rates, showOffBalance]);
+
+  // Are there any off-balance accounts in the cache worth offering a toggle for?
+  const hasOffBalance = useMemo(
+    () => (liveAccounts ?? []).some((a) => !a.inBalance && !a.archive),
+    [liveAccounts]
+  );
 
   // True when at least one account carries a real (API) balance — drives the
   // headline ("Баланс" vs "Изменение") and the table's column labels.
@@ -606,6 +621,17 @@ export function AccountsPage() {
             <Wallet className="w-4 h-4" />
             Счета ({accountRows.length})
           </div>
+          <div className="flex items-center gap-2 flex-wrap">
+          {hasOffBalance && (
+            <button
+              onClick={() => setShowOffBalance((v) => !v)}
+              aria-pressed={showOffBalance}
+              className={`btn-ghost text-xs ${showOffBalance ? "border-accent2 text-accent2" : ""}`}
+              title="Показать счета, помеченные в Дзен-мани как «вне баланса» (накопительные и т.п.)"
+            >
+              {showOffBalance ? "Скрыть вне баланса" : "Показать вне баланса"}
+            </button>
+          )}
           <div
             role="group"
             aria-label="Вид списка счетов"
@@ -631,6 +657,7 @@ export function AccountsPage() {
               <TableIcon className="w-3 h-3" />
               Таблица
             </button>
+          </div>
           </div>
         </div>
         <div className="text-xs text-muted mb-3">
@@ -681,6 +708,9 @@ export function AccountsPage() {
                         {hasReal && (
                           <span className="text-[10px] text-muted">
                             {accountTypeLabel(a.type)}
+                            {a.offBalance && (
+                              <span className="ml-1 text-accent2">· вне баланса</span>
+                            )}
                           </span>
                         )}
                       </span>
@@ -799,6 +829,9 @@ export function AccountsPage() {
                             {hasReal && (
                               <div className="text-[10px] text-muted">
                                 {accountTypeLabel(a.type)}
+                                {a.offBalance && (
+                                  <span className="ml-1 text-accent2">· вне баланса</span>
+                                )}
                               </div>
                             )}
                           </div>
