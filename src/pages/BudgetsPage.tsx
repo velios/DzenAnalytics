@@ -181,9 +181,11 @@ export function BudgetsPage() {
 
   const expPlan = expenseRows.reduce((s, r) => s + r.planned, 0);
   const expFact = expenseRows.reduce((s, r) => s + r.fact, 0);
-  const expProj = monthProgress > 0 ? expFact / monthProgress : 0;
   const incPlan = incomeRows.reduce((s, r) => s + r.planned, 0);
   const incFact = incomeRows.reduce((s, r) => s + r.fact, 0);
+  // Дельта = доходы − расходы, отдельно по плану и по факту.
+  const planDelta = incPlan - expPlan;
+  const factDelta = incFact - expFact;
 
   return (
     <div className="space-y-6">
@@ -194,7 +196,7 @@ export function BudgetsPage() {
         right={
           <button onClick={() => setAdding(!adding)} className="btn-primary text-sm">
             <Plus className="w-4 h-4" />
-            Бюджет
+            Добавить категорию
           </button>
         }
       />
@@ -241,35 +243,32 @@ export function BudgetsPage() {
         </button>
       </div>
 
-      {/* Expense summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Summary: расходы / доходы / дельта — каждый план и факт */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card card-pad">
-          <div className="label mb-1">План расходов</div>
-          <div className="stat-num">{formatMoney(expPlan, base)}</div>
-          <div className="text-xs text-muted mt-1">{expenseRows.length} категорий</div>
-        </div>
-        <div className="card card-pad">
-          <div className="label mb-1">Факт расходов</div>
+          <div className="label mb-1">Общий план расходов</div>
           <div className="stat-num text-expense">{formatMoney(expFact, base)}</div>
           <div className="text-xs text-muted mt-1">
-            {expPlan > 0 ? `${((expFact / expPlan) * 100).toFixed(0)}% от плана` : "—"}
+            факт · план {formatMoney(expPlan, base)}
+            {expPlan > 0 ? ` · ${((expFact / expPlan) * 100).toFixed(0)}%` : ""}
           </div>
         </div>
         <div className="card card-pad">
-          <div className="label mb-1">Прогноз</div>
-          <div className={`stat-num ${expProj > expPlan ? "text-expense" : "text-warn"}`}>
-            {isCurrent && expProj > 0 ? formatMoney(expProj, base) : "—"}
+          <div className="label mb-1">Общий план доходов</div>
+          <div className="stat-num text-income">{formatMoney(incFact, base)}</div>
+          <div className="text-xs text-muted mt-1">
+            факт · план {formatMoney(incPlan, base)}
+            {incPlan > 0 ? ` · ${((incFact / incPlan) * 100).toFixed(0)}%` : ""}
+          </div>
+        </div>
+        <div className="card card-pad">
+          <div className="label mb-1">Дельта (доходы − расходы)</div>
+          <div className={`stat-num ${factDelta >= 0 ? "text-income" : "text-expense"}`}>
+            {formatMoney(factDelta, base, { signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">
-            {isCurrent ? "при текущем темпе" : "месяц завершён"}
+            факт · план {formatMoney(planDelta, base, { signed: true })}
           </div>
-        </div>
-        <div className="card card-pad">
-          <div className="label mb-1">Резерв</div>
-          <div className={`stat-num ${expPlan - expFact < 0 ? "text-expense" : "text-income"}`}>
-            {formatMoney(expPlan - expFact, base, { signed: true })}
-          </div>
-          <div className="text-xs text-muted mt-1">План минус факт</div>
         </div>
       </div>
 
@@ -363,7 +362,7 @@ export function BudgetsPage() {
           {!adding && (
             <button onClick={() => setAdding(true)} className="btn-primary text-sm">
               <Plus className="w-4 h-4" />
-              Создать бюджет
+              Добавить категорию
             </button>
           )}
         </div>
@@ -461,7 +460,9 @@ function BudgetRow({
   const near = !isIncome && ratio >= 0.8 && ratio < 1;
   const tone = good ? "income" : near ? "warn" : "expense";
   const toneClass = { income: "text-income", warn: "text-warn", expense: "text-expense" }[tone];
-  const barClass = { income: "bg-income", warn: "bg-warn", expense: "bg-expense" }[tone];
+  // Bar fill colour reflects the KIND, not the status: income bars are green,
+  // expense bars red. Status still reads from the number/icon colour below.
+  const barClass = isIncome ? "bg-income" : "bg-expense";
   const Icon = isIncome
     ? good ? CheckCircle2 : TrendingDown
     : ratio >= 1 ? AlertTriangle : near ? TrendingUp : CheckCircle2;
