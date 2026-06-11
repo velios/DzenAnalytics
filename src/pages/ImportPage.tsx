@@ -196,10 +196,21 @@ export function ImportPage() {
   const editsMap = useEditsStore((s) => s.edits);
   const editsLoaded = useEditsStore((s) => s.loaded);
   const editsHydrate = useEditsStore((s) => s.hydrate);
+  const clearManyEdits = useEditsStore((s) => s.clearMany);
   useEffect(() => {
     if (!editsLoaded) editsHydrate();
   }, [editsLoaded, editsHydrate]);
   const pendingEditCount = Object.keys(editsMap).length;
+  // Orphaned edits: overrides whose transaction no longer exists in the data
+  // (e.g. edits made on a CSV import, then switched to API — ids changed). They
+  // can never apply or push, and a re-sync won't clear them, so we offer to
+  // prune them. Only meaningful once the dataset is loaded (avoid flagging
+  // everything as orphaned during an empty initial render).
+  const orphanEditIds = useMemo(() => {
+    if (transactions.length === 0) return [];
+    const ids = new Set(transactions.map((t) => t.id));
+    return Object.keys(editsMap).filter((id) => !ids.has(id));
+  }, [editsMap, transactions]);
 
   useEffect(() => {
     if (!zenLoaded) zenHydrate();
@@ -2231,6 +2242,37 @@ export function ImportPage() {
                     </span>
                   )}
                 </div>
+
+                {orphanEditIds.length > 0 && (
+                  <div className="text-xs flex items-start gap-2 mb-3 p-2.5 rounded-lg bg-warn/10 border border-warn/30">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-warn" />
+                    <div className="flex-1">
+                      <div>
+                        <strong>{orphanEditIds.length}</strong> правок зависли — у их
+                        операций нет соответствия в данных (обычно остаются после
+                        перехода с CSV на API, когда меняются id). Они не применяются
+                        и не уходят в облако, ре-синк их не убирает.
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: "Убрать зависшие правки?",
+                            message: `${orphanEditIds.length} правок без подходящей операции будут удалены из локального оверлея. На облако не влияет.`,
+                            confirmLabel: "Убрать",
+                            tone: "danger",
+                          });
+                          if (!ok) return;
+                          await clearManyEdits(orphanEditIds);
+                          await reapplyRules();
+                        }}
+                        className="btn-ghost text-xs mt-2 !py-1 text-warn hover:text-expense"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Убрать {orphanEditIds.length} зависших
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {pushError && (
                   <div className="text-xs text-expense flex items-start gap-2 mb-3">

@@ -50,6 +50,10 @@ interface EditsState {
    *  not N times). */
   setEditMany: (ids: string[], patch: TransactionEdit) => Promise<void>;
   clearEdit: (id: string) => Promise<void>;
+  /** Drop many edits at once (one IDB write). Used to prune orphaned edits —
+   *  overrides whose transaction no longer exists in the dataset (e.g. after
+   *  switching CSV → API, where ids change), so they can neither apply nor push. */
+  clearMany: (ids: string[]) => Promise<void>;
   clearAll: () => Promise<void>;
 }
 
@@ -84,6 +88,14 @@ export const useEditsStore = create<EditsState>((set, get) => ({
   clearEdit: async (id) => {
     const next = { ...get().edits };
     delete next[id];
+    await db.saveJSON(KEY, next);
+    set({ edits: next });
+  },
+
+  clearMany: async (ids) => {
+    if (ids.length === 0) return;
+    const next = { ...get().edits };
+    for (const id of ids) delete next[id];
     await db.saveJSON(KEY, next);
     set({ edits: next });
   },
