@@ -33,9 +33,19 @@ function parseISO(iso: string): { y: number; m: number; d: number } | null {
   return x ? { y: +x[1], m: +x[2] - 1, d: +x[3] } : null;
 }
 
+function parseYM(s: string): { y: number; m: number } | null {
+  const x = /^(\d{4})-(\d{2})$/.exec(s);
+  return x ? { y: +x[1], m: +x[2] - 1 } : null;
+}
+
 function toDisplay(iso: string): string {
   const p = parseISO(iso);
   return p ? `${pad(p.d)}.${pad(p.m + 1)}.${p.y}` : "";
+}
+
+function toDisplayMonth(ym: string): string {
+  const p = parseYM(ym);
+  return p ? `${MONTHS[p.m]} ${p.y}` : "";
 }
 
 interface Props {
@@ -44,6 +54,13 @@ interface Props {
   className?: string;
   wrapperClassName?: string;
   placeholder?: string;
+  /**
+   * "day" (default) → value is "YYYY-MM-DD", calendar picks a day.
+   * "month" → value is "YYYY-MM", the same popup opens straight to the month
+   * grid and selecting a month emits "YYYY-MM" (no day step). Reuses the one
+   * Russian calendar component instead of a native <input type="month">.
+   */
+  granularity?: "day" | "month";
 }
 
 export function DateField({
@@ -52,11 +69,16 @@ export function DateField({
   className = "",
   wrapperClassName = "",
   placeholder,
+  granularity = "day",
 }: Props) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const display = value ? toDisplay(value) : "";
-  const ph = placeholder || "дд.мм.гггг";
+  const display = value
+    ? granularity === "month"
+      ? toDisplayMonth(value)
+      : toDisplay(value)
+    : "";
+  const ph = placeholder || (granularity === "month" ? "месяц год" : "дд.мм.гггг");
   const emit = (v: string) => onChange?.({ target: { value: v } });
 
   return (
@@ -77,6 +99,7 @@ export function DateField({
         <CalendarPopup
           anchorRef={btnRef}
           value={value}
+          granularity={granularity}
           onSelect={(v) => {
             emit(v);
             setOpen(false);
@@ -109,18 +132,28 @@ function computePos(anchor: HTMLElement | null) {
 function CalendarPopup({
   anchorRef,
   value,
+  granularity = "day",
   onSelect,
   onClear,
   onClose,
 }: {
   anchorRef: RefObject<HTMLButtonElement | null>;
   value: string;
+  granularity?: "day" | "month";
   onSelect: (iso: string) => void;
   onClear: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const sel = value ? parseISO(value) : null;
+  const isMonth = granularity === "month";
+  const sel = value
+    ? isMonth
+      ? (() => {
+          const p = parseYM(value);
+          return p ? { y: p.y, m: p.m, d: 1 } : null;
+        })()
+      : parseISO(value)
+    : null;
   const today = new Date();
   const [view, setView] = useState(() =>
     sel
@@ -129,8 +162,11 @@ function CalendarPopup({
   );
   // The header title drills up — "Июнь 2026" → month grid → decade grid —
   // and tapping a cell drills back down, so a far-off month/year is two
-  // clicks away instead of dozens of ‹ › steps.
-  const [mode, setMode] = useState<"days" | "months" | "years">("days");
+  // clicks away instead of dozens of ‹ › steps. In month-granularity mode we
+  // start on the month grid and a month tap is the final selection.
+  const [mode, setMode] = useState<"days" | "months" | "years">(
+    isMonth ? "months" : "days"
+  );
   const [yearStart, setYearStart] = useState(view.y - 6); // 12-year grid origin
   // Position against the anchor in a layout effect — reading the ref's
   // .current during render is unsafe (and lint-flagged); a layout effect
@@ -292,8 +328,12 @@ function CalendarPopup({
                   key={mname}
                   type="button"
                   onClick={() => {
-                    setView((v) => ({ ...v, m: mi }));
-                    setMode("days");
+                    if (isMonth) {
+                      onSelect(`${view.y}-${pad(mi + 1)}`);
+                    } else {
+                      setView((v) => ({ ...v, m: mi }));
+                      setMode("days");
+                    }
                   }}
                   className={`h-10 rounded-md text-sm transition-colors ${
                     isSel
@@ -374,12 +414,14 @@ function CalendarPopup({
           type="button"
           onClick={() =>
             onSelect(
-              toISO(today.getFullYear(), today.getMonth(), today.getDate())
+              isMonth
+                ? `${today.getFullYear()}-${pad(today.getMonth() + 1)}`
+                : toISO(today.getFullYear(), today.getMonth(), today.getDate())
             )
           }
           className="text-xs text-accent hover:underline"
         >
-          Сегодня
+          {isMonth ? "Текущий месяц" : "Сегодня"}
         </button>
       </div>
     </div>,

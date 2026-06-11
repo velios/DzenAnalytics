@@ -3,6 +3,8 @@ import {
   Plus,
   Trash2,
   Target,
+  Wallet,
+  Copy,
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
@@ -28,6 +30,8 @@ import {
 } from "../lib/budgets";
 import { formatMoney } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { DateField } from "../components/DateField";
 
 const RU_MONTHS = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -124,6 +128,26 @@ export function BudgetsPage() {
     resetForm();
   }
 
+  // Copy the previous month's plan into the current one: for every line, write
+  // last month's planned value as a per-month override here, so this month
+  // mirrors it (including any tweaks). Skips lines with nothing planned last
+  // month and lines already matching, so it doesn't create redundant overrides.
+  async function copyFromPrevMonth() {
+    const prev = addMonths(ym, -1);
+    const ok = await confirm({
+      title: "Копировать бюджет?",
+      message: `План из «${monthLabel(prev)}» будет скопирован в «${monthLabel(ym)}». Правки этого месяца будут заменены.`,
+      confirmLabel: "Копировать",
+    });
+    if (!ok) return;
+    for (const line of lines) {
+      const prevPlan = plannedFor(line, prev);
+      if (prevPlan <= 0) continue;
+      if (plannedFor(line, ym) === prevPlan) continue;
+      await setOverride(line.id, ym, prevPlan);
+    }
+  }
+
   const rows = useMemo<Row[]>(
     () =>
       lines
@@ -162,49 +186,57 @@ export function BudgetsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Target className="w-6 h-6 text-accent" />
+      <PageHeader
+        icon={Wallet}
+        title="Бюджет"
+        hint="План и факт по категориям: периодичность, даты, доход и расход."
+        right={
+          <button onClick={() => setAdding(!adding)} className="btn-primary text-sm">
+            <Plus className="w-4 h-4" />
             Бюджет
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            План и факт по категориям с периодичностью и датами. Расходные и
-            доходные лимиты, помесячно.
-          </p>
-        </div>
-        <button onClick={() => setAdding(!adding)} className="btn-primary text-sm">
-          <Plus className="w-4 h-4" />
-          Бюджет
-        </button>
-      </div>
+          </button>
+        }
+      />
 
-      {/* Month switcher */}
-      <div className="flex items-center justify-center gap-3">
-        <button
-          onClick={() => setYm((m) => addMonths(m, -1))}
-          className="btn-ghost !p-2"
-          title="Предыдущий месяц"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <div className="text-center min-w-[180px]">
-          <div className="font-semibold text-lg">{monthLabel(ym)}</div>
+      {/* Toolbar: month nav (left) + copy-from-previous (right) */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setYm((m) => addMonths(m, -1))}
+            className="btn-ghost !p-2"
+            title="Предыдущий месяц"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <DateField
+            granularity="month"
+            value={ym}
+            onChange={(e) => e.target.value && setYm(e.target.value)}
+            className="input text-sm font-medium min-w-[150px]"
+          />
+          <button
+            onClick={() => setYm((m) => addMonths(m, 1))}
+            className="btn-ghost !p-2"
+            title="Следующий месяц"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
           {!isCurrent && (
             <button
               onClick={() => setYm(cur)}
-              className="text-xs text-accent hover:underline"
+              className="text-xs text-accent hover:underline ml-1"
             >
-              вернуться к текущему
+              текущий
             </button>
           )}
         </div>
         <button
-          onClick={() => setYm((m) => addMonths(m, 1))}
-          className="btn-ghost !p-2"
-          title="Следующий месяц"
+          onClick={copyFromPrevMonth}
+          className="btn-ghost text-sm"
+          title={`Скопировать план из «${monthLabel(addMonths(ym, -1))}» в этот месяц`}
         >
-          <ChevronRight className="w-5 h-5" />
+          <Copy className="w-4 h-4" />
+          Копировать с прошлого месяца
         </button>
       </div>
 
@@ -285,21 +317,23 @@ export function BudgetsPage() {
             </select>
             <label className="flex items-center gap-2 text-sm">
               <span className="text-muted whitespace-nowrap">с</span>
-              <input
-                type="month"
+              <DateField
+                granularity="month"
                 value={fStart}
                 onChange={(e) => setFStart(e.target.value)}
-                className="input flex-1"
+                wrapperClassName="flex-1"
+                className="input w-full"
               />
             </label>
             <label className="flex items-center gap-2 text-sm">
               <span className="text-muted whitespace-nowrap">по</span>
-              <input
-                type="month"
+              <DateField
+                granularity="month"
                 value={fEnd}
                 onChange={(e) => setFEnd(e.target.value)}
                 placeholder="бессрочно"
-                className="input flex-1"
+                wrapperClassName="flex-1"
+                className="input w-full"
               />
             </label>
           </div>
