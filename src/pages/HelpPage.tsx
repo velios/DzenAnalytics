@@ -1887,11 +1887,7 @@ export function HelpPage() {
                 const isOpen = open.has(s.id);
                 const Icon = s.icon;
                 return (
-                  <div
-                    key={s.id}
-                    id={`help-${s.id}`}
-                    className="border-b border-border last:border-b-0 scroll-mt-24"
-                  >
+                  <div key={s.id} className="border-b border-border last:border-b-0">
                     <button
                       onClick={() => toggle(s.id)}
                       className="w-full flex items-center gap-3 py-3 text-left hover:bg-panel2/40 px-2 -mx-2 rounded transition-colors"

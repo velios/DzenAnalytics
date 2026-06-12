@@ -61,7 +61,7 @@ export function TrendsPage() {
   // so it opens on a meaningful span. Other global filters still apply.
   const [period, setPeriod] = useState<DatePreset>("12m");
   const effectiveFilters = useMemo(
-    () => ({ ...filters, preset: period }),
+    () => ({ ...filters, preset: period, from: null, to: null }),
     [filters, period]
   );
 

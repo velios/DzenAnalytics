@@ -19,7 +19,8 @@ function renderInline(text: string): ReactNode[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[1]) out.push(<strong key={key++}>{m[1]}</strong>);
+    // Recurse into bold so nested markup (e.g. **[link](url)**) still renders.
+    if (m[1]) out.push(<strong key={key++}>{renderInline(m[1])}</strong>);
     else if (m[2])
       out.push(
         <code key={key++} className="px-1 py-0.5 rounded bg-panel2 text-[0.85em]">
@@ -160,7 +161,9 @@ function renderMarkdown(md: string): ReactNode[] {
     if (/^>\s?/.test(line)) {
       flushPara();
       flushList();
-      quote.push(line.replace(/^>\s?/, ""));
+      const q = line.replace(/^>\s?/, "");
+      // Drop GitHub admonition markers («> [!NOTE]» etc.) — render just the text.
+      if (!/^\[!\w+\]\s*$/.test(q)) quote.push(q);
       continue;
     }
     if (/^-\s/.test(line)) {
@@ -191,6 +194,17 @@ function renderMarkdown(md: string): ReactNode[] {
     flushList();
     flushQuote();
     para.push(line.trim());
+  }
+  // Unterminated code fence at EOF — emit what we collected instead of dropping it.
+  if (inCode && code.length) {
+    blocks.push(
+      <pre
+        key={key++}
+        className="mt-2 p-3 rounded-lg bg-panel2 overflow-x-auto text-xs"
+      >
+        <code>{code.join("\n")}</code>
+      </pre>
+    );
   }
   flushAll();
   return blocks;

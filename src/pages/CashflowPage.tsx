@@ -80,7 +80,7 @@ export function CashflowPage() {
   // still apply. Mirrors the Calendar page's local-period pattern.
   const [period, setPeriod] = useState<DatePreset>("12m");
   const effectiveFilters = useMemo(
-    () => ({ ...filters, preset: period }),
+    () => ({ ...filters, preset: period, from: null, to: null }),
     [filters, period]
   );
 
