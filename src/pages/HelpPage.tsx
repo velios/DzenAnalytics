@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   HelpCircle,
   ChevronDown,
@@ -26,7 +26,6 @@ import {
   HeartPulse,
   FlaskConical,
   Newspaper,
-  History,
   Sparkles,
   LayoutDashboard,
   LineChart,
@@ -46,9 +45,8 @@ import {
   Layers,
   Trash2,
 } from "lucide-react";
-import { ChangelogView } from "../components/ChangelogView";
 
-type Group = "main" | "more" | "concepts" | "about";
+type Group = "main" | "more" | "concepts";
 
 interface Section {
   id: string;
@@ -62,7 +60,6 @@ const GROUP_LABEL: Record<Group, string> = {
   main: "Меню «Основное»",
   more: "Меню «Ещё»",
   concepts: "Концепции и фишки",
-  about: "О приложении",
 };
 
 const SECTIONS: Section[] = [
@@ -1847,36 +1844,10 @@ const SECTIONS: Section[] = [
       </>
     ),
   },
-  {
-    id: "changelog",
-    group: "about",
-    icon: History,
-    title: "История изменений (changelog)",
-    body: <ChangelogView />,
-  },
 ];
 
 export function HelpPage() {
   const [open, setOpen] = useState<Set<string>>(new Set([SECTIONS[0].id]));
-
-  // Deep-link: «/help#changelog» (e.g. the footer's «Что нового») opens and
-  // scrolls to that section. Works for any section id in the hash, and on
-  // hashchange too (clicking the footer link while already on this page).
-  useEffect(() => {
-    const openFromHash = () => {
-      const id = window.location.hash.replace(/^#/, "");
-      if (!id || !SECTIONS.some((s) => s.id === id)) return;
-      setOpen((prev) => new Set(prev).add(id));
-      requestAnimationFrame(() => {
-        document
-          .getElementById(`help-${id}`)
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-    };
-    openFromHash();
-    window.addEventListener("hashchange", openFromHash);
-    return () => window.removeEventListener("hashchange", openFromHash);
-  }, []);
 
   function toggle(id: string) {
     setOpen((prev) => {
@@ -1887,7 +1858,7 @@ export function HelpPage() {
     });
   }
 
-  const groups: Group[] = ["main", "more", "concepts", "about"];
+  const groups: Group[] = ["main", "more", "concepts"];
 
   return (
     <div className="space-y-6">

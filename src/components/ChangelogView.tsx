@@ -5,10 +5,11 @@ import type { ReactNode } from "react";
 import changelogRaw from "../../CHANGELOG.md?raw";
 
 /**
- * A deliberately tiny Markdown renderer — just enough for our CHANGELOG:
- * `##`/`###` headings, `-` bullets (with wrapped continuation lines),
- * paragraphs, and inline `**bold**`, `` `code` `` and `[text](url)` links.
- * No external dependency, no `dangerouslySetInnerHTML`.
+ * A deliberately small Markdown renderer — enough for our CHANGELOG across all
+ * releases: `##`/`###` headings, `-`/`1.` lists (with wrapped continuation
+ * lines), `>` quotes, fenced code blocks, paragraphs, and inline `**bold**`,
+ * `` `code` `` and `[text](url)` links. No external dependency, no
+ * `dangerouslySetInnerHTML`.
  */
 function renderInline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -45,8 +46,12 @@ function renderInline(text: string): ReactNode[] {
 
 function renderMarkdown(md: string): ReactNode[] {
   const blocks: ReactNode[] = [];
-  const para: string[] = [];
-  const list: string[] = [];
+  let para: string[] = [];
+  let list: string[] = [];
+  let listOrdered = false;
+  let quote: string[] = [];
+  let code: string[] = [];
+  let inCode = false;
   let key = 0;
 
   const flushPara = () => {
@@ -56,34 +61,83 @@ function renderMarkdown(md: string): ReactNode[] {
           {renderInline(para.join(" "))}
         </p>
       );
-      para.length = 0;
+      para = [];
     }
   };
   const flushList = () => {
     if (list.length) {
-      const items = [...list];
+      const items = list;
+      const cls = "list-inside space-y-1 mt-2 " + (listOrdered ? "list-decimal" : "list-disc");
       blocks.push(
-        <ul key={key++} className="list-disc list-inside space-y-1 mt-2">
-          {items.map((li, i) => (
-            <li key={i}>{renderInline(li)}</li>
-          ))}
-        </ul>
+        listOrdered ? (
+          <ol key={key++} className={cls}>
+            {items.map((li, i) => (
+              <li key={i}>{renderInline(li)}</li>
+            ))}
+          </ol>
+        ) : (
+          <ul key={key++} className={cls}>
+            {items.map((li, i) => (
+              <li key={i}>{renderInline(li)}</li>
+            ))}
+          </ul>
+        )
       );
-      list.length = 0;
+      list = [];
     }
+  };
+  const flushQuote = () => {
+    if (quote.length) {
+      blocks.push(
+        <blockquote
+          key={key++}
+          className="mt-2 border-l-2 border-accent/40 pl-3 text-muted italic"
+        >
+          {renderInline(quote.join(" "))}
+        </blockquote>
+      );
+      quote = [];
+    }
+  };
+  const flushAll = () => {
+    flushPara();
+    flushList();
+    flushQuote();
   };
 
   for (const raw of md.split("\n")) {
+    // Fenced code blocks — collect verbatim between ``` markers.
+    if (/^\s*```/.test(raw)) {
+      if (inCode) {
+        blocks.push(
+          <pre
+            key={key++}
+            className="mt-2 p-3 rounded-lg bg-panel2 overflow-x-auto text-xs"
+          >
+            <code>{code.join("\n")}</code>
+          </pre>
+        );
+        code = [];
+        inCode = false;
+      } else {
+        flushAll();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      code.push(raw);
+      continue;
+    }
+
     const line = raw.replace(/\s+$/, "");
-    // Top-level "# Changelog" — the section already has its own title; skip.
     if (/^#\s/.test(line)) {
-      flushPara();
-      flushList();
+      // Top-level "# Changelog" — the modal/section has its own title; skip.
+      flushAll();
       continue;
     }
     if (/^##\s/.test(line)) {
-      flushPara();
-      flushList();
+      flushAll();
       blocks.push(
         <h3
           key={key++}
@@ -95,8 +149,7 @@ function renderMarkdown(md: string): ReactNode[] {
       continue;
     }
     if (/^###\s/.test(line)) {
-      flushPara();
-      flushList();
+      flushAll();
       blocks.push(
         <h4 key={key++} className="font-semibold mt-3">
           {renderInline(line.replace(/^###\s/, ""))}
@@ -104,26 +157,42 @@ function renderMarkdown(md: string): ReactNode[] {
       );
       continue;
     }
+    if (/^>\s?/.test(line)) {
+      flushPara();
+      flushList();
+      quote.push(line.replace(/^>\s?/, ""));
+      continue;
+    }
     if (/^-\s/.test(line)) {
       flushPara();
+      flushQuote();
+      if (listOrdered) flushList();
+      listOrdered = false;
       list.push(line.replace(/^-\s/, ""));
       continue;
     }
-    // Indented continuation of the current bullet (wrapped long line).
+    if (/^\d+\.\s/.test(line)) {
+      flushPara();
+      flushQuote();
+      if (!listOrdered) flushList();
+      listOrdered = true;
+      list.push(line.replace(/^\d+\.\s/, ""));
+      continue;
+    }
+    // Indented continuation of the current list item (wrapped long line).
     if (list.length > 0 && /^\s+\S/.test(raw)) {
       list[list.length - 1] += " " + line.trim();
       continue;
     }
     if (line.trim() === "") {
-      flushPara();
-      flushList();
+      flushAll();
       continue;
     }
     flushList();
+    flushQuote();
     para.push(line.trim());
   }
-  flushPara();
-  flushList();
+  flushAll();
   return blocks;
 }
 

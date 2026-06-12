@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, Outlet, Link } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { TopNav } from "./components/TopNav";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ChangelogModal } from "./components/ChangelogModal";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { DashboardPage } from "./pages/DashboardPage";
 import { CashflowPage } from "./pages/CashflowPage";
@@ -72,6 +73,7 @@ function App() {
   useDisplayStore((s) => s.fractionDigits);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   useGlobalShortcuts(() => setPaletteOpen(true));
 
   useEffect(() => {
@@ -259,16 +261,17 @@ function App() {
             <span className="tabular-nums">v{__APP_VERSION__}</span>
           </span>
           <span className="text-border">·</span>
-          <Link
-            to="/help#changelog"
+          <button
+            onClick={() => setChangelogOpen(true)}
             className="hover:text-accent transition-colors"
           >
             Что нового
-          </Link>
+          </button>
         </div>
       </footer>
       <TransactionsDrawer />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
       <ConfirmDialog />
     </div>
   );
