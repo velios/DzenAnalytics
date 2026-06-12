@@ -3,6 +3,13 @@ import react from "@vitejs/plugin-react";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
+import { createRequire } from "node:module";
+
+// App version — single source of truth is package.json. Injected via `define`
+// and surfaced in the footer + «История изменений» help section.
+const pkgVersion = (
+  createRequire(import.meta.url)("./package.json") as { version: string }
+).version;
 
 // STANDALONE=1 → single self-contained index.html for "double-click to run" releases.
 // Default build remains the regular multi-file output for hosting.
@@ -100,6 +107,9 @@ function inlineStandaloneAssets(): Plugin {
 
 export default defineConfig({
   base: standalone ? "./" : "/",
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   plugins: [
     react(),
     devLogSink(),

@@ -18,7 +18,12 @@ import {
 } from "recharts";
 import { Activity, Calendar } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
-import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import {
+  useFiltersStore,
+  applyFilters,
+  type DatePreset,
+} from "../store/useFiltersStore";
+import { PeriodPills } from "../components/PeriodPills";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import {
@@ -52,8 +57,15 @@ export function TrendsPage() {
   const [kind, setKind] = useState<"expense" | "income">("expense");
   const [level, setLevel] = useState<"top" | "full">("top");
   const [selected, setSelected] = useState<string[]>([]);
+  // History page → own period (default «12 мес»), not the global «месяц» filter,
+  // so it opens on a meaningful span. Other global filters still apply.
+  const [period, setPeriod] = useState<DatePreset>("12m");
+  const effectiveFilters = useMemo(
+    () => ({ ...filters, preset: period, from: null, to: null }),
+    [filters, period]
+  );
 
-  const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
+  const filtered = useMemo(() => applyFilters(transactions, effectiveFilters, monthStartDay), [transactions, effectiveFilters, monthStartDay]);
 
   const allCategories = useMemo(
     () =>
@@ -149,6 +161,7 @@ export function TrendsPage() {
         hint="Помесячная динамика и паттерны по дням недели."
         right={
           <div className="flex flex-wrap gap-2">
+            <PeriodPills value={period} onChange={setPeriod} />
             <div className="flex bg-panel2 rounded-lg p-1 border border-border">
               <button
                 onClick={() => setKind("expense")}
@@ -180,7 +193,7 @@ export function TrendsPage() {
           </div>
         }
       />
-      <GlobalFilters />
+      <GlobalFilters showDateRange={false} />
 
       <div className="card card-pad">
         <div className="flex items-start justify-between mb-3 flex-wrap gap-3">

@@ -28,7 +28,12 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
-import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import {
+  useFiltersStore,
+  applyFilters,
+  type DatePreset,
+} from "../store/useFiltersStore";
+import { PeriodPills } from "../components/PeriodPills";
 import { useDrillStore } from "../store/useDrillStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -69,9 +74,19 @@ export function CashflowPage() {
   const showDrill = useDrillStore((s) => s.show);
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
+  // This is a history chart, so it has its OWN period (default «12 мес») rather
+  // than inheriting the global «месяц» filter — otherwise a first visit would
+  // show a single month. Other global filters (счета/категории/валюты/поиск)
+  // still apply. Mirrors the Calendar page's local-period pattern.
+  const [period, setPeriod] = useState<DatePreset>("12m");
+  const effectiveFilters = useMemo(
+    () => ({ ...filters, preset: period, from: null, to: null }),
+    [filters, period]
+  );
+
   const filtered = useMemo(
-    () => applyFilters(transactions, filters, monthStartDay),
-    [transactions, filters, monthStartDay]
+    () => applyFilters(transactions, effectiveFilters, monthStartDay),
+    [transactions, effectiveFilters, monthStartDay]
   );
   const months = useMemo(
     () => groupByMonth(filtered, { monthStartDay }),
@@ -168,8 +183,9 @@ export function CashflowPage() {
         icon={LineChartIcon}
         title="Cash-flow"
         hint="Доходы, расходы и чистый поток по месяцам."
+        right={<PeriodPills value={period} onChange={setPeriod} />}
       />
-      <GlobalFilters />
+      <GlobalFilters showDateRange={false} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat
