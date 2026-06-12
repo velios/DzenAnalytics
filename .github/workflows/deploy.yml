@@ -34,8 +34,8 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p "$DOKKU_PORT" "$DOKKU_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          dokku() { ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$DOKKU_PORT" "dokku@$DOKKU_HOST" -- "$@"; }
           # ps:stop: '-p 127.0.0.1:8103' breaks rolling deploy until edge-enable (ADR 0004);
           # '|| true' covers the very first deploy when the app has no containers yet
-          ssh -p "$DOKKU_PORT" "dokku@$DOKKU_HOST" -- ps:stop dzenanalytics || true
-          ssh -p "$DOKKU_PORT" "dokku@$DOKKU_HOST" -- git:from-image dzenanalytics "$IMAGE:$GITHUB_SHA"
+          dokku ps:stop dzenanalytics || true
+          dokku git:from-image dzenanalytics "$IMAGE:$GITHUB_SHA"
