@@ -36,7 +36,11 @@ export function ChangelogModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      // Solid dim scrim — NO backdrop-filter. A full-viewport backdrop-blur
+      // over the chart-heavy page makes Chromium snapshot the page to blur it,
+      // which intermittently flashes the root (white) background for a frame on
+      // open. A plain dim never does. (Same call as EditTransactionModal.)
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
