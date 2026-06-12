@@ -14,7 +14,7 @@ RUN npm run build
 
 # nginx stage
 # --------------------
-FROM nginx:mainline
+FROM nginx:mainline-alpine
 
 RUN mkdir /var/www/html/ -p
 

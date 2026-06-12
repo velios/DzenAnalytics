@@ -1,0 +1,41 @@
+name: Deploy to dokku
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE: ghcr.io/velios/dzenanalytics
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and push image
+        run: |
+          docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+
+      - name: Deploy via dokku
+        env:
+          SSH_KEY: ${{ secrets.DOKKU_SSH_PRIVATE_KEY }}
+          DOKKU_HOST: ${{ secrets.DOKKU_HOST }}
+          DOKKU_PORT: ${{ secrets.DOKKU_SSH_PORT }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$DOKKU_PORT" "$DOKKU_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # ps:stop: '-p 127.0.0.1:8103' breaks rolling deploy until edge-enable (ADR 0004);
+          # '|| true' covers the very first deploy when the app has no containers yet
+          ssh -p "$DOKKU_PORT" "dokku@$DOKKU_HOST" -- ps:stop dzenanalytics || true
+          ssh -p "$DOKKU_PORT" "dokku@$DOKKU_HOST" -- git:from-image dzenanalytics "$IMAGE:$GITHUB_SHA"
