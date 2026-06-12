@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet, Link } from "react-router-dom";
 import { TopNav } from "./components/TopNav";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
@@ -209,9 +209,9 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen flex flex-col">
       <TopNav onOpenPalette={() => setPaletteOpen(true)} />
-      <main className="max-w-[1400px] mx-auto px-4 md:px-6 py-4 md:py-6">
+      <main className="flex-1 w-full max-w-[1400px] mx-auto px-4 md:px-6 py-4 md:py-6">
         <Routes>
           <Route element={<PlainLayout />}>
             <Route path="/" element={<DashboardPage />} />
@@ -252,6 +252,21 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <footer className="border-t border-border mt-4">
+        <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-3 flex items-center justify-center gap-2.5 text-xs text-muted">
+          <span>
+            DzenAnalytics{" "}
+            <span className="tabular-nums">v{__APP_VERSION__}</span>
+          </span>
+          <span className="text-border">·</span>
+          <Link
+            to="/help#changelog"
+            className="hover:text-accent transition-colors"
+          >
+            Что нового
+          </Link>
+        </div>
+      </footer>
       <TransactionsDrawer />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ConfirmDialog />

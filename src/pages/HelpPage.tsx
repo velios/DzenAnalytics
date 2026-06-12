@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   HelpCircle,
   ChevronDown,
@@ -26,6 +26,7 @@ import {
   HeartPulse,
   FlaskConical,
   Newspaper,
+  History,
   Sparkles,
   LayoutDashboard,
   LineChart,
@@ -45,8 +46,9 @@ import {
   Layers,
   Trash2,
 } from "lucide-react";
+import { ChangelogView } from "../components/ChangelogView";
 
-type Group = "main" | "more" | "concepts";
+type Group = "main" | "more" | "concepts" | "about";
 
 interface Section {
   id: string;
@@ -60,6 +62,7 @@ const GROUP_LABEL: Record<Group, string> = {
   main: "Меню «Основное»",
   more: "Меню «Ещё»",
   concepts: "Концепции и фишки",
+  about: "О приложении",
 };
 
 const SECTIONS: Section[] = [
@@ -233,7 +236,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "page-trends",
-    group: "main",
+    group: "more",
     icon: Activity,
     title: "Тренды",
     body: (
@@ -251,7 +254,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "page-goals",
-    group: "main",
+    group: "more",
     icon: Target,
     title: "Цели + FIRE",
     body: (
@@ -1844,10 +1847,36 @@ const SECTIONS: Section[] = [
       </>
     ),
   },
+  {
+    id: "changelog",
+    group: "about",
+    icon: History,
+    title: "История изменений (changelog)",
+    body: <ChangelogView />,
+  },
 ];
 
 export function HelpPage() {
   const [open, setOpen] = useState<Set<string>>(new Set([SECTIONS[0].id]));
+
+  // Deep-link: «/help#changelog» (e.g. the footer's «Что нового») opens and
+  // scrolls to that section. Works for any section id in the hash, and on
+  // hashchange too (clicking the footer link while already on this page).
+  useEffect(() => {
+    const openFromHash = () => {
+      const id = window.location.hash.replace(/^#/, "");
+      if (!id || !SECTIONS.some((s) => s.id === id)) return;
+      setOpen((prev) => new Set(prev).add(id));
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`help-${id}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+  }, []);
 
   function toggle(id: string) {
     setOpen((prev) => {
@@ -1858,7 +1887,7 @@ export function HelpPage() {
     });
   }
 
-  const groups: Group[] = ["main", "more", "concepts"];
+  const groups: Group[] = ["main", "more", "concepts", "about"];
 
   return (
     <div className="space-y-6">
@@ -1887,7 +1916,11 @@ export function HelpPage() {
                 const isOpen = open.has(s.id);
                 const Icon = s.icon;
                 return (
-                  <div key={s.id} className="border-b border-border last:border-b-0">
+                  <div
+                    key={s.id}
+                    id={`help-${s.id}`}
+                    className="border-b border-border last:border-b-0 scroll-mt-24"
+                  >
                     <button
                       onClick={() => toggle(s.id)}
                       className="w-full flex items-center gap-3 py-3 text-left hover:bg-panel2/40 px-2 -mx-2 rounded transition-colors"
