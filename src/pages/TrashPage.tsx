@@ -5,6 +5,8 @@ import { useEditsStore } from "../store/useEditsStore";
 import { useDeletedStore } from "../store/useDeletedStore";
 import { useDeletedPayloadsStore } from "../store/useDeletedPayloadsStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { confirm } from "../store/useConfirmStore";
+import { pluralRu } from "../lib/plural";
 import { applyEdits } from "../lib/applyEdits";
 import { loadZenCache, cacheToDiffResponse } from "../lib/zenmoneyCache";
 import { mapZenmoneyDiff } from "../lib/zenmoneyMap";
@@ -37,6 +39,7 @@ export function TrashPage() {
   const rates = useDataStore((s) => s.rates);
   const restoreTransaction = useDataStore((s) => s.restoreTransaction);
   const restoreTransactionMany = useDataStore((s) => s.restoreTransactionMany);
+  const purgeDeleted = useDataStore((s) => s.purgeDeleted);
   const edits = useEditsStore((s) => s.edits);
   const deletedSet = useDeletedStore((s) => s.deletedSet);
   const pushMode = useZenmoneyStore((s) => s.pushMode);
@@ -99,6 +102,27 @@ export function TrashPage() {
     return all.sort((a, b) => b.date.localeCompare(a.date));
   }, [fromRaw, fromSnapshots]);
 
+  async function handlePurge() {
+    const n = deletedTxs.length;
+    if (n === 0) return;
+    const ops = pluralRu(n, ["операция", "операции", "операций"]);
+    const willBe = pluralRu(n, ["будет", "будут", "будут"]);
+    const cloudNote =
+      pushMode !== "off"
+        ? " Уже удалённые в облаке Дзен-мани остаются удалёнными; операции, удаление которых ещё не отправлено в облако, могут вернуться при полной синхронизации."
+        : "";
+    const ok = await confirm({
+      title: "Очистить корзину окончательно?",
+      message:
+        `${formatNum(n)} ${ops} ${willBe} безвозвратно удалены из локального хранилища и исчезнут из корзины — восстановить их будет нельзя.` +
+        cloudNote,
+      confirmLabel: "Очистить корзину",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await purgeDeleted();
+  }
+
   if (deletedTxs.length === 0) {
     return (
       <div className="space-y-6">
@@ -126,13 +150,23 @@ export function TrashPage() {
         title="Удалённые"
         hint="Удалённые операции скрыты из всех расчётов, но хранятся локально — здесь их можно вернуть."
         right={
-          <button
-            onClick={() => restoreTransactionMany(deletedTxs.map((t) => t.id))}
-            className="btn-ghost text-sm"
-          >
-            <Undo2 className="w-4 h-4" />
-            Восстановить все ({formatNum(deletedTxs.length)})
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => restoreTransactionMany(deletedTxs.map((t) => t.id))}
+              className="btn-ghost text-sm"
+            >
+              <Undo2 className="w-4 h-4" />
+              Восстановить все ({formatNum(deletedTxs.length)})
+            </button>
+            <button
+              onClick={handlePurge}
+              className="btn-danger text-sm"
+              title="Окончательно удалить все операции из корзины"
+            >
+              <Trash2 className="w-4 h-4" />
+              Очистить корзину
+            </button>
+          </div>
         }
       />
 

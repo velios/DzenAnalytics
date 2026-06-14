@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   buildDeletions,
+  buildDraftTransaction,
   buildPushItems,
   buildResurrections,
   detectConflicts,
   resurrectionId,
+  validateDrafts,
+  type DraftFields,
 } from "./zenmoneyPush";
 import type { ZenCache } from "./zenmoneyCache";
 import type { ZenAccount, ZenInstrument, ZenTag, ZenTransaction } from "./zenmoney";
@@ -551,5 +554,185 @@ describe("detectConflicts", () => {
   it("only considers edited ids, not every changed cloud row", () => {
     const fresh = [{ id: "b", changed: 999 } as ZenTransaction];
     expect(detectConflicts(["a"], c, fresh).size).toBe(0);
+  });
+});
+
+describe("buildDraftTransaction", () => {
+  const RUB = 2;
+  const USD = 1;
+  // Richer cache with reference entities a draft resolves against.
+  const draftCache = (): ZenCache => ({
+    serverTimestamp: 0,
+    instruments: [
+      { id: RUB, shortTitle: "RUB", rate: 1 },
+      { id: USD, shortTitle: "USD", rate: 90 },
+    ] as unknown as ZenCache["instruments"],
+    accounts: [
+      { id: "acc-card", title: "Карта", instrument: RUB, archive: false },
+      { id: "acc-usd", title: "USD-счёт", instrument: USD, archive: false },
+    ] as unknown as ZenCache["accounts"],
+    tags: [
+      { id: "t-food", title: "Еда", parent: null, archive: false },
+      { id: "t-salary", title: "Зарплата", parent: null, archive: false },
+    ] as unknown as ZenCache["tags"],
+    merchants: [{ id: "m-pyat", title: "Пятёрочка" }] as unknown as ZenCache["merchants"],
+    transactions: [],
+    user: [{ id: 99, currency: RUB }] as unknown as ZenCache["user"],
+  });
+
+  const base: DraftFields = {
+    id: "new-1",
+    kind: "expense",
+    date: "2026-06-14",
+    amount: 500,
+    account: "Карта",
+    category: "Еда",
+  };
+
+  it("builds a single-leg expense (both legs on one account, amount on outcome)", () => {
+    const r = buildDraftTransaction(base, draftCache(), 1000);
+    expect(r.skip).toBeUndefined();
+    expect(r.zen).toMatchObject({
+      id: "new-1",
+      user: 99,
+      outcome: 500,
+      income: 0,
+      outcomeAccount: "acc-card",
+      incomeAccount: "acc-card",
+      outcomeInstrument: RUB,
+      incomeInstrument: RUB,
+      tag: ["t-food"],
+      deleted: false,
+      changed: 1000,
+      created: 1000,
+    });
+  });
+
+  it("builds a single-leg income (amount on income leg)", () => {
+    const r = buildDraftTransaction(
+      { ...base, kind: "income", amount: 100000, category: "Зарплата" },
+      draftCache(),
+      1000
+    );
+    expect(r.zen).toMatchObject({ income: 100000, outcome: 0, tag: ["t-salary"] });
+  });
+
+  it("resolves a known brand to a merchant id (payee stays null)", () => {
+    const r = buildDraftTransaction({ ...base, payee: "Пятёрочка" }, draftCache(), 1);
+    expect(r.zen).toMatchObject({ merchant: "m-pyat", payee: null });
+  });
+
+  it("stores an unknown counterparty as free-text payee", () => {
+    const r = buildDraftTransaction({ ...base, payee: "Ларёк у дома" }, draftCache(), 1);
+    expect(r.zen).toMatchObject({ merchant: null, payee: "Ларёк у дома" });
+  });
+
+  it("builds a same-currency transfer (income mirrors outcome, no tag)", () => {
+    const r = buildDraftTransaction(
+      { id: "tr-1", kind: "transfer", date: "2026-06-14", amount: 1000, account: "Карта", incomeAccount: "Карта" },
+      // two distinct RUB accounts
+      {
+        ...draftCache(),
+        accounts: [
+          { id: "acc-card", title: "Карта", instrument: RUB, archive: false },
+          { id: "acc-cash", title: "Наличные", instrument: RUB, archive: false },
+        ] as unknown as ZenCache["accounts"],
+      },
+      1
+    );
+    // adjust dst to the second RUB account
+    const r2 = buildDraftTransaction(
+      { id: "tr-1", kind: "transfer", date: "2026-06-14", amount: 1000, account: "Карта", incomeAccount: "Наличные" },
+      {
+        ...draftCache(),
+        accounts: [
+          { id: "acc-card", title: "Карта", instrument: RUB, archive: false },
+          { id: "acc-cash", title: "Наличные", instrument: RUB, archive: false },
+        ] as unknown as ZenCache["accounts"],
+      },
+      1
+    );
+    expect(r.skip).toBeDefined(); // same account → rejected
+    expect(r2.zen).toMatchObject({
+      outcome: 1000,
+      income: 1000,
+      outcomeAccount: "acc-card",
+      incomeAccount: "acc-cash",
+      tag: null,
+    });
+  });
+
+  it("builds a cross-currency transfer when both leg amounts are given", () => {
+    const r = buildDraftTransaction(
+      { id: "fx-1", kind: "transfer", date: "2026-06-14", amount: 9000, account: "Карта", incomeAccount: "USD-счёт", incomeAmount: 100 },
+      draftCache(),
+      1
+    );
+    expect(r.zen).toMatchObject({
+      outcome: 9000,
+      outcomeInstrument: RUB,
+      income: 100,
+      incomeInstrument: USD,
+      outcomeAccount: "acc-card",
+      incomeAccount: "acc-usd",
+    });
+  });
+
+  it("skips a cross-currency transfer with no destination amount", () => {
+    const r = buildDraftTransaction(
+      { id: "fx-2", kind: "transfer", date: "2026-06-14", amount: 9000, account: "Карта", incomeAccount: "USD-счёт" },
+      draftCache(),
+      1
+    );
+    expect(r.zen).toBeUndefined();
+    expect(r.skip).toMatch(/сумму зачисления/);
+  });
+
+  it("rejects missing/unknown account, category, synthetic category, bad amount/date", () => {
+    const c = draftCache();
+    expect(buildDraftTransaction({ ...base, account: "Нет" }, c, 1).skip).toMatch(/не найден/);
+    expect(buildDraftTransaction({ ...base, category: "" }, c, 1).skip).toMatch(/категори/);
+    expect(buildDraftTransaction({ ...base, category: "Перевод" }, c, 1).skip).toMatch(/ярлык/);
+    expect(buildDraftTransaction({ ...base, category: "Несуществующая" }, c, 1).skip).toMatch(/не найдена/);
+    expect(buildDraftTransaction({ ...base, amount: 0 }, c, 1).skip).toMatch(/больше нуля/);
+    expect(buildDraftTransaction({ ...base, date: "14.06.2026" }, c, 1).skip).toMatch(/дата/);
+  });
+
+  describe("validateDrafts (pre-push)", () => {
+    const ok = (): ZenTransaction => {
+      const r = buildDraftTransaction(base, draftCache(), 5);
+      return r.zen!;
+    };
+    const byId = (txs: ZenTransaction[]) => Object.fromEntries(txs.map((t) => [t.id, t]));
+
+    it("passes a valid draft and re-stamps `changed`", () => {
+      const out = validateDrafts(byId([ok()]), draftCache(), 777);
+      expect(out.skipped).toEqual([]);
+      expect(out.ready).toHaveLength(1);
+      expect(out.ready[0].changed).toBe(777);
+      expect(out.ready[0].outcome).toBe(500);
+    });
+
+    it("skips a draft whose account is gone from the cache", () => {
+      const d = ok();
+      const out = validateDrafts(byId([d]), { ...draftCache(), accounts: [] }, 1);
+      expect(out.ready).toEqual([]);
+      expect(out.skipped[0].reason).toMatch(/счёт/);
+    });
+
+    it("skips a draft whose category tag is gone", () => {
+      const d = ok();
+      const out = validateDrafts(byId([d]), { ...draftCache(), tags: [] }, 1);
+      expect(out.skipped[0].reason).toMatch(/категори/);
+    });
+
+    it("skips a draft whose id is already live in the cloud (stale)", () => {
+      const d = ok();
+      const c = draftCache();
+      c.transactions = [{ id: d.id, deleted: false } as ZenTransaction];
+      const out = validateDrafts(byId([d]), c, 1);
+      expect(out.ready).toEqual([]);
+      expect(out.skipped[0].reason).toMatch(/уже есть/);
+    });
   });
 });

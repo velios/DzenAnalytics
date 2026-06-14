@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Download,
+  Plus,
   Pencil,
   Trash2,
   TrendingUp,
@@ -10,10 +11,12 @@ import {
   Hash,
   ListFilter,
   ListChecks,
+  CloudUpload,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore, type TransactionEdit } from "../store/useEditsStore";
+import { useDraftsStore } from "../store/useDraftsStore";
 import { useDeletedStore } from "../store/useDeletedStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -27,7 +30,7 @@ import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
-import { formatMoney, formatNum, displayPayee, secondaryPayee } from "../lib/format";
+import { formatMoney, formatNum, displayPayee, secondaryPayee, crossCurrencyReceived } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
@@ -103,9 +106,16 @@ export function TransactionsPage() {
     if (!editsLoaded) hydrateEdits();
   }, [editsLoaded, hydrateEdits]);
 
+  // Adding operations needs the live Zenmoney cache (account/tag ids), so
+  // it's offered only in API mode. `drafts` are locally-created rows not yet
+  // pushed — flagged in the list with a "не синхронизировано" badge.
+  const apiConnected = useZenmoneyStore((s) => !!s.token);
+  const drafts = useDraftsStore((s) => s.drafts);
+
   const [pageSearch, setPageSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("date-desc");
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const [creating, setCreating] = useState(false);
 
   // ── Bulk selection + edit ──────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -333,6 +343,16 @@ export function TransactionsPage() {
               <option value="amount-asc">Сумма ↑ (мелкие)</option>
             </select>
           </div>
+          {apiConnected && (
+            <button
+              onClick={() => setCreating(true)}
+              className="btn-primary text-xs whitespace-nowrap"
+              title="Добавить новую операцию"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Добавить
+            </button>
+          )}
           <button onClick={exportCsv} className="btn-ghost text-xs whitespace-nowrap">
             <Download className="w-3.5 h-3.5" />
             CSV
@@ -375,6 +395,7 @@ export function TransactionsPage() {
                 txs={txs}
                 base={base}
                 edits={edits}
+                drafts={drafts}
                 onEdit={setEditing}
                 onDelete={handleDelete}
                 selected={selected}
@@ -395,6 +416,7 @@ export function TransactionsPage() {
                 key={t.id}
                 tx={t}
                 edited={!!edits[t.id]}
+                draft={!!drafts[t.id]}
                 onEdit={() => setEditing(t)}
                 onDelete={() => handleDelete(t)}
                 selected={selected.has(t.id)}
@@ -419,6 +441,10 @@ export function TransactionsPage() {
 
       {editing && (
         <EditTransactionModal tx={editing} onClose={() => setEditing(null)} />
+      )}
+
+      {creating && (
+        <EditTransactionModal onClose={() => setCreating(false)} />
       )}
 
       {/* Floating bulk-action bar — appears when ≥1 row is selected. */}
@@ -505,6 +531,7 @@ function DayGroup({
   txs,
   base,
   edits,
+  drafts,
   onEdit,
   onDelete,
   selected,
@@ -514,6 +541,7 @@ function DayGroup({
   txs: Transaction[];
   base: string;
   edits: Record<string, unknown>;
+  drafts: Record<string, unknown>;
   onEdit: (t: Transaction) => void;
   onDelete: (t: Transaction) => void;
   selected: Set<string>;
@@ -564,6 +592,7 @@ function DayGroup({
           key={t.id}
           tx={t}
           edited={!!edits[t.id]}
+          draft={!!drafts[t.id]}
           onEdit={() => onEdit(t)}
           onDelete={() => onDelete(t)}
           selected={selected.has(t.id)}
@@ -578,6 +607,7 @@ function DayGroup({
 function Row({
   tx,
   edited,
+  draft = false,
   onEdit,
   onDelete,
   selected,
@@ -586,6 +616,7 @@ function Row({
 }: {
   tx: Transaction;
   edited: boolean;
+  draft?: boolean;
   onEdit: () => void;
   onDelete: () => void;
   selected: boolean;
@@ -623,7 +654,13 @@ function Row({
         <div className="flex items-center gap-2 min-w-0" title={tx.categoryFull}>
           <CategoryDot category={tx.category} size="w-5 h-5" />
           <span className="truncate">{tx.category}</span>
-          {edited && (
+          {draft && (
+            <CloudUpload
+              className="w-3 h-3 text-warn shrink-0"
+              aria-label="Не синхронизировано"
+            />
+          )}
+          {edited && !draft && (
             <Pencil
               className="w-3 h-3 text-accent2 shrink-0"
               aria-label="Отредактировано"
@@ -670,6 +707,14 @@ function Row({
       >
         <span className={amountSignClass}>{amountSign}</span>
         {formatMoney(tx.amount, tx.currency)}
+        {(() => {
+          const received = crossCurrencyReceived(tx);
+          return received ? (
+            <div className="text-[10px] font-normal text-muted/80">
+              ({received})
+            </div>
+          ) : null;
+        })()}
       </div>
       <div className="flex items-center justify-end gap-0.5">
         <button

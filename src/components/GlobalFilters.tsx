@@ -510,7 +510,7 @@ export function GlobalFilters({
             onChange={(e) => f.setExcludeTransfers(e.target.checked)}
             className="accent-accent"
           />
-          без переводов
+          Без переводов
         </label>
       </div>
     </div>

@@ -42,7 +42,8 @@ const initial = {
   categories: new Set<string>(),
   currencies: new Set<string>(),
   search: "",
-  excludeTransfers: true,
+  // Off by default — transfers are shown unless the user opts to hide them.
+  excludeTransfers: false,
 };
 
 export const useFiltersStore = create<FiltersState>((set, get) => ({

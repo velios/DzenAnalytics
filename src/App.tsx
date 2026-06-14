@@ -41,6 +41,7 @@ import { useZenmoneyStore } from "./store/useZenmoneyStore";
 import { useEditsStore } from "./store/useEditsStore";
 import { useDeletedStore } from "./store/useDeletedStore";
 import { useDeletedPayloadsStore } from "./store/useDeletedPayloadsStore";
+import { useDraftsStore } from "./store/useDraftsStore";
 import { useDisplayStore } from "./store/useDisplayStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
 import { useOffBalanceStore } from "./store/useOffBalanceStore";
@@ -83,6 +84,7 @@ function App() {
     // that the UI + auto-push subscription read.)
     useDeletedStore.getState().hydrate();
     useDeletedPayloadsStore.getState().hydrate();
+    useDraftsStore.getState().hydrate();
     useDisplayStore.getState().hydrate();
     useOffBalanceStore.getState().hydrate();
     hydrate();
@@ -135,7 +137,9 @@ function App() {
         Object.keys(useEditsStore.getState().edits).length > 0;
       const hasDeletions =
         useDeletedStore.getState().deletedIds.length > 0;
-      if (!hasEdits && !hasDeletions) return;
+      const hasDrafts =
+        Object.keys(useDraftsStore.getState().drafts).length > 0;
+      if (!hasEdits && !hasDeletions && !hasDrafts) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
@@ -166,10 +170,19 @@ function App() {
       if (s.deletedIds.length <= p.deletedIds.length) return;
       schedule();
     });
+    // New drafts (locally-created operations) push on the same debounce.
+    // Fire only when a draft was ADDED (count grew) — the post-push
+    // cleanup that clears sent drafts must not re-trigger a no-op push.
+    const unsubDrafts = useDraftsStore.subscribe((s, p) => {
+      if (s.drafts === p.drafts) return;
+      if (Object.keys(s.drafts).length <= Object.keys(p.drafts).length) return;
+      schedule();
+    });
     return () => {
       if (timer) clearTimeout(timer);
       unsubEdits();
       unsubDeleted();
+      unsubDrafts();
     };
   }, []);
 
