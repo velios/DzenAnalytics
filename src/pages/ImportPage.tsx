@@ -47,6 +47,7 @@ import { useZenmoneyStore, recalcBalanceCalibration } from "../store/useZenmoney
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
 import { useEditsStore } from "../store/useEditsStore";
+import { useDraftsStore } from "../store/useDraftsStore";
 import { confirm } from "../store/useConfirmStore";
 import { pluralRu } from "../lib/plural";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
@@ -202,6 +203,12 @@ export function ImportPage() {
     if (!editsLoaded) editsHydrate();
   }, [editsLoaded, editsHydrate]);
   const pendingEditCount = Object.keys(editsMap).length;
+  // Locally-created drafts (new operations) also go out on a Push, so the
+  // button/queue counts must include them — otherwise "4 new operations"
+  // reads as "Нет правок для отправки".
+  const draftsMap = useDraftsStore((s) => s.drafts);
+  const pendingDraftCount = Object.keys(draftsMap).length;
+  const pendingTotal = pendingEditCount + pendingDraftCount;
   // Orphaned edits: overrides whose transaction no longer exists in the data
   // (e.g. edits made on a CSV import, then switched to API — ids changed). They
   // can never apply or push, and a re-sync won't clear them, so we offer to
@@ -2204,9 +2211,9 @@ export function ImportPage() {
                 <div className="flex flex-wrap items-center gap-3 mb-3">
                   <button
                     onClick={async () => {
-                      if (pendingEditCount === 0) return;
+                      if (pendingTotal === 0) return;
                       const confirmed = await confirm({
-                        title: `Отправить ${pendingEditCount} правок в Дзен-мани?`,
+                        title: `Отправить ${pendingTotal} ${pluralRu(pendingTotal, ["изменение", "изменения", "изменений"])} в Дзен-мани?`,
                         message:
                           "Перед отправкой автоматически сделается снимок облачного состояния (safety net) и проверка на конфликты (операции, изменённые в облаке после вашей синхронизации, не перезатираются). Неподдерживаемые правки будут пропущены — вы увидите их список после операции.",
                         confirmLabel: "Отправить",
@@ -2221,7 +2228,7 @@ export function ImportPage() {
                     }}
                     disabled={
                       pushStatus === "syncing" ||
-                      pendingEditCount === 0 ||
+                      pendingTotal === 0 ||
                       !zenToken
                     }
                     className="btn-primary text-sm inline-flex items-center gap-2"
@@ -2233,10 +2240,18 @@ export function ImportPage() {
                     )}
                     {pushStatus === "syncing"
                       ? "Отправляю…"
-                      : pendingEditCount === 0
-                        ? "Нет правок для отправки"
-                        : `Отправить ${pendingEditCount} правок в облако`}
+                      : pendingTotal === 0
+                        ? "Нет изменений для отправки"
+                        : `Отправить ${pendingTotal} ${pluralRu(pendingTotal, ["изменение", "изменения", "изменений"])} в облако`}
                   </button>
+                  {pendingDraftCount > 0 && (
+                    <span className="text-xs text-muted">
+                      из них новых операций:{" "}
+                      <strong className="text-text tabular-nums">
+                        {pendingDraftCount}
+                      </strong>
+                    </span>
+                  )}
                   {lastPushAt && (
                     <span className="text-xs text-muted">
                       Последний Push: {new Date(lastPushAt).toLocaleString("ru-RU")}
@@ -2293,6 +2308,11 @@ export function ImportPage() {
                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                       <span>
                         Отправлено: <strong>{lastPushResult.pushed}</strong>
+                        {lastPushResult.created > 0 && (
+                          <>
+                            {" · "}создано: <strong>{lastPushResult.created}</strong>
+                          </>
+                        )}
                         {lastPushResult.skipped.length > 0 && (
                           <>
                             {" · "}пропущено: {lastPushResult.skipped.length}
@@ -2338,14 +2358,13 @@ export function ImportPage() {
               <div className="flex flex-wrap items-center gap-3 mb-3 text-xs">
                 <span className="text-muted">
                   В очереди: <strong className="text-text tabular-nums">
-                    {pendingEditCount}
+                    {pendingTotal}
                   </strong>
                   {" "}
-                  {pendingEditCount === 1
-                    ? "правка"
-                    : pendingEditCount < 5
-                      ? "правки"
-                      : "правок"}
+                  {pluralRu(pendingTotal, ["изменение", "изменения", "изменений"])}
+                  {pendingDraftCount > 0 && (
+                    <> (новых операций: {pendingDraftCount})</>
+                  )}
                 </span>
                 {pushStatus === "syncing" && (
                   <span className="text-muted inline-flex items-center gap-1.5">

@@ -10,6 +10,8 @@ import { useDeletedStore, loadDeletedSet } from "./useDeletedStore";
 import { useDeletedPayloadsStore } from "./useDeletedPayloadsStore";
 import { loadZenCache } from "../lib/zenmoneyCache";
 import type { ZenTransaction } from "../lib/zenmoney";
+import { loadDrafts } from "./useDraftsStore";
+import { draftsToTransactions } from "../lib/draftsMap";
 import { aliasesToMap, type PayeeAlias } from "./usePayeeAliasStore";
 
 // Rough cross-rates relative to RUB — purely a starting point so the rates UI
@@ -82,6 +84,10 @@ interface DataState {
   setBase: (newBase: string) => Promise<void>;
   setPayeeGrouping: (enabled: boolean) => Promise<void>;
   reapplyRules: () => Promise<void>;
+  /** Recompute the visible list from the unchanged raw set. Cheap — used
+   *  when only the overlay changed (e.g. a draft was added/removed), so we
+   *  don't need to rebuild `transactionsRaw`. */
+  refresh: () => Promise<void>;
   /** Hide a transaction locally (soft-delete) and recompute the
    *  visible list. Cloud-side deletion (when push is on) is handled
    *  separately by the Zenmoney store's push path. */
@@ -92,6 +98,10 @@ interface DataState {
   restoreTransaction: (id: string) => Promise<void>;
   /** Un-hide many at once (one recompute). */
   restoreTransactionMany: (ids: string[]) => Promise<void>;
+  /** Permanently empty the local trash: drop hidden rows from storage,
+   *  clear the hidden-id set and the cloud-restore snapshots. No cloud
+   *  writes — irreversible locally. */
+  purgeDeleted: () => Promise<void>;
 }
 
 function recalcBase(txs: Transaction[], rates: CurrencyRates): Transaction[] {
@@ -110,8 +120,34 @@ async function finalize(
 ): Promise<Transaction[]> {
   const withEdits = applyEdits(raw, await loadEditsFromStore(), rates);
   const deleted = await loadDeletedSet();
-  if (deleted.size === 0) return withEdits;
-  return withEdits.filter((t) => !deleted.has(t.id));
+  const visible =
+    deleted.size === 0
+      ? withEdits
+      : withEdits.filter((t) => !deleted.has(t.id));
+  // Append locally-created drafts (not-yet-pushed). Dedup by id against the
+  // visible set: once a draft is pushed and echoed back into the cache, its
+  // cloud row wins (and we then drop the draft from the store).
+  const drafts = await loadDraftRows(rates, visible);
+  return drafts.length === 0 ? visible : [...visible, ...drafts];
+}
+
+/**
+ * Forward-map drafts for display and recompute `amountBase` against the
+ * user's effective rates (the canonical mapper uses Zenmoney's own rates;
+ * we re-anchor so drafts aggregate consistently with everything else).
+ * Skips any draft id already present in `existing` (post-push window).
+ */
+async function loadDraftRows(
+  rates: CurrencyRates,
+  existing: Transaction[]
+): Promise<Transaction[]> {
+  const drafts = await loadDrafts();
+  if (Object.keys(drafts).length === 0) return [];
+  const cache = await loadZenCache();
+  const seen = new Set(existing.map((t) => t.id));
+  return draftsToTransactions(drafts, cache)
+    .filter((t) => !seen.has(t.id))
+    .map((t) => ({ ...t, amountBase: toBase(t.amount, t.currency, rates) }));
 }
 
 /**
@@ -386,6 +422,12 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ transactions: final, transactionsRaw: raw });
   },
 
+  refresh: async () => {
+    const { transactionsRaw: raw, rates } = get();
+    const final = await finalize(raw, rates);
+    set({ transactions: final });
+  },
+
   deleteTransaction: async (id) => {
     await snapshotForCloudRestore([id]);
     await useDeletedStore.getState().remove(id);
@@ -420,5 +462,25 @@ export const useDataStore = create<DataState>((set, get) => ({
     const final = await finalize(raw, rates);
     set({ transactions: final });
     void pushAfterRestore();
+  },
+
+  purgeDeleted: async () => {
+    // Permanently empty the local trash. Drops the recoverable copies:
+    //   • removes the hidden rows from `transactionsRaw` + IDB,
+    //   • clears the hidden-id set (so they leave the trash),
+    //   • drops the cloud-restore snapshots (no more resurrection).
+    // Intentionally NO cloud writes: rows already deleted in the cloud stay
+    // deleted; a row that was only hidden locally (push off / not yet
+    // pushed) may return on a FULL re-sync — the confirm dialog says so.
+    const ids = useDeletedStore.getState().deletedIds;
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const { transactionsRaw: raw, rates } = get();
+    const nextRaw = raw.filter((t) => !idSet.has(t.id));
+    await db.saveTransactions(nextRaw);
+    await useDeletedStore.getState().clearAll();
+    await useDeletedPayloadsStore.getState().clearAll();
+    const final = await finalize(nextRaw, rates);
+    set({ transactions: final, transactionsRaw: nextRaw });
   },
 }));

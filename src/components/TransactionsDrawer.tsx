@@ -20,7 +20,7 @@ import { CategoryDot } from "./CategoryDot";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { BulkEditModal } from "./BulkEditModal";
 import { confirmBulkDelete } from "../lib/confirmBulkDelete";
-import { formatMoney, formatDate, formatNum, displayPayee, secondaryPayee } from "../lib/format";
+import { formatMoney, formatDate, formatNum, displayPayee, secondaryPayee, crossCurrencyReceived } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
 
@@ -447,6 +447,14 @@ export function TransactionsDrawer() {
                     >
                       <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
                       {formatMoney(t.amount, t.currency)}
+                      {(() => {
+                        const received = crossCurrencyReceived(t);
+                        return received ? (
+                          <div className="text-[10px] font-normal text-muted/80">
+                            ({received})
+                          </div>
+                        ) : null;
+                      })()}
                     </td>
                     <td className="table-td w-14 text-right whitespace-nowrap">
                       <button

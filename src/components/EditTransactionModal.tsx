@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2 } from "lucide-react";
+import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2 } from "lucide-react";
 import { extractHashtags } from "../lib/aggregations";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
+import { useDraftsStore } from "../store/useDraftsStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import {
   getBrandTitlesFromCache,
@@ -11,27 +12,78 @@ import {
   useZenmoneyStore,
 } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
+import { loadZenCache } from "../lib/zenmoneyCache";
+import {
+  buildDraftTransaction,
+  newDraftId,
+  type DraftFields,
+} from "../lib/zenmoneyPush";
 import { Combobox } from "./Combobox";
 import { DateField } from "./DateField";
 import { HashtagTextarea } from "./HashtagTextarea";
 import type { Transaction, TxKind } from "../types";
 
 interface Props {
-  tx: Transaction;
+  /** The transaction to edit. Omit (or null) to open the modal in
+   *  "create" mode — a brand-new draft operation. */
+  tx?: Transaction | null;
   onClose: () => void;
 }
 
+/** Today's date as ISO YYYY-MM-DD, for seeding a new draft. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 /**
- * Modal for editing a single transaction. Writes the patch to the local
- * overlay (`useEditsStore`) — the cloud copy in Zenmoney is never touched.
- * After save we re-run the local pipeline so derived fields stay consistent.
+ * Modal for editing a single transaction OR creating a new one.
+ *
+ * Edit mode (a `tx` is given): writes a patch to the local overlay
+ * (`useEditsStore`); the cloud copy is touched only on the next push.
+ *
+ * Create mode (no `tx`): builds a fresh `ZenTransaction` from the form and
+ * stores it as a draft (`useDraftsStore`) — it shows up in the list right
+ * away and is sent to Zenmoney on the next push. API mode only (the caller
+ * only offers the button when a token is present).
  */
-export function EditTransactionModal({ tx, onClose }: Props) {
+export function EditTransactionModal({ tx: txProp, onClose }: Props) {
+  const isCreate = !txProp;
   const rates = useDataStore((s) => s.rates);
+  // A blank seed so every `tx.<field>` read below works uniformly in
+  // create mode (no special-casing each reference).
+  const tx: Transaction = useMemo(
+    () =>
+      txProp ?? {
+        id: "",
+        date: todayIso(),
+        category: "",
+        subcategory: null,
+        categoryFull: "",
+        payee: "",
+        brand: null,
+        comment: "",
+        outcomeAccount: "",
+        outcomeAmount: 0,
+        outcomeCurrency: rates.base,
+        incomeAccount: "",
+        incomeAmount: 0,
+        incomeCurrency: rates.base,
+        kind: "expense",
+        amount: 0,
+        currency: rates.base,
+        account: "",
+        amountBase: 0,
+        createdAt: `${todayIso()}T00:00:00Z`,
+      },
+    [txProp, rates.base]
+  );
   const allTransactions = useDataStore((s) => s.transactions);
   const reapply = useDataStore((s) => s.reapplyRules);
+  const refresh = useDataStore((s) => s.refresh);
   const setEdit = useEditsStore((s) => s.setEdit);
+  const addDraft = useDraftsStore((s) => s.add);
   const deleteTransaction = useDataStore((s) => s.deleteTransaction);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleDelete() {
     const pushMode = useZenmoneyStore.getState().pushMode;
@@ -133,11 +185,16 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   const [accountCurrency, setAccountCurrency] = useState<Map<string, string>>(
     new Map()
   );
+  const [defaultAccount, setDefaultAccount] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     getLiveAccountsFromCache().then((list) => {
       if (cancelled || !list) return;
       setAccountCurrency(new Map(list.map((a) => [a.title, a.currency])));
+      // Remember the first non-archived account so create mode can seed
+      // the account fields (applied in a dedicated effect below).
+      const firstActive = list.find((a) => !a.archive) ?? list[0];
+      if (firstActive) setDefaultAccount(firstActive.title);
     });
     return () => {
       cancelled = true;
@@ -180,7 +237,9 @@ export function EditTransactionModal({ tx, onClose }: Props) {
 
   // All account names ever used in the dataset (debit / cash / credit /
   // debt — anything that's appeared either as `account`, `outcomeAccount`
-  // or `incomeAccount`). Sorted alphabetically.
+  // or `incomeAccount`), PLUS every live account from the Zenmoney cache.
+  // The cache matters for create mode: a freshly-opened account with no
+  // transactions yet still needs to be pickable. Sorted alphabetically.
   const accountOptions = useMemo(() => {
     const set = new Set<string>();
     for (const t of allTransactions) {
@@ -188,8 +247,9 @@ export function EditTransactionModal({ tx, onClose }: Props) {
       if (t.outcomeAccount) set.add(t.outcomeAccount);
       if (t.incomeAccount) set.add(t.incomeAccount);
     }
+    for (const title of accountCurrency.keys()) set.add(title);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [allTransactions]);
+  }, [allTransactions, accountCurrency]);
 
   const [date, setDate] = useState(tx.date);
   const [category, setCategory] = useState(tx.category);
@@ -211,7 +271,9 @@ export function EditTransactionModal({ tx, onClose }: Props) {
       for (const h of extractHashtags(t.comment)) set.add(h);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
   }, [allTransactions]);
-  const [amount, setAmount] = useState(String(tx.amount));
+  // Blank amount in create mode (don't prefill "0"); the existing value
+  // otherwise.
+  const [amount, setAmount] = useState(isCreate ? "" : String(tx.amount));
   const [currency, setCurrency] = useState(tx.currency);
   const [account, setAccount] = useState(tx.account);
   // Transfer-specific: outcome / income accounts. For income/expense we
@@ -222,6 +284,26 @@ export function EditTransactionModal({ tx, onClose }: Props) {
   const [inAmount, setInAmount] = useState(
     tx.incomeAmount ? String(tx.incomeAmount) : ""
   );
+
+  // Create mode: once the live accounts are known, seed the (still-blank)
+  // account fields with the first active account so the form is usable
+  // out of the box. Never stomps a user pick.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!isCreate || !defaultAccount) return;
+    setAccount((a) => a || defaultAccount);
+    setOutAcc((a) => a || defaultAccount);
+  }, [isCreate, defaultAccount]);
+  // Create mode, single-leg: a new operation's amount is in the source
+  // account's own currency (the draft builder resolves the instrument from
+  // the account, not the picker). Keep the currency field truthful by
+  // following the selected account; the picker is disabled in this mode.
+  useEffect(() => {
+    if (!isCreate || kind === "transfer") return;
+    const cur = accountCurrency.get(account.trim());
+    if (cur) setCurrency((c) => (c === cur ? c : cur));
+  }, [isCreate, kind, account, accountCurrency]);
+  /* eslint-enable react-hooks/set-state-in-effect */
   // Did the user hand-edit the received amount? While false we keep it in sync
   // with the FX rate; once they type, we stop overwriting (they exchanged at
   // their own rate). The «↻ по курсу» link flips it back to auto.
@@ -288,9 +370,53 @@ export function EditTransactionModal({ tx, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Create mode: build a fresh ZenTransaction from the form and store it as
+  // a draft. Validation/resolution lives in `buildDraftTransaction` (pure,
+  // unit-tested); we surface its skip reason inline on failure.
+  async function saveDraft() {
+    const cache = await loadZenCache();
+    if (!cache) {
+      setError("Создание операций доступно только при синхронизации с Zenmoney.");
+      return;
+    }
+    const fields: DraftFields = {
+      id: newDraftId(),
+      kind,
+      date,
+      amount: Number(amount.replace(",", ".")),
+      account: kind === "transfer" ? outAcc.trim() : account.trim(),
+      incomeAccount: kind === "transfer" ? inAcc.trim() : undefined,
+      incomeAmount:
+        kind === "transfer" && isCrossCurrencyTransfer
+          ? Number(inAmountValue.replace(",", "."))
+          : undefined,
+      category: kind === "transfer" ? undefined : category.trim(),
+      subcategory: kind === "transfer" ? null : subcategory.trim() || null,
+      payee: kind === "transfer" ? undefined : payee.trim(),
+      comment: comment.trim(),
+    };
+    const built = buildDraftTransaction(
+      fields,
+      cache,
+      Math.floor(Date.now() / 1000)
+    );
+    if (!built.zen) {
+      setError(built.skip ?? "Не удалось создать операцию");
+      return;
+    }
+    await addDraft(built.zen);
+    await refresh();
+    onClose();
+  }
+
   async function save() {
     setSaving(true);
+    setError(null);
     try {
+      if (isCreate) {
+        await saveDraft();
+        return;
+      }
       const amtNum = Number(amount.replace(",", "."));
       const safeAmount =
         Number.isFinite(amtNum) && amtNum >= 0 ? amtNum : tx.amount;
@@ -445,11 +571,20 @@ export function EditTransactionModal({ tx, onClose }: Props) {
       <div
         onClick={(e) => e.stopPropagation()}
         className="card w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        // Reserve the scrollbar's space at all times so toggling a field
+        // (e.g. the cross-currency «Получено» row appearing when you pick a
+        // foreign-currency account) doesn't change the content width and make
+        // the whole modal shift/jump sideways.
+        style={{ scrollbarGutter: "stable" }}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="font-semibold flex items-center gap-2">
-            <Pencil className="w-4 h-4 text-accent2" />
-            Редактирование операции
+            {isCreate ? (
+              <Plus className="w-4 h-4 text-accent2" />
+            ) : (
+              <Pencil className="w-4 h-4 text-accent2" />
+            )}
+            {isCreate ? "Новая операция" : "Редактирование операции"}
           </div>
           <button onClick={onClose} className="text-muted hover:text-text">
             <X className="w-4 h-4" />
@@ -587,7 +722,10 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               <select
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
-                className="input text-sm w-full"
+                // Create + single-leg: currency follows the account (the
+                // draft's amount is in the account's own currency).
+                disabled={isCreate && kind !== "transfer"}
+                className="input text-sm w-full disabled:opacity-60"
               >
                 {currencyOptions.map((c) => (
                   <option key={c} value={c}>
@@ -631,7 +769,7 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               </div>
             </Field>
           )}
-          {isCrossCurrencyMove && (
+          {!isCreate && isCrossCurrencyMove && (
             <p className="text-xs text-muted -mt-1">
               Счёт в {accountNativeCurrency}: укажите «Сумму» в{" "}
               {accountNativeCurrency}. Исходная сумма ({tx.amount} {currency})
@@ -685,16 +823,23 @@ export function EditTransactionModal({ tx, onClose }: Props) {
             />
           </Field>
         </div>
+        {error && (
+          <div className="px-5 -mt-1 pb-1 text-xs text-expense">{error}</div>
+        )}
         <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
-          <button
-            onClick={handleDelete}
-            disabled={saving}
-            className="btn-danger text-sm"
-            title="Удалить операцию"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Удалить
-          </button>
+          {isCreate ? (
+            <span />
+          ) : (
+            <button
+              onClick={handleDelete}
+              disabled={saving}
+              className="btn-danger text-sm"
+              title="Удалить операцию"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Удалить
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="btn-ghost text-sm">
               Отмена
@@ -704,8 +849,12 @@ export function EditTransactionModal({ tx, onClose }: Props) {
               disabled={saving}
               className="btn-primary text-sm"
             >
-              <Save className="w-3.5 h-3.5" />
-              Сохранить
+              {isCreate ? (
+                <Plus className="w-3.5 h-3.5" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              {isCreate ? "Создать" : "Сохранить"}
             </button>
           </div>
         </div>

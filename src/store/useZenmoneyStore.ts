@@ -21,8 +21,10 @@ import {
   buildResurrections,
   detectConflicts,
   sendPush,
+  validateDrafts,
   type PushBuildResult,
 } from "../lib/zenmoneyPush";
+import { useDraftsStore, loadDrafts } from "./useDraftsStore";
 import { loadSnapshotIndex, takeSnapshot } from "../lib/cloudSnapshots";
 import { useDataStore } from "./useDataStore";
 import { useCalibrationStore } from "./useCalibrationStore";
@@ -194,6 +196,8 @@ export interface SyncResult {
 export interface PushResult {
   /** How many local edits were successfully sent and acknowledged by Zenmoney. */
   pushed: number;
+  /** How many newly-created operations (drafts) were sent. */
+  created: number;
   /** Edits that couldn't be pushed (with reasons). They stay in the local overlay. */
   skipped: PushBuildResult["skipped"];
   /** ISO timestamp of the snapshot we took right before sending — for audit. */
@@ -467,12 +471,14 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       // "on-sync" push mode: piggy-back outgoing edits on every sync.
       // Fire-and-forget — the push has its own status / log entry, and
       // we don't want a failed push to taint the sync's return value.
-      // Guarded by `useEditsStore` having anything to send so the
-      // common "nothing changed locally" case stays a no-op.
+      // Guarded by there being anything to send (edits, deletions OR
+      // locally-created drafts) so the common "nothing changed locally"
+      // case stays a no-op.
       if (
         get().pushMode === "on-sync" &&
         (Object.keys(useEditsStore.getState().edits).length > 0 ||
-          useDeletedStore.getState().deletedIds.length > 0)
+          useDeletedStore.getState().deletedIds.length > 0 ||
+          Object.keys(useDraftsStore.getState().drafts).length > 0)
       ) {
         // Defer to next microtask so the sync's set() lands first and
         // pushPendingEdits sees `status: "ok"` (its own guard).
@@ -634,12 +640,25 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         cache,
         Math.floor(Date.now() / 1000)
       );
+      // Locally-created drafts (new operations not yet in the cloud). Each
+      // is a complete ZenTransaction; validate references against the fresh
+      // cache and re-stamp `changed`. They ride along in the same request.
+      const draftPush = validateDrafts(
+        await loadDrafts(),
+        cache,
+        Math.floor(Date.now() / 1000)
+      );
+      const draftTxs = draftPush.ready;
+      // Draft "skips" don't keep a row in limbo: an "already in cloud" draft
+      // is stale (the cleanup below drops it); other reasons go to the log.
+      skipped.push(...draftPush.skipped);
       if (
         toPush.length === 0 &&
         deletions.length === 0 &&
-        resurrections.length === 0
+        resurrections.length === 0 &&
+        draftTxs.length === 0
       ) {
-        const result: PushResult = { pushed: 0, skipped, snapshotId };
+        const result: PushResult = { pushed: 0, created: 0, skipped, snapshotId };
         set({
           pushStatus: "ok",
           pushError: null,
@@ -677,7 +696,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         get().serverTimestamp,
         toPush,
         deletions,
-        resurrections.map((r) => r.tx)
+        [...resurrections.map((r) => r.tx), ...draftTxs]
       );
 
       // 4) Merge server response into local cache so subsequent diffs
@@ -717,6 +736,23 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         await useEditsStore.getState().clearEdit(item.id);
       }
 
+      // 5b) Drop drafts that now live in the cloud (sent + echoed, or stale
+      //     ones that were already there). The mapper re-creates them from
+      //     the cache, so keeping the draft would double the row.
+      {
+        const liveNow = new Set(
+          nextCache.transactions
+            .filter((t) => !t.deleted)
+            .map((t) => String(t.id))
+        );
+        const sentIds = Object.keys(await loadDrafts()).filter((id) =>
+          liveNow.has(id)
+        );
+        if (sentIds.length > 0) {
+          await useDraftsStore.getState().clearMany(sentIds);
+        }
+      }
+
       // 6) Refresh main data store. Same pattern as `sync`, minus
       //    calibration (push doesn't move account balances locally).
       const importMeta: ImportMeta = {
@@ -737,6 +773,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       await db.saveJSON(LAST_PUSH_KEY, nowIso);
       const result: PushResult = {
         pushed: toPush.length,
+        created: draftTxs.length,
         skipped,
         snapshotId,
       };
@@ -750,6 +787,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       const parts: string[] = [];
       if (toPush.length > 0)
         parts.push(`Отправлено: ${formatNum(toPush.length)}`);
+      if (draftTxs.length > 0)
+        parts.push(`Создано: ${formatNum(draftTxs.length)}`);
       if (deletions.length > 0)
         parts.push(`Удалено: ${formatNum(deletions.length)}`);
       if (resurrections.length > 0)

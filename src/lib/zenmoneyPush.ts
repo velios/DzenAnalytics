@@ -805,6 +805,245 @@ function resolveTagId(
   return null;
 }
 
+/** A fresh UUID for a locally-created transaction. Thin wrapper around
+ *  `crypto.randomUUID()` so the create flow can inject a stable id in tests. */
+export function newDraftId(): string {
+  return crypto.randomUUID();
+}
+
+/** User-supplied fields for a brand-new transaction (create flow). Mirrors
+ *  the EditTransactionModal state, but for a row that has no original. */
+export interface DraftFields {
+  /** Pre-generated UUID (see `newDraftId`); injected for testability. */
+  id: string;
+  kind: TxKind;
+  /** ISO YYYY-MM-DD. */
+  date: string;
+  /** Main-leg amount, in the source account's own currency. */
+  amount: number;
+  /** Primary account title: source for expense/transfer, destination for
+   *  income/refund. For a transfer, `incomeAccount` names the destination. */
+  account: string;
+  /** Transfer destination account title (transfer only). */
+  incomeAccount?: string;
+  /** Destination-leg amount for a cross-currency transfer (in the
+   *  destination account's currency). Ignored when both legs share a
+   *  currency (income mirrors `amount`). */
+  incomeAmount?: number;
+  /** Category / subcategory for expense/income/refund (not transfer). */
+  category?: string;
+  subcategory?: string | null;
+  /** Brand-or-free-text counterparty. Resolved to a merchant id when it
+   *  matches the dictionary, else stored as a free-text payee. */
+  payee?: string;
+  comment?: string;
+}
+
+export type DraftBuildResult =
+  | { zen: ZenTransaction; skip?: undefined }
+  | { zen?: undefined; skip: string };
+
+/**
+ * Build a complete `ZenTransaction` for a brand-new (draft) operation from
+ * the user's form fields, resolving accounts / instruments / tags / merchants
+ * against the live cache. Pure — no IO. Returns `{ skip }` with a
+ * human-readable reason when a required field can't be resolved.
+ *
+ * Single-leg (expense/income/refund): both legs point at the same account,
+ * amount in that account's own currency. Transfer: two accounts; for a
+ * cross-currency transfer the user supplies both leg amounts (we never
+ * invent a rate). The forward mapper re-derives kind/«Перевод»/«Долг» from
+ * the legs, so we don't set a tag on transfers.
+ */
+export function buildDraftTransaction(
+  fields: DraftFields,
+  cache: ZenCache,
+  stampSeconds: number
+): DraftBuildResult {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fields.date)) {
+    return { skip: "некорректная дата" };
+  }
+  if (!(fields.amount > 0)) {
+    return { skip: "сумма должна быть больше нуля" };
+  }
+
+  const accountsByTitle = new Map<string, ZenAccount>();
+  for (const a of cache.accounts) {
+    const prev = accountsByTitle.get(a.title);
+    if (!prev || (prev.archive && !a.archive)) accountsByTitle.set(a.title, a);
+  }
+  const tagsByTitle = new Map<string, ZenTag[]>();
+  for (const t of cache.tags) {
+    if (t.archive) continue;
+    const list = tagsByTitle.get(t.title) ?? [];
+    list.push(t);
+    tagsByTitle.set(t.title, list);
+  }
+  const tagsById = new Map(cache.tags.map((t) => [t.id, t]));
+  const merchantsByTitle = new Map<string, string>();
+  for (const m of cache.merchants) {
+    const key = (m.title || "").trim().toLowerCase();
+    if (key && !merchantsByTitle.has(key)) merchantsByTitle.set(key, m.id);
+  }
+
+  const user = cache.user[0]?.id;
+  if (user == null) return { skip: "нет данных пользователя в кэше" };
+
+  // Base shell — every field present, Zenmoney-safe defaults.
+  const zen: ZenTransaction = {
+    id: fields.id,
+    user,
+    date: fields.date,
+    income: 0,
+    outcome: 0,
+    changed: stampSeconds,
+    incomeInstrument: 0,
+    outcomeInstrument: 0,
+    created: stampSeconds,
+    originalPayee: null,
+    deleted: false,
+    viewed: true,
+    hold: null,
+    qrCode: null,
+    source: null,
+    incomeAccount: "",
+    outcomeAccount: "",
+    tag: null,
+    comment: fields.comment ? fields.comment : null,
+    payee: null,
+    opIncome: null,
+    opOutcome: null,
+    opIncomeInstrument: null,
+    opOutcomeInstrument: null,
+    latitude: null,
+    longitude: null,
+    merchant: null,
+    incomeBankID: null,
+    outcomeBankID: null,
+    reminderMarker: null,
+  };
+
+  if (fields.kind === "transfer") {
+    const src = accountsByTitle.get(fields.account);
+    const dst = fields.incomeAccount
+      ? accountsByTitle.get(fields.incomeAccount)
+      : undefined;
+    if (!src) return { skip: `счёт "${fields.account}" не найден` };
+    if (!dst) {
+      return { skip: `счёт зачисления "${fields.incomeAccount ?? ""}" не найден` };
+    }
+    if (src.id === dst.id) return { skip: "счета перевода совпадают" };
+    const sameCurrency = src.instrument === dst.instrument;
+    const incomeAmount = sameCurrency ? fields.amount : fields.incomeAmount;
+    if (!sameCurrency && !(incomeAmount! > 0)) {
+      return { skip: "укажите сумму зачисления для перевода в другой валюте" };
+    }
+    zen.outcomeAccount = src.id;
+    zen.outcomeInstrument = src.instrument;
+    zen.outcome = fields.amount;
+    zen.incomeAccount = dst.id;
+    zen.incomeInstrument = dst.instrument;
+    zen.income = incomeAmount!;
+  } else {
+    // Single-leg: expense leaves the account, income/refund lands in it.
+    const acc = accountsByTitle.get(fields.account);
+    if (!acc) return { skip: `счёт "${fields.account}" не найден` };
+    zen.outcomeAccount = acc.id;
+    zen.incomeAccount = acc.id;
+    zen.outcomeInstrument = acc.instrument;
+    zen.incomeInstrument = acc.instrument;
+    if (fields.kind === "expense") {
+      zen.outcome = fields.amount;
+    } else {
+      zen.income = fields.amount;
+    }
+
+    // Category is required for single-leg rows and must resolve to a tag.
+    const category = (fields.category || "").trim();
+    if (!category) return { skip: "укажите категорию" };
+    if (SYNTHETIC_CATEGORIES.has(category)) {
+      return { skip: `категория "${category}" — локальный ярлык, тега в Zenmoney нет` };
+    }
+    const tagId = resolveTagId(
+      category,
+      fields.subcategory?.trim() || null,
+      tagsByTitle,
+      tagsById
+    );
+    if (!tagId) {
+      return {
+        skip: `категория "${category}"${fields.subcategory ? ` / "${fields.subcategory}"` : ""} не найдена в тегах Zenmoney`,
+      };
+    }
+    zen.tag = [tagId];
+  }
+
+  // Counterparty: known brand → merchant id; else free-text payee.
+  const counterparty = (fields.payee || "").trim();
+  if (counterparty) {
+    const merchantId = merchantsByTitle.get(counterparty.toLowerCase());
+    if (merchantId) zen.merchant = merchantId;
+    else zen.payee = counterparty;
+  }
+
+  return { zen };
+}
+
+export interface DraftPushResult {
+  /** Drafts whose references all resolve — ready to send. */
+  ready: ZenTransaction[];
+  /** Drafts we couldn't send, with a reason (stale cache, id clash). */
+  skipped: { id: string; reason: string }[];
+}
+
+/**
+ * Validate locally-created drafts against the current cache right before a
+ * push. A draft is a full ZenTransaction, but the cache may have moved on
+ * since it was built (an account/tag got archived elsewhere), so we re-check
+ * that every referenced account / instrument / tag still exists and that the
+ * fresh UUID isn't somehow already live. Re-stamps `changed` to now so the
+ * create wins last-write-wins. Pure — no IO.
+ */
+export function validateDrafts(
+  drafts: Record<string, ZenTransaction>,
+  cache: ZenCache,
+  stampSeconds: number
+): DraftPushResult {
+  const accountIds = new Set(cache.accounts.map((a) => a.id));
+  const instrumentIds = new Set(cache.instruments.map((i) => i.id));
+  const tagIds = new Set(cache.tags.map((t) => t.id));
+  const liveTxIds = new Set(
+    cache.transactions.filter((t) => !t.deleted).map((t) => String(t.id))
+  );
+  const ready: ZenTransaction[] = [];
+  const skipped: { id: string; reason: string }[] = [];
+  for (const [id, zt] of Object.entries(drafts)) {
+    if (liveTxIds.has(id)) {
+      // Already echoed back from a prior push — the store cleanup just
+      // hasn't run yet. Skip silently-ish (caller drops it from the store).
+      skipped.push({ id, reason: "операция уже есть в облаке" });
+      continue;
+    }
+    if (!accountIds.has(zt.outcomeAccount) || !accountIds.has(zt.incomeAccount)) {
+      skipped.push({ id, reason: "счёт операции не найден в облаке (нужен ре-синк)" });
+      continue;
+    }
+    if (
+      !instrumentIds.has(zt.outcomeInstrument) ||
+      !instrumentIds.has(zt.incomeInstrument)
+    ) {
+      skipped.push({ id, reason: "валюта операции не найдена в облаке" });
+      continue;
+    }
+    if (zt.tag && zt.tag.some((t) => !tagIds.has(t))) {
+      skipped.push({ id, reason: "категория операции не найдена в облаке" });
+      continue;
+    }
+    ready.push({ ...zt, changed: stampSeconds });
+  }
+  return { ready, skipped };
+}
+
 /**
  * Send the prepared push batch. Returns the server's response so the
  * caller can merge the canonical `changed` timestamps back into cache.

@@ -80,6 +80,23 @@ export function formatMoney(
   return `${sign}${value} ${symbol}`;
 }
 
+/**
+ * For a cross-currency transfer the amount cell shows the SENT leg (e.g.
+ * 50 000 ₽). This returns the RECEIVED leg formatted in its own currency
+ * (e.g. 550 $) so callers can show the second currency alongside — or null
+ * for same-currency transfers and non-transfers.
+ */
+export function crossCurrencyReceived(
+  t: Pick<
+    Transaction,
+    "kind" | "incomeAmount" | "incomeCurrency" | "outcomeCurrency"
+  >
+): string | null {
+  if (t.kind !== "transfer") return null;
+  if (!t.incomeAmount || t.incomeCurrency === t.outcomeCurrency) return null;
+  return formatMoney(t.incomeAmount, t.incomeCurrency);
+}
+
 export function formatNum(value: number, opts?: { compact?: boolean }): string {
   return new Intl.NumberFormat("ru-RU", {
     notation: opts?.compact ? "compact" : "standard",
