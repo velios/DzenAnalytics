@@ -267,6 +267,7 @@ export function RecurringPage() {
                   // red = inactive (no payment for more than ~2 expected cycles).
                   key: "status",
                   label: "Статус",
+                  align: "center",
                   sortValue: (c) => (c.stale ? "неактивен" : "активен"),
                   render: (c) => (
                     <span

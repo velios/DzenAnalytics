@@ -7,7 +7,7 @@ export type SortDir = "asc" | "desc";
 export interface Column<T> {
   key: string;
   label: string;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   width?: string;
   sortable?: boolean;
   sortValue?: (row: T) => string | number | null | undefined;
@@ -159,7 +159,11 @@ export function SortableTable<T>({
                 return (
                   <th
                     key={c.key}
-                    className={clsx("table-th", c.align === "right" && "text-right")}
+                    className={clsx(
+                      "table-th",
+                      c.align === "right" && "text-right",
+                      c.align === "center" && "text-center"
+                    )}
                     style={c.width ? { width: c.width } : undefined}
                   >
                     {sortable ? (
@@ -224,7 +228,11 @@ export function SortableTable<T>({
                       {columns.map((c) => (
                         <td
                           key={c.key}
-                          className={clsx("table-td", c.align === "right" && "text-right")}
+                          className={clsx(
+                            "table-td",
+                            c.align === "right" && "text-right",
+                            c.align === "center" && "text-center"
+                          )}
                         >
                           {c.render(row, i)}
                         </td>
