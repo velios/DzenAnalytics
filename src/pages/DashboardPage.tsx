@@ -874,10 +874,7 @@ export function DashboardPage() {
           <div className="flex items-center justify-between mb-3">
             <div className="font-semibold flex items-center gap-2">
               <PieChart className="w-4 h-4 text-accent" />
-              Топ-10 категорий за{" "}
-              <span className="text-muted font-normal text-xs">
-                {monthLabel(currentYM)}
-              </span>
+              <span>Топ-10 категорий за {monthLabel(currentYM)}</span>
             </div>
             <Link
               to="/categories"
