@@ -53,14 +53,22 @@ export interface MappedDiff {
 }
 
 /**
- * Zenmoney stores `tag.color` as an ARGB-packed unsigned long
- * (a*256³ + r*256² + g*256 + b). Decode to a CSS rgb() string, or null when
- * the colour is missing / fully transparent.
+ * Decode `tag.color` (a packed colour int) to a CSS rgb() string, or null when
+ * no colour is set.
+ *
+ * The RGB lives in the LOW 24 bits; the top (alpha) byte is NOT reliable —
+ * Zenmoney stores most colours as plain RGB with a zero alpha byte (a small
+ * positive int like 4499017 → #44a649), and only some with full alpha 0xFF
+ * (a large/negative int). So we mirror the reference client (Zerro): ignore
+ * the alpha byte entirely and decode the low 24 bits for any non-null value.
+ *
+ * Previously we nulled out on `alpha === 0`, which silently dropped the real
+ * colour of the majority of categories for such users — they fell back to the
+ * synthetic hash palette and looked nothing like Zenmoney. Only `null`/absent
+ * means "no colour".
  */
 function colorIntToCss(c: number | null | undefined): string | null {
   if (c == null) return null;
-  const a = (c >>> 24) & 0xff;
-  if (a === 0) return null;
   const r = (c >>> 16) & 0xff;
   const g = (c >>> 8) & 0xff;
   const b = c & 0xff;
