@@ -78,7 +78,7 @@ export function AccountsPage() {
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [view, setView] = useState<View>("stacked");
   const [scope, setScope] = useState<Scope>("all");
-  const [accountsView, setAccountsView] = useState<AccountsView>("cards");
+  const [accountsView, setAccountsView] = useState<AccountsView>("table");
   // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage) are
   // shown only when the global setting (Настройки → Обработка) is on.
   const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
@@ -157,7 +157,8 @@ export function AccountsPage() {
     const titles = new Set<string>();
     for (const a of accounts) titles.add(a.account);
     for (const a of liveList) {
-      if (a.archive) continue; // archived = closed, never in the list
+      // Archived (closed) accounts are kept but grouped below active ones
+      // (see the sort), so the user can still review them without clutter up top.
       // Off-balance accounts only when the global setting opts them in.
       if (!a.inBalance && !includeOffBalance) continue;
       // Skip dormant zero-balance accounts with no activity — they'd be noise.
@@ -184,8 +185,12 @@ export function AccountsPage() {
         offBalance: live ? !live.inBalance : false,
       };
     });
-    // Sort by real balance when we have it, otherwise by the flow delta.
-    rows.sort((x, y) => (y.balanceBase ?? y.delta) - (x.balanceBase ?? x.delta));
+    // Active first, archived grouped below; within each group sort by real
+    // balance when we have it, otherwise by the flow delta.
+    rows.sort((x, y) => {
+      if (x.archive !== y.archive) return x.archive ? 1 : -1;
+      return (y.balanceBase ?? y.delta) - (x.balanceBase ?? x.delta);
+    });
     return rows;
   }, [accounts, liveAccounts, base, rates, includeOffBalance]);
 
@@ -646,16 +651,6 @@ export function AccountsPage() {
             className="flex bg-panel2 rounded-lg p-1 border border-border"
           >
             <button
-              onClick={() => setAccountsView("cards")}
-              aria-pressed={accountsView === "cards"}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
-                accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
-              }`}
-            >
-              <LayoutGrid className="w-3 h-3" />
-              Карточки
-            </button>
-            <button
               onClick={() => setAccountsView("table")}
               aria-pressed={accountsView === "table"}
               className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
@@ -664,6 +659,16 @@ export function AccountsPage() {
             >
               <TableIcon className="w-3 h-3" />
               Таблица
+            </button>
+            <button
+              onClick={() => setAccountsView("cards")}
+              aria-pressed={accountsView === "cards"}
+              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
+                accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
+              }`}
+            >
+              <LayoutGrid className="w-3 h-3" />
+              Карточки
             </button>
           </div>
         </div>
@@ -699,7 +704,7 @@ export function AccountsPage() {
                     isSel
                       ? "bg-accent/10 border-accent"
                       : "bg-panel2 border-border hover:border-accent/50"
-                  }`}
+                  } ${a.archive ? "opacity-60" : ""}`}
                 >
                   <div className="flex items-start justify-between mb-2 gap-2">
                     <button
@@ -717,6 +722,9 @@ export function AccountsPage() {
                             {accountTypeLabel(a.type)}
                             {a.offBalance && (
                               <span className="ml-1 text-accent2">· вне баланса</span>
+                            )}
+                            {a.archive && (
+                              <span className="ml-1 text-muted">· архив</span>
                             )}
                           </span>
                         )}
@@ -838,6 +846,9 @@ export function AccountsPage() {
                                 {accountTypeLabel(a.type)}
                                 {a.offBalance && (
                                   <span className="ml-1 text-accent2">· вне баланса</span>
+                                )}
+                                {a.archive && (
+                                  <span className="ml-1 text-muted">· архив</span>
                                 )}
                               </div>
                             )}
