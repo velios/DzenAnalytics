@@ -564,7 +564,7 @@ export function DashboardPage() {
               </div>
             </div>
             <Link to="/cashflow" className="text-xs text-accent hover:underline flex items-center gap-1">
-              подробнее <ArrowRight className="w-3 h-3" />
+              Подробнее <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <div className="h-64">
@@ -604,7 +604,7 @@ export function DashboardPage() {
               </div>
             </div>
             <Link to="/accounts" className="text-xs text-accent hover:underline flex items-center gap-1">
-              счета <ArrowRight className="w-3 h-3" />
+              Счета <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <div className="h-64">
@@ -759,7 +759,7 @@ export function DashboardPage() {
               to="/accounts"
               className="text-xs text-accent hover:underline flex items-center gap-1"
             >
-              все <ArrowRight className="w-3 h-3" />
+              Все <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -880,7 +880,7 @@ export function DashboardPage() {
               to="/categories"
               className="text-xs text-accent hover:underline flex items-center gap-1"
             >
-              все <ArrowRight className="w-3 h-3" />
+              Все <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {catsThisMonth.length === 0 ? (
@@ -934,7 +934,7 @@ export function DashboardPage() {
               Ближайшие регулярные
             </div>
             <Link to="/recurring" className="text-xs text-accent hover:underline flex items-center gap-1">
-              все ({recurring.length}) <ArrowRight className="w-3 h-3" />
+              Все ({recurring.length}) <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {upcoming.length === 0 ? (
@@ -976,7 +976,7 @@ export function DashboardPage() {
               Активность за 90 дней
             </div>
             <Link to="/calendar" className="text-xs text-accent hover:underline flex items-center gap-1">
-              календарь <ArrowRight className="w-3 h-3" />
+              Календарь <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <MiniHeatmap dayMap={dayMap} days={90} base={base} />
