@@ -12,12 +12,16 @@ interface State {
   loaded: boolean;
   hydrate: () => Promise<void>;
   setAll: (m: Record<string, CategoryMeta>) => Promise<void>;
+  /** Optimistically set a category's «обязательная» flag (the 50/30/20
+   *  needs/wants source). Used by the Categories editor so the split updates
+   *  instantly; the real value rides to the cloud via the tag-edit overlay. */
+  setRequired: (category: string, required: boolean | null) => Promise<void>;
   clear: () => Promise<void>;
 }
 
 const KEY = "categoryMeta";
 
-export const useCategoryMetaStore = create<State>((set) => ({
+export const useCategoryMetaStore = create<State>((set, get) => ({
   meta: {},
   loaded: false,
 
@@ -29,6 +33,21 @@ export const useCategoryMetaStore = create<State>((set) => ({
   setAll: async (m) => {
     await db.saveJSON(KEY, m);
     set({ meta: m });
+  },
+
+  setRequired: async (category, required) => {
+    const cur = get().meta[category];
+    // No meta row yet (e.g. a tag with no transactions) → synthesise a minimal
+    // one so the flag still persists and the 50/30/20 split picks it up.
+    const next = {
+      ...get().meta,
+      [category]: {
+        ...(cur || { color: null, icon: null, picture: null }),
+        required,
+      },
+    };
+    await db.saveJSON(KEY, next);
+    set({ meta: next });
   },
 
   clear: async () => {

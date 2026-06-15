@@ -218,12 +218,20 @@ export function ComparePage() {
     return allCats
       .map((cat) => ({
         category: cat,
-        a: Math.round(aByCat.get(cat) || 0),
-        b: Math.round(bByCat.get(cat) || 0),
+        // Clamp at 0 for the bar chart: a category whose refunds exceed its
+        // expenses has a negative "expense" total, which would otherwise drag
+        // the X-axis below zero and waste half the plot. The metrics table
+        // above still shows the real signed numbers.
+        a: Math.max(0, Math.round(aByCat.get(cat) || 0)),
+        b: Math.max(0, Math.round(bByCat.get(cat) || 0)),
         diff: (aByCat.get(cat) || 0) - (bByCat.get(cat) || 0),
       }))
-      .sort((x, y) => Math.max(y.a, y.b) - Math.max(x.a, x.b))
-      .slice(0, 15);
+      // Drop rows with no expense in either period (income-only categories, or
+      // net-refund categories clamped to 0) so the chart has no empty bars.
+      // All remaining categories are shown (no top-N cap); the chart height
+      // grows with the count so nothing is silently hidden.
+      .filter((d) => d.a > 0 || d.b > 0)
+      .sort((x, y) => Math.max(y.a, y.b) - Math.max(x.a, x.b));
   }, [catsA, catsB, allCats]);
 
   if (transactions.length === 0) return <EmptyState />;
@@ -234,34 +242,36 @@ export function ComparePage() {
         icon={GitCompare}
         title="Сравнение периодов"
         hint="Два периода рядом: ключевые метрики и расходы по категориям."
+        right={
+          <div className="flex bg-panel2 rounded-lg p-1 border border-border flex-wrap">
+            {(
+              [
+                ["this_vs_prev_month", "Месяц"],
+                ["last_30_vs_prev_30", "30 дней"],
+                ["last_90_vs_prev_90", "90 дней"],
+                ["ytd_vs_prev_ytd", "YTD"],
+                ["custom", "Свои даты"],
+              ] as const
+            ).map(([k, l]) => (
+              <button
+                key={k}
+                onClick={() => setPreset(k)}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                  preset === k
+                    ? "bg-accent text-accent-fg"
+                    : "text-muted hover:text-text"
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        }
       />
 
-      <div className="card card-pad">
-        <div className="flex flex-wrap gap-2 mb-4">
-          {(
-            [
-              ["this_vs_prev_month", "Месяц / пред. месяц"],
-              ["ytd_vs_prev_ytd", "YTD / прошлый YTD"],
-              ["last_30_vs_prev_30", "30 / пред. 30"],
-              ["last_90_vs_prev_90", "90 / пред. 90"],
-              ["custom", "Свои даты"],
-            ] as const
-          ).map(([k, l]) => (
-            <button
-              key={k}
-              onClick={() => setPreset(k)}
-              className={`px-3 py-1.5 text-xs rounded-lg border ${
-                preset === k
-                  ? "bg-accent text-accent-fg border-accent font-medium"
-                  : "bg-panel2 text-muted border-border hover:text-text"
-              }`}
-            >
-              {l}
-            </button>
-          ))}
-        </div>
-        {preset === "custom" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-border">
+      {preset === "custom" && (
+        <div className="card card-pad">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <div className="label mb-2">Период А</div>
               <div className="flex gap-2">
@@ -297,8 +307,8 @@ export function ComparePage() {
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {[
@@ -422,14 +432,17 @@ export function ComparePage() {
         <div className="font-semibold mb-3">
           Расходы по категориям: {ranges.a.label} vs {ranges.b.label}
         </div>
-        <div className="text-xs text-muted mb-3">
-          Клик по бару — операции категории в соответствующем периоде
-        </div>
-        <div className="h-96">
+        <div style={{ height: Math.max(384, compareData.length * 34 + 48) }}>
           <ResponsiveContainer>
-            <BarChart data={compareData} layout="vertical" margin={{ left: 100 }}>
+            <BarChart data={compareData} layout="vertical" margin={{ left: 100 }} barGap={2}>
               <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
-              <XAxis type="number" stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
+              <XAxis
+                type="number"
+                allowDecimals={false}
+                stroke={chartAxisStroke}
+                fontSize={11}
+                tickFormatter={(v) => formatNum(v, { compact: true })}
+              />
               {/* interval={0} prevents Recharts from auto-skipping
                   category labels when the list gets long. */}
               <YAxis
@@ -450,6 +463,8 @@ export function ComparePage() {
                 name={ranges.a.label}
                 fill="#22D3EE"
                 radius={[0, 4, 4, 0]}
+                maxBarSize={13}
+                isAnimationActive={false}
                 cursor="pointer"
                 activeBar={false}
                 onClick={((d: unknown) => {
@@ -462,6 +477,8 @@ export function ComparePage() {
                 name={ranges.b.label}
                 fill="#A78BFA"
                 radius={[0, 4, 4, 0]}
+                maxBarSize={13}
+                isAnimationActive={false}
                 cursor="pointer"
                 activeBar={false}
                 onClick={((d: unknown) => {

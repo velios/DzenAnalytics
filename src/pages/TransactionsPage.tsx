@@ -635,7 +635,6 @@ function Row({
         selected ? "bg-accent/5" : "hover:bg-panel2/40"
       }`}
       style={{ gridTemplateColumns: template }}
-      title="Двойной клик — редактировать"
     >
       <input
         type="checkbox"

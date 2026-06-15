@@ -1053,11 +1053,13 @@ export async function sendPush(
   serverTimestamp: number,
   items: PushItem[],
   deletions: ZenDeletion[] = [],
-  resurrections: ZenTransaction[] = []
+  resurrections: ZenTransaction[] = [],
+  tags: ZenTag[] = []
 ): Promise<ZenDiffResponse> {
   const payload: PushPayload = {
     transaction: [...items.map((i) => i.zen), ...resurrections],
     ...(deletions.length > 0 ? { deletion: deletions } : {}),
+    ...(tags.length > 0 ? { tag: tags } : {}),
   };
   // Debug aid: surface the full payload in DevTools so it's easy to
   // verify which fields actually landed in the request body. Disabled
@@ -1081,4 +1083,34 @@ export async function sendPush(
     console.groupEnd();
   }
   return pushDiff(token, serverTimestamp, payload);
+}
+
+/**
+ * Build the `ZenTag[]` payload for pending category-tag edits (currently only
+ * the «обязательная» `required` flag). Same strategy as transactions: take the
+ * ORIGINAL tag from cache and override only the touched field, so we never
+ * blank out fields we don't model locally (color, icon, budget*, parent…).
+ *
+ * Edits that map to no cached tag (needs a re-sync) or are a no-op (value
+ * already matches the cache) are skipped — the former reported in `skipped`,
+ * the latter silently dropped.
+ */
+export function buildTagPush(
+  edits: Record<string, { required: boolean | null }>,
+  cacheTags: ZenTag[],
+  stampSeconds: number
+): { tags: ZenTag[]; skipped: { id: string; reason: string }[] } {
+  const byId = new Map(cacheTags.map((t) => [t.id, t]));
+  const tags: ZenTag[] = [];
+  const skipped: { id: string; reason: string }[] = [];
+  for (const [id, edit] of Object.entries(edits)) {
+    const orig = byId.get(id);
+    if (!orig) {
+      skipped.push({ id, reason: "категория не найдена в кэше (нужна синхронизация)" });
+      continue;
+    }
+    if ((orig.required ?? null) === (edit.required ?? null)) continue; // no-op
+    tags.push({ ...orig, required: edit.required, changed: stampSeconds });
+  }
+  return { tags, skipped };
 }

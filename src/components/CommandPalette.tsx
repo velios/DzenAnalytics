@@ -35,7 +35,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useThemeStore } from "../store/useThemeStore";
 import { useFiltersStore } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
-import { groupByCategory, topPayees } from "../lib/aggregations";
+import { groupByCategory, topPayees, NO_PAYEE_LABEL } from "../lib/aggregations";
 import { monthLabel, ymKey } from "../lib/format";
 
 interface Item {
@@ -196,7 +196,7 @@ export function CommandPalette({ open, onClose }: Props) {
           hint: `${p.count} оп.`,
           icon: TrendingUp,
           action: () => {
-            const txs = transactions.filter((t) => t.payee === p.payee);
+            const txs = transactions.filter((t) => (t.payee || NO_PAYEE_LABEL) === p.payee);
             showDrill(p.payee, txs, "Получатель");
           },
         });

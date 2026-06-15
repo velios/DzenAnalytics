@@ -629,7 +629,12 @@ export interface DuplicateGroup {
   totalAmount: number;
 }
 
-export function detectDuplicates(txs: Transaction[], windowDays = 3): DuplicateGroup[] {
+export function detectDuplicates(
+  txs: Transaction[],
+  windowDays = 3,
+  /** Signatures the user marked «не дубликаты» — never flagged again. */
+  excluded?: Set<string>
+): DuplicateGroup[] {
   const groups = new Map<string, Transaction[]>();
   for (const t of txs) {
     if (t.kind === "transfer") continue;
@@ -639,6 +644,7 @@ export function detectDuplicates(txs: Transaction[], windowDays = 3): DuplicateG
   }
   const out: DuplicateGroup[] = [];
   for (const [sig, list] of groups) {
+    if (excluded?.has(sig)) continue; // user said these aren't duplicates
     if (list.length < 2) continue;
     list.sort((a, b) => a.date.localeCompare(b.date));
     const cluster: Transaction[] = [list[0]];
@@ -1040,6 +1046,11 @@ export interface PayeeBucket {
   count: number;
 }
 
+/** Bucket label for transactions without a payee. Also the value the drill-down
+ *  matches against, via `t.payee || NO_PAYEE_LABEL` — so clicking the row opens
+ *  exactly those empty-payee operations instead of an empty drawer. */
+export const NO_PAYEE_LABEL = "Без получателя";
+
 export function topPayees(txs: Transaction[], kind: "expense" | "income" = "expense", limit = 20): PayeeBucket[] {
   const map = new Map<string, PayeeBucket>();
   for (const t of txs) {
@@ -1047,7 +1058,7 @@ export function topPayees(txs: Transaction[], kind: "expense" | "income" = "expe
     // that payee's net spend ("I bought X then returned it" → net 0).
     const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
     if (!include) continue;
-    const key = t.payee || "—";
+    const key = t.payee || NO_PAYEE_LABEL;
     let b = map.get(key);
     if (!b) {
       b = { payee: key, total: 0, count: 0 };

@@ -24,6 +24,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { groupByCategory } from "../lib/aggregations";
 import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
+import { colorForCategory } from "../lib/categoryColor";
 import {
   formatMoney,
   formatNum,
@@ -36,6 +37,7 @@ import {
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { CategoryRequiredEditor } from "../components/CategoryRequiredEditor";
 import { PieChart as PieChartIcon } from "lucide-react";
 import type { Transaction } from "../types";
 
@@ -258,13 +260,6 @@ export function CategoriesPage() {
   useEffect(() => {
     if (!metaLoaded) hydrateMeta();
   }, [metaLoaded, hydrateMeta]);
-  const categoryColors = useMemo(() => {
-    const m: Record<string, string | null> = {};
-    for (const [name, info] of Object.entries(categoryMeta)) {
-      m[name] = info.color;
-    }
-    return m;
-  }, [categoryMeta]);
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
@@ -292,18 +287,14 @@ export function CategoriesPage() {
   const tree = useMemo(() => buildHierarchy(filtered, kind), [filtered, kind]);
 
   // Single source of truth for "what colour belongs to this category".
-  // Donut / Treemap / Иерархия sidebar all consult this map, so a
-  // category's swatch is identical across all three visualisations.
-  // Zenmoney-provided colour (from `tag.color`) wins; otherwise we pick
-  // a palette colour by the category's index in the *tree* — that's the
-  // order the user sees in the sidebar, so palette-based fallbacks line up.
+  // Donut / Treemap / Иерархия sidebar all consult this map. Zenmoney's
+  // `tag.color` wins; otherwise a DETERMINISTIC colour from the name (shared
+  // `colorForCategory`), so the same category matches every other page.
   const resolvedCategoryColors = useMemo(() => {
     const m: Record<string, string> = {};
-    tree.forEach((node, i) => {
-      m[node.name] = categoryColors[node.name] || COLORS[i % COLORS.length];
-    });
+    for (const node of tree) m[node.name] = colorForCategory(node.name, categoryMeta);
     return m;
-  }, [tree, categoryColors]);
+  }, [tree, categoryMeta]);
 
   const totalAll = tree.reduce((s, n) => s + n.total, 0);
 
@@ -355,8 +346,6 @@ export function CategoriesPage() {
 
   if (transactions.length === 0) return <EmptyState />;
 
-  const max = data[0]?.value || 1;
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -401,7 +390,7 @@ export function CategoriesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card card-pad lg:col-span-2">
           <div className="font-semibold mb-3">
-            {view === "donut" ? "Доля категорий (клик)" : "Карта категорий (клик)"}
+            {view === "donut" ? "Доля категорий" : "Карта категорий"}
           </div>
           <div className="h-[450px]">
             {view === "donut" ? (
@@ -617,18 +606,13 @@ export function CategoriesPage() {
       </div>
 
       <div className="card card-pad">
-        <div className="font-semibold mb-3">Все категории (клик по бару)</div>
+        <div className="font-semibold mb-3">Все категории</div>
         <div className="h-96">
           <ResponsiveContainer>
             <BarChart
               data={data.slice(0, 25)}
               layout="vertical"
               margin={{ left: 100 }}
-              onClick={(e: unknown) => {
-                const ev = e as { activePayload?: { payload?: { name?: string } }[] } | undefined;
-                const name = ev?.activePayload?.[0]?.payload?.name;
-                if (name) openCategory(name);
-              }}
               style={{ cursor: "pointer" }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} />
@@ -662,6 +646,12 @@ export function CategoriesPage() {
                 name={kind === "expense" ? "Расход" : "Доход"}
                 radius={[0, 4, 4, 0]}
                 activeBar={false}
+                cursor="pointer"
+                onClick={(d: unknown) => {
+                  const p = d as { name?: string; payload?: { name?: string } };
+                  const name = p?.name ?? p?.payload?.name;
+                  if (name) openCategory(name);
+                }}
               >
                 {data.slice(0, 25).map((d, i) => (
                   <Cell
@@ -675,10 +665,9 @@ export function CategoriesPage() {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="text-xs text-muted mt-2">
-          Показаны топ-25 (всего {data.length}). Используется максимум {Math.round(max / 1000)}K {base}.
-        </div>
       </div>
+
+      <CategoryRequiredEditor />
     </div>
   );
 }

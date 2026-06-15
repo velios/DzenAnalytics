@@ -179,4 +179,15 @@ describe("detectDuplicates", () => {
     );
     expect(groups.length).toBe(0);
   });
+
+  it("skips groups whose signature is in the exclusion set («не дубликаты»)", () => {
+    const txs = [
+      tx({ id: "a", date: "2026-01-10", payee: "Магнит", amount: 250, kind: "expense" }),
+      tx({ id: "b", date: "2026-01-11", payee: "Магнит", amount: 250, kind: "expense" }),
+    ];
+    const sig = detectDuplicates(txs, 3)[0].signature;
+    expect(detectDuplicates(txs, 3, new Set([sig]))).toEqual([]);
+    // an unrelated signature in the set doesn't suppress real duplicates
+    expect(detectDuplicates(txs, 3, new Set(["other"]))).toHaveLength(1);
+  });
 });

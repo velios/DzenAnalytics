@@ -1,7 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { ResponsiveContainer, Sankey, Tooltip } from "recharts";
 import { GitFork } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
+import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
+import { colorForCategory } from "../lib/categoryColor";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { buildSankey } from "../lib/aggregations";
@@ -19,6 +21,12 @@ const COLORS = {
 export function SankeyPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const categoryMeta = useCategoryMetaStore((s) => s.meta);
+  const metaLoaded = useCategoryMetaStore((s) => s.loaded);
+  const hydrateMeta = useCategoryMetaStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!metaLoaded) hydrateMeta();
+  }, [metaLoaded, hydrateMeta]);
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
@@ -71,7 +79,13 @@ export function SankeyPage() {
                 const w = width ?? 0;
                 const h = height ?? 0;
                 const kind = payload?.kind || "account";
-                const fill = COLORS[kind];
+                // Expense-category nodes get their own per-category colour
+                // (API / deterministic), matching every other page. Income
+                // sources and the budget node keep their flow colours.
+                const fill =
+                  kind === "category" && payload?.name
+                    ? colorForCategory(payload.name, categoryMeta)
+                    : COLORS[kind];
                 const isLeft = xv < 200;
                 return (
                   <g key={`node-${index}`}>
@@ -92,6 +106,11 @@ export function SankeyPage() {
             >
               <Tooltip
                 {...chartTooltipProps}
+                // Sankey paints the node/link name with its own (dark) colour,
+                // which is unreadable on the dark-theme tooltip. Pin both the
+                // label and item text to the theme text colour.
+                labelStyle={{ color: "rgb(var(--c-text))" }}
+                itemStyle={{ color: "rgb(var(--c-text))" }}
                 formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
             </Sankey>

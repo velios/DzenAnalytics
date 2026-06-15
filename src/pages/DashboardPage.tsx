@@ -35,6 +35,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
+import { AnnotationMarker } from "../components/AnnotationMarker";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { currentPeriod, periodKey } from "../lib/period";
@@ -654,7 +655,7 @@ export function DashboardPage() {
                     x={a.date}
                     stroke={a.color || "#A78BFA"}
                     strokeDasharray="2 2"
-                    label={{ value: a.title, position: "top", fontSize: 9, fill: a.color || "#A78BFA" }}
+                    label={<AnnotationMarker ann={a} />}
                   />
                 ))}
               </AreaChart>

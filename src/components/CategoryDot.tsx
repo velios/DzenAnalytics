@@ -2,6 +2,7 @@ import { useEffect, type ComponentType } from "react";
 import { HandCoins, ArrowLeftRight } from "lucide-react";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { zenIconToEmoji } from "../lib/zenIconEmoji";
+import { SYNTHETIC_CATEGORY_COLORS, fallbackColorForName } from "../lib/categoryColor";
 
 interface Props {
   category: string;
@@ -25,8 +26,8 @@ const SYNTHETIC_CATEGORIES: Record<
   string,
   { icon: ComponentType<{ className?: string }>; color: string }
 > = {
-  Долг: { icon: HandCoins, color: "#64748B" /* slate-500 */ },
-  Перевод: { icon: ArrowLeftRight, color: "#A78BFA" /* accent2 */ },
+  Долг: { icon: HandCoins, color: SYNTHETIC_CATEGORY_COLORS["Долг"] },
+  Перевод: { icon: ArrowLeftRight, color: SYNTHETIC_CATEGORY_COLORS["Перевод"] },
 };
 
 /**
@@ -73,11 +74,16 @@ export function CategoryDot({
     );
   }
 
-  const color = meta?.color ?? fallback;
+  // API colour first, then any explicit fallback, then a DETERMINISTIC colour
+  // from the name — so every category gets a stable, consistent swatch even
+  // when Zenmoney didn't assign one (or in CSV mode). `hideEmpty` still wins
+  // for callers that genuinely want nothing when there's no real meta.
   const emoji = zenIconToEmoji(meta?.icon);
+  const color =
+    meta?.color ?? fallback ?? (hideEmpty ? null : fallbackColorForName(category));
 
   if (!color && !emoji) {
-    return hideEmpty ? null : null;
+    return null;
   }
 
   // With an icon → coloured circle + emoji inside. Without an icon → just a

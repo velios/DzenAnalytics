@@ -28,6 +28,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
+import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
+import { colorForCategory } from "../lib/categoryColor";
 import {
   useFiltersStore,
   applyFilters,
@@ -36,6 +38,7 @@ import {
 import { PeriodPills } from "../components/PeriodPills";
 import { useDrillStore } from "../store/useDrillStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
+import { AnnotationMarker } from "../components/AnnotationMarker";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { periodKey } from "../lib/period";
 import {
@@ -69,6 +72,12 @@ import type { MonthBucket } from "../lib/aggregations";
 export function CashflowPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const categoryMeta = useCategoryMetaStore((s) => s.meta);
+  const metaLoaded = useCategoryMetaStore((s) => s.loaded);
+  const hydrateMeta = useCategoryMetaStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!metaLoaded) hydrateMeta();
+  }, [metaLoaded, hydrateMeta]);
   const filters = useFiltersStore();
 
   const showDrill = useDrillStore((s) => s.show);
@@ -103,6 +112,22 @@ export function CashflowPage() {
     [filtered, monthStartDay]
   );
 
+  // «Год к году» и «сезонность» — многолетние разрезы, поэтому они НЕ
+  // ограничиваются локальным периодом (иначе на 3-месячном окне им просто
+  // нечего показать). Но остальные глобальные фильтры (счета/категории/валюты/
+  // поиск/без переводов) должны применяться ко всей странице одинаково —
+  // иначе смена категории меняла основной график, но не эти два. Берём всю
+  // историю с применёнными фильтрами-измерениями (preset: "all").
+  const dimensionFiltered = useMemo(
+    () =>
+      applyFilters(
+        transactions,
+        { ...filters, preset: "all", from: null, to: null },
+        monthStartDay
+      ),
+    [transactions, filters, monthStartDay]
+  );
+
   const annotations = useAnnotationsStore((s) => s.annotations);
   const annHydrate = useAnnotationsStore((s) => s.hydrate);
   const annLoaded = useAnnotationsStore((s) => s.loaded);
@@ -112,9 +137,9 @@ export function CashflowPage() {
 
   const allYears = useMemo(() => {
     const set = new Set<number>();
-    for (const t of transactions) set.add(Number(t.date.slice(0, 4)));
+    for (const t of dimensionFiltered) set.add(Number(t.date.slice(0, 4)));
     return Array.from(set).sort();
-  }, [transactions]);
+  }, [dimensionFiltered]);
   const [yoyYear, setYoyYear] = useState(allYears[allYears.length - 1] || new Date().getFullYear());
   const [yoyKind, setYoyKind] = useState<"expense" | "income">("expense");
   // Clamp the selected year-over-year year if the available list
@@ -125,8 +150,8 @@ export function CashflowPage() {
     if (allYears.length && !allYears.includes(yoyYear)) setYoyYear(allYears[allYears.length - 1]);
   }, [allYears, yoyYear]);
   const yoyData = useMemo(
-    () => yearOverYearMonthly(transactions, yoyYear, yoyKind),
-    [transactions, yoyYear, yoyKind]
+    () => yearOverYearMonthly(dimensionFiltered, yoyYear, yoyKind),
+    [dimensionFiltered, yoyYear, yoyKind]
   );
 
   // Cash-flow visualization mode: bars (по умолчанию) или stream graph
@@ -134,7 +159,7 @@ export function CashflowPage() {
   const stream = useMemo(() => buildStreamData(filtered, 10, "expense"), [filtered]);
 
   // Seasonality
-  const seasonality = useMemo(() => detectSeasonality(transactions), [transactions]);
+  const seasonality = useMemo(() => detectSeasonality(dimensionFiltered), [dimensionFiltered]);
 
   function openMonth(ym: string) {
     const txs = filtered.filter(
@@ -329,7 +354,7 @@ export function CashflowPage() {
                   x={monthLabel(a.date.slice(0, 7))}
                   stroke={a.color || "#A78BFA"}
                   strokeDasharray="2 2"
-                  label={{ value: a.title, position: "top", fontSize: 10, fill: a.color || "#A78BFA" }}
+                  label={<AnnotationMarker ann={a} />}
                 />
               ))}
             </ComposedChart>
@@ -364,19 +389,16 @@ export function CashflowPage() {
                   ]}
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                {stream.categories.map((cat, i) => {
-                  const colors = [
-                    "#22D3EE", "#A78BFA", "#F59E0B", "#10B981", "#EF4444",
-                    "#EC4899", "#3B82F6", "#84CC16", "#F97316", "#14B8A6", "#6B7280",
-                  ];
+                {stream.categories.map((cat) => {
+                  const color = colorForCategory(cat, categoryMeta);
                   return (
                     <Area
                       key={cat}
                       type="monotone"
                       dataKey={cat}
                       stackId="stream"
-                      stroke={colors[i % colors.length]}
-                      fill={colors[i % colors.length]}
+                      stroke={color}
+                      fill={color}
                       fillOpacity={0.75}
                     />
                   );
@@ -427,7 +449,7 @@ export function CashflowPage() {
             <div>
               <div className="font-semibold">Год к году</div>
               <div className="text-xs text-muted">
-                Сравнение с тем же месяцем годом ранее
+                Сравнение с тем же месяцем годом ранее · вся история (период не влияет)
               </div>
             </div>
             <div className="flex gap-2">
@@ -519,7 +541,7 @@ export function CashflowPage() {
                 Сезонность расходов
               </div>
               <div className="text-xs text-muted">
-                Средний расход по месяцу года, цветом — отклонение от общего среднего
+                Средний расход по месяцу года, цветом — отклонение от общего среднего · вся история (период не влияет)
               </div>
             </div>
           </div>

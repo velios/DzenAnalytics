@@ -117,10 +117,26 @@ export function TransactionsDrawer() {
       if (e.key === "Escape") close();
     };
     window.addEventListener("keydown", onKey);
+    // The page scrolls on <html> (it has `overflow-y: scroll`), so locking
+    // only <body> left the html scrollbar visible beside the drawer — it
+    // moved the hidden page behind the overlay and looked broken. Lock the
+    // real scroller and reserve its scrollbar width so the background doesn't
+    // shift when the drawer opens/closes.
+    const html = document.documentElement;
+    const scrollbarW = window.innerWidth - html.clientWidth;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      htmlPad: html.style.paddingRight,
+      bodyOverflow: document.body.style.overflow,
+    };
+    html.style.overflow = "hidden";
+    if (scrollbarW > 0) html.style.paddingRight = `${scrollbarW}px`;
     document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      html.style.overflow = prev.htmlOverflow;
+      html.style.paddingRight = prev.htmlPad;
+      document.body.style.overflow = prev.bodyOverflow;
     };
   }, [open, close]);
 
@@ -376,7 +392,6 @@ export function TransactionsDrawer() {
                     className={`align-top group cursor-pointer ${
                       isSel ? "bg-accent/5" : "hover:bg-panel2/40"
                     }`}
-                    title="Двойной клик — редактировать"
                   >
                     <td className="table-td w-8">
                       <input

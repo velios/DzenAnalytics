@@ -19,11 +19,13 @@ import {
   buildPushItems,
   buildDeletions,
   buildResurrections,
+  buildTagPush,
   detectConflicts,
   sendPush,
   validateDrafts,
   type PushBuildResult,
 } from "../lib/zenmoneyPush";
+import { useTagEditsStore, loadTagEdits } from "./useTagEditsStore";
 import { useDraftsStore, loadDrafts } from "./useDraftsStore";
 import { loadSnapshotIndex, takeSnapshot } from "../lib/cloudSnapshots";
 import { useDataStore } from "./useDataStore";
@@ -51,6 +53,33 @@ const SNAPSHOT_POLICY_KEY = "zenmoneySnapshotPolicy";
 const AUTO_SYNC_ENABLED_KEY = "zenmoneyAutoSyncEnabled";
 const AUTO_SYNC_VALUE_KEY = "zenmoneyAutoSyncValue";
 const AUTO_SYNC_UNIT_KEY = "zenmoneyAutoSyncUnit";
+
+/**
+ * Overlay pending tag edits onto a freshly-mapped `categoryMeta` map so a
+ * not-yet-pushed «обязательная» change survives a re-map (sync/push rebuild
+ * meta from the cache, which still holds the old value until the edit lands
+ * in the cloud). Tag edits are keyed by tag id; meta by category title — we
+ * resolve via the cache tags. Mutates and returns `meta`.
+ */
+function overlayTagEdits<M extends { required?: boolean | null }>(
+  meta: Record<string, M>,
+  edits: Record<string, { required: boolean | null }>,
+  cacheTags: { id: string; title: string; parent: string | null }[]
+): Record<string, M> {
+  if (Object.keys(edits).length === 0) return meta;
+  // Only TOP-LEVEL tags map to a categoryMeta key. Sub-tag edits push to the
+  // cloud but never feed the 50/30/20 split, so skip them here.
+  const rootTitleById = new Map(
+    cacheTags.filter((t) => !t.parent).map((t) => [t.id, t.title])
+  );
+  for (const [id, edit] of Object.entries(edits)) {
+    const title = rootTitleById.get(id);
+    if (!title) continue;
+    const cur = meta[title];
+    if (cur) meta[title] = { ...cur, required: edit.required };
+  }
+  return meta;
+}
 
 /**
  * Auto-sync interval — how often the background poller wakes up to
@@ -155,6 +184,42 @@ export async function getBrandTitlesFromCache(): Promise<string[] | null> {
     .map((m) => m.title.trim())
     .filter((t) => t.length > 0)
     .sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+/** A category tag (root or sub-tag) for the «обязательная» editor. */
+export interface CategoryTag {
+  id: string;
+  title: string;
+  /** Parent tag id, or null for a top-level category. */
+  parent: string | null;
+  /** Zenmoney «обязательная» flag (null = not set). */
+  required: boolean | null;
+  /** Tag accepts income transactions. */
+  showIncome: boolean;
+  /** Tag accepts expense transactions. */
+  showOutcome: boolean;
+}
+
+/**
+ * Category tags from the Zenmoney cache for the «обязательная» editor — roots
+ * AND their sub-tags (the editor nests them under their parent). Each tag's
+ * own `required` is editable independently and pushes to the cloud; note the
+ * 50/30/20 split classifies by the TOP-LEVEL category, so a sub-tag's flag
+ * doesn't move the split. Returns null in CSV mode. Sorted by title (ru).
+ */
+export async function getCategoryTagsFromCache(): Promise<CategoryTag[] | null> {
+  const cache = await loadZenCache();
+  if (!cache) return null;
+  return cache.tags
+    .map((t) => ({
+      id: t.id,
+      title: t.title,
+      parent: t.parent ?? null,
+      required: t.required ?? null,
+      showIncome: !!t.showIncome,
+      showOutcome: !!t.showOutcome,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title, "ru"));
 }
 
 /**
@@ -421,6 +486,12 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         source: "api",
       };
       // Per-category meta (colour / icon / picture) for UI dots, treemap, etc.
+      // Keep any not-yet-pushed «обязательная» edits visible across the re-map.
+      overlayTagEdits(
+        mapped.categoryMeta,
+        await loadTagEdits(),
+        nextCache.tags
+      );
       await useCategoryMetaStore.getState().setAll(mapped.categoryMeta);
 
       // Persist the rates that came with the diff so the next session boots
@@ -478,7 +549,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         get().pushMode === "on-sync" &&
         (Object.keys(useEditsStore.getState().edits).length > 0 ||
           useDeletedStore.getState().deletedIds.length > 0 ||
-          Object.keys(useDraftsStore.getState().drafts).length > 0)
+          Object.keys(useDraftsStore.getState().drafts).length > 0 ||
+          Object.keys(useTagEditsStore.getState().edits).length > 0)
       ) {
         // Defer to next microtask so the sync's set() lands first and
         // pushPendingEdits sees `status: "ok"` (its own guard).
@@ -652,11 +724,25 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       // Draft "skips" don't keep a row in limbo: an "already in cloud" draft
       // is stale (the cleanup below drops it); other reasons go to the log.
       skipped.push(...draftPush.skipped);
+      // Pending category-tag edits (the «обязательная» flag). Built against
+      // the fresh cache; no-ops and unresolvable ids are skipped.
+      const tagEdits = await loadTagEdits();
+      const tagPush = buildTagPush(
+        tagEdits,
+        cache.tags,
+        Math.floor(Date.now() / 1000)
+      );
+      const tagSkips = tagPush.skipped.map((s) => ({
+        id: s.id,
+        reason: s.reason,
+      }));
+      skipped.push(...tagSkips);
       if (
         toPush.length === 0 &&
         deletions.length === 0 &&
         resurrections.length === 0 &&
-        draftTxs.length === 0
+        draftTxs.length === 0 &&
+        tagPush.tags.length === 0
       ) {
         const result: PushResult = { pushed: 0, created: 0, skipped, snapshotId };
         set({
@@ -696,7 +782,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         get().serverTimestamp,
         toPush,
         deletions,
-        [...resurrections.map((r) => r.tx), ...draftTxs]
+        [...resurrections.map((r) => r.tx), ...draftTxs],
+        tagPush.tags
       );
 
       // 4) Merge server response into local cache so subsequent diffs
@@ -763,6 +850,19 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         skipped: nextCache.transactions.length - mapped.transactions.length,
         source: "api",
       };
+      // Tag edits that were sent now live in cloud truth + our cache — drop
+      // them from the overlay (same reasoning as transaction edits). Any
+      // unresolved/no-op ones that remain are overlaid below so the UI keeps
+      // showing the intended value until a re-sync resolves them.
+      const sentTagIds = tagPush.tags.map((t) => String(t.id));
+      if (sentTagIds.length > 0) {
+        await useTagEditsStore.getState().clearMany(sentTagIds);
+      }
+      overlayTagEdits(
+        mapped.categoryMeta,
+        useTagEditsStore.getState().edits,
+        nextCache.tags
+      );
       await useCategoryMetaStore.getState().setAll(mapped.categoryMeta);
       await db.saveRates(mapped.rates);
       useDataStore.setState({ rates: mapped.rates });
@@ -793,6 +893,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         parts.push(`Удалено: ${formatNum(deletions.length)}`);
       if (resurrections.length > 0)
         parts.push(`Восстановлено в облаке: ${formatNum(resurrections.length)}`);
+      if (tagPush.tags.length > 0)
+        parts.push(`Категорий обновлено: ${formatNum(tagPush.tags.length)}`);
       if (skipped.length > 0)
         parts.push(
           `Пропущено: ${formatNum(skipped.length)}` +

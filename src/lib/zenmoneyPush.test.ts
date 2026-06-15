@@ -4,6 +4,7 @@ import {
   buildDraftTransaction,
   buildPushItems,
   buildResurrections,
+  buildTagPush,
   detectConflicts,
   resurrectionId,
   validateDrafts,
@@ -554,6 +555,52 @@ describe("detectConflicts", () => {
   it("only considers edited ids, not every changed cloud row", () => {
     const fresh = [{ id: "b", changed: 999 } as ZenTransaction];
     expect(detectConflicts(["a"], c, fresh).size).toBe(0);
+  });
+});
+
+describe("buildTagPush", () => {
+  const tags: ZenTag[] = [
+    { id: "t1", title: "Аренда", required: null, color: 1 } as unknown as ZenTag,
+    { id: "t2", title: "Кафе", required: false, color: 2 } as unknown as ZenTag,
+  ];
+
+  it("emits a changed tag with the new required + stamp, preserving other fields", () => {
+    const { tags: out, skipped } = buildTagPush(
+      { t1: { required: true } },
+      tags,
+      555
+    );
+    expect(skipped).toEqual([]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      id: "t1",
+      title: "Аренда", // untouched fields survive
+      color: 1,
+      required: true,
+      changed: 555,
+    });
+  });
+
+  it("drops a no-op edit (value already matches cache)", () => {
+    const { tags: out } = buildTagPush({ t2: { required: false } }, tags, 1);
+    expect(out).toEqual([]);
+  });
+
+  it("treats null and absent as equal (no-op)", () => {
+    const { tags: out } = buildTagPush({ t1: { required: null } }, tags, 1);
+    expect(out).toEqual([]);
+  });
+
+  it("reports an edit whose tag is missing from the cache as skipped", () => {
+    const { tags: out, skipped } = buildTagPush(
+      { ghost: { required: true } },
+      tags,
+      1
+    );
+    expect(out).toEqual([]);
+    expect(skipped).toEqual([
+      { id: "ghost", reason: expect.stringContaining("не найдена") },
+    ]);
   });
 });
 
