@@ -161,7 +161,12 @@ export interface StackedBalancePoint {
 
 export function stackedBalanceByAccount(
   allTxs: Transaction[],
-  topN = 8
+  topN = 8,
+  /** Real current balance per account title (base currency), API mode only.
+   *  When given, each line is shifted to END at the real balance — turning the
+   *  «накопленный поток с нуля» into an actual balance-over-time, so the stack
+   *  sums to real net worth and funded accounts don't sink below zero. */
+  realBalances?: Record<string, number | null> | null
 ): { series: StackedBalancePoint[]; accounts: string[] } {
   const balances = balancesByAccount(allTxs);
   const topAccounts = balances
@@ -219,6 +224,38 @@ export function stackedBalanceByAccount(
     point.total = Math.round(total);
     series.push(point);
   }
+
+  // Anchor to real balances (API mode): after the loop, `running[a]` is each
+  // account's cumulative flow at the last day. Shift the whole line by a
+  // constant so it ends at the real balance; the day-to-day shape (real flows)
+  // is preserved. «Прочие» is anchored to the combined real balance of every
+  // account that isn't one of the shown top ones.
+  if (realBalances) {
+    const topSet = new Set(accountList.filter((a) => a !== "Прочие"));
+    let prochieReal = 0;
+    for (const [acc, bal] of Object.entries(realBalances)) {
+      if (bal != null && !topSet.has(acc)) prochieReal += bal;
+    }
+    const offset: Record<string, number> = {};
+    for (const a of accountList) {
+      if (a === "Прочие") {
+        offset[a] = prochieReal - (running[a] || 0);
+      } else {
+        const real = realBalances[a];
+        offset[a] = real == null ? 0 : real - running[a];
+      }
+    }
+    for (const point of series) {
+      let total = 0;
+      for (const a of accountList) {
+        const v = (point[a] as number) + offset[a];
+        point[a] = Math.round(v);
+        total += v;
+      }
+      point.total = Math.round(total);
+    }
+  }
+
   return { series, accounts: accountList };
 }
 

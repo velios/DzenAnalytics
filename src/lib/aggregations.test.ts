@@ -7,8 +7,35 @@ import {
   detectDuplicates,
   hashtagCategoryTrees,
   detectRecurring,
+  stackedBalanceByAccount,
 } from "./aggregations";
 import { tx } from "../test/fixtures";
+
+describe("stackedBalanceByAccount — real-balance anchoring", () => {
+  const txs = [
+    tx({ kind: "income", amount: 300, incomeAccount: "A", date: "2026-01-01" }),
+    tx({ kind: "income", amount: 50, incomeAccount: "B", date: "2026-01-01" }),
+    tx({ kind: "expense", amount: 100, outcomeAccount: "A", date: "2026-01-02" }),
+  ];
+
+  it("without real balances → cumulative flow from zero", () => {
+    const { series } = stackedBalanceByAccount(txs, 8);
+    const last = series[series.length - 1];
+    expect(last.A).toBe(200); // +300 −100
+    expect(last.B).toBe(50);
+    expect(last.total).toBe(250);
+  });
+
+  it("with real balances → lines end at real balance; stack sums to net worth", () => {
+    const { series } = stackedBalanceByAccount(txs, 8, { A: 1000, B: 500 });
+    const last = series[series.length - 1];
+    expect(last.A).toBe(1000);
+    expect(last.B).toBe(500);
+    expect(last.total).toBe(1500);
+    // Shape preserved: before the −100 expense, A's balance was 100 higher.
+    expect(series[0].A).toBe(1100);
+  });
+});
 
 describe("detectRecurring — nextExpected projection", () => {
   const NOW = +new Date("2026-06-15T12:00:00Z");

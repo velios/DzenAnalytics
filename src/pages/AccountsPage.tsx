@@ -192,11 +192,28 @@ export function AccountsPage() {
   // True when at least one account carries a real (API) balance — drives the
   // headline ("Баланс" vs "Изменение") and the table's column labels.
   const hasRealBalances = accountRows.some((r) => r.balanceBase !== null);
+  // Real current balance per account (base currency) — only in API mode. Lets
+  // the stacked chart show actual balances instead of cumulative-flow-from-zero.
+  const realBalancesByAccount = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of accountRows) {
+      if (r.balanceBase != null) m[r.account] = r.balanceBase;
+    }
+    return m;
+  }, [accountRows]);
   const series = useMemo(
     () => dailyBalanceSeries(filtered, selectedAccount ?? undefined),
     [filtered, selectedAccount]
   );
-  const stacked = useMemo(() => stackedBalanceByAccount(baseTxs, 8), [baseTxs]);
+  const stacked = useMemo(
+    () =>
+      stackedBalanceByAccount(
+        baseTxs,
+        8,
+        hasRealBalances ? realBalancesByAccount : null
+      ),
+    [baseTxs, hasRealBalances, realBalancesByAccount]
+  );
   const netWorth = useMemo(() => netWorthSeries(baseTxs, calibration), [baseTxs, calibration]);
 
   function applyCalibration() {
@@ -438,11 +455,19 @@ export function AccountsPage() {
           <div>
             <div className="font-semibold">
               {view === "stacked"
-                ? "Баланс по счетам (стопкой)"
+                ? hasRealBalances
+                  ? "Баланс по счетам (стопкой)"
+                  : "Накопленный поток по счетам (стопкой)"
                 : "Совокупный баланс (одной линией)"}
             </div>
             <div className="text-xs text-muted">
-              {scope === "all" ? "Все транзакции, без учёта фильтров" : "С учётом фильтров"}
+              {view === "stacked"
+                ? hasRealBalances
+                  ? "Реальные остатки по счетам · вся история, без фильтров"
+                  : "Накопление с нуля, без стартовых остатков · без фильтров"
+                : scope === "all"
+                  ? "Все транзакции, без учёта фильтров"
+                  : "С учётом фильтров"}
               {view === "stacked" && ` · топ-${stacked.accounts.length} счетов`}
             </div>
           </div>
