@@ -34,6 +34,7 @@ import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import type { LiveAccount } from "../store/useZenmoneyStore";
 import {
   balancesByAccount,
+  computeKPI,
   dailyBalanceSeries,
   stackedBalanceByAccount,
   netWorthSeries,
@@ -258,8 +259,13 @@ export function AccountsPage() {
   if (transactions.length === 0) return <EmptyState />;
 
   const totalNet = accounts.reduce((s, a) => s + a.balance, 0);
-  const totalIncome = accounts.reduce((s, a) => s + a.income, 0);
-  const totalExpense = accounts.reduce((s, a) => s + a.expense, 0);
+  // Headline доход/расход = real income/expense, EXCLUDING internal transfers
+  // (computeKPI skips kind="transfer"). Summing per-account flows instead would
+  // double-count every transfer between own accounts (both legs), inflating the
+  // figures to near-equal turnover that has no match in the operations list.
+  const kpi = computeKPI(filtered);
+  const totalIncome = kpi.income;
+  const totalExpense = kpi.expense;
 
   const totalAllAccounts = accountsAll.reduce((s, a) => s + a.balance, 0);
   const peakNetWorth = netWorth.reduce((m, p) => Math.max(m, p.net), 0);
@@ -442,16 +448,18 @@ export function AccountsPage() {
           <div className="text-xs text-muted mt-1">Максимум за период графика</div>
         </div>
         <div className="card card-pad">
-          <div className="label mb-1">Поступления (фильтр)</div>
+          <div className="label mb-1">Доходы (фильтр)</div>
           <div className="stat-num text-income">
             {formatMoney(totalIncome, base)}
           </div>
+          <div className="text-xs text-muted mt-1">Без переводов между счетами</div>
         </div>
         <div className="card card-pad">
-          <div className="label mb-1">Списания (фильтр)</div>
+          <div className="label mb-1">Расходы (фильтр)</div>
           <div className="stat-num text-expense">
             {formatMoney(totalExpense, base)}
           </div>
+          <div className="text-xs text-muted mt-1">Без переводов между счетами</div>
         </div>
       </div>
 
