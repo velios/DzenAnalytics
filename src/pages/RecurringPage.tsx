@@ -26,7 +26,7 @@ export function RecurringPage() {
   const allCandidates = useMemo(() => detectRecurring(transactions), [transactions]);
   const [cadenceFilter, setCadenceFilter] = useState<CadenceFilter>("all");
   const [onlyPriceUp, setOnlyPriceUp] = useState(false);
-  // "Активные" = платёж не «протух» (пропущено не больше ~2 циклов с учётом
+  // "Активные" = платёж идёт по графику (пропущено не больше ~2 циклов с учётом
   // периодичности). ON by default: a subscription cancelled a few months ago
   // isn't really "recurring" anymore, so we hide those unless the user
   // explicitly asks to see the full history. The staleness test is
@@ -180,7 +180,7 @@ export function RecurringPage() {
             role="switch"
             aria-checked={onlyActive}
             onClick={() => setOnlyActive((v) => !v)}
-            title="Скрыть протухшие — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
+            title="Показывать только активные. Неактивные — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
             className={`ml-auto flex items-center gap-2 transition-colors ${
               onlyActive ? "text-text" : "text-muted hover:text-text"
             }`}
@@ -259,6 +259,25 @@ export function RecurringPage() {
             exportName="recurring_payments"
             columns={
               [
+                {
+                  // Traffic-light status: green = active (payments on schedule),
+                  // red = inactive (no payment for more than ~2 expected cycles).
+                  key: "status",
+                  label: "Статус",
+                  sortValue: (c) => (c.stale ? "неактивен" : "активен"),
+                  render: (c) => (
+                    <span
+                      className={`inline-block w-2.5 h-2.5 rounded-full ${
+                        c.stale ? "bg-expense" : "bg-income"
+                      }`}
+                      title={
+                        c.stale
+                          ? `Неактивен: нет платежа ${c.daysSinceLast} дн. при периоде ~${c.avgIntervalDays} дн.`
+                          : "Активен: платежи идут по графику"
+                      }
+                    />
+                  ),
+                },
                 {
                   key: "payee",
                   label: "Получатель",
@@ -362,16 +381,8 @@ export function RecurringPage() {
                   label: "Последний",
                   sortValue: (c) => c.lastDate,
                   render: (c) => (
-                    <span className="whitespace-nowrap inline-flex items-center gap-1.5">
-                      <span className="text-muted">{formatDate(c.lastDate, "short")}</span>
-                      {c.stale && (
-                        <span
-                          className="text-[10px] pill text-muted"
-                          title={`Протух: нет платежа ${c.daysSinceLast} дн. при периоде ~${c.avgIntervalDays} дн.`}
-                        >
-                          протух
-                        </span>
-                      )}
+                    <span className="text-muted whitespace-nowrap">
+                      {formatDate(c.lastDate, "short")}
                     </span>
                   ),
                 },
