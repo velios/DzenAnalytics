@@ -35,6 +35,19 @@ describe("stackedBalanceByAccount — real-balance anchoring", () => {
     // Shape preserved: before the −100 expense, A's balance was 100 higher.
     expect(series[0].A).toBe(1100);
   });
+
+  it("ranks top accounts by real balance (not turnover) in API mode", () => {
+    const t = [
+      // C: huge turnover, tiny balance — would top a turnover ranking.
+      tx({ kind: "income", amount: 1_000_000, incomeAccount: "C", date: "2026-01-01" }),
+      tx({ kind: "expense", amount: 999_000, outcomeAccount: "C", date: "2026-01-02" }),
+      tx({ kind: "income", amount: 100, incomeAccount: "A", date: "2026-01-01" }),
+      tx({ kind: "income", amount: 100, incomeAccount: "B", date: "2026-01-01" }),
+    ];
+    const { accounts } = stackedBalanceByAccount(t, 2, { A: 900_000, B: 800_000, C: 1000 });
+    expect(accounts).toEqual(expect.arrayContaining(["A", "B", "Прочие"]));
+    expect(accounts).not.toContain("C"); // small balance → folded into «Прочие»
+  });
 });
 
 describe("detectRecurring — nextExpected projection", () => {

@@ -69,3 +69,25 @@ export async function loadJSON<T>(key: string): Promise<T | null> {
   const db = await getDB();
   return ((await db.get("meta", key)) as T) || null;
 }
+
+/**
+ * Full local wipe: clear the transactions store and EVERY meta key except the
+ * given `keepKeys` (connection + preferences). This is the «удалить локальные
+ * данные» path — it must remove everything derived from / tied to the imported
+ * dataset (cache, server timestamp, duplicate exclusions, calibration, drafts,
+ * edits, category meta, …) so nothing «resurrects» after a fresh re-sync.
+ *
+ * Allow-list (not block-list) on purpose: any store added later is wiped by
+ * default, so this can't silently go stale the way the old per-store clear did.
+ */
+export async function clearAllExcept(keepKeys: string[]): Promise<void> {
+  const db = await getDB();
+  const keep = new Set(keepKeys);
+  await db.clear("transactions");
+  const tx = db.transaction("meta", "readwrite");
+  const keys = await tx.store.getAllKeys();
+  for (const k of keys) {
+    if (!keep.has(k as string)) await tx.store.delete(k);
+  }
+  await tx.done;
+}

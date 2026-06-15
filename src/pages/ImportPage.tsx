@@ -1133,11 +1133,32 @@ export function ImportPage() {
                   const ok = await confirm({
                     title: "Очистить локальные данные?",
                     message:
-                      "Удалить все локально сохранённые данные из этого браузера. Данные в облаке Дзен-мани НЕ пострадают.",
+                      "Удалятся ВСЕ локальные данные из этого браузера: операции, кэш, правки, черновики, исключения дубликатов, калибровка, бюджеты, правила, аннотации и т.п. Подключение к Дзен-мани и настройки сохранятся, данные в облаке НЕ пострадают. Страница перезагрузится.",
                     confirmLabel: "Очистить",
                     tone: "danger",
                   });
-                  if (ok) await clearAll();
+                  if (!ok) return;
+                  // Allow-list: keep only the connection + preferences. Everything
+                  // else (incl. duplicate exclusions, categoryMeta, server
+                  // timestamp & cache) is wiped, so the next sync is a clean FULL
+                  // re-pull and nothing «resurrects».
+                  await db.clearAllExcept([
+                    "zenmoneyToken",
+                    "zenmoneyPushEnabled",
+                    "zenmoneyPushMode",
+                    "zenmoneySnapshotPolicy",
+                    "zenmoneyAutoSyncEnabled",
+                    "zenmoneyAutoSyncValue",
+                    "zenmoneyAutoSyncUnit",
+                    "displaySettings",
+                    "reportPeriod",
+                    "includeOffBalance",
+                    "payeeGrouping",
+                    "backupInterval",
+                    "backupLastAt",
+                    "rates",
+                  ]);
+                  window.location.reload();
                 }}
                 className="btn-danger text-sm ml-auto self-center"
               >

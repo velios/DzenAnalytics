@@ -169,9 +169,17 @@ export function stackedBalanceByAccount(
   realBalances?: Record<string, number | null> | null
 ): { series: StackedBalancePoint[]; accounts: string[] } {
   const balances = balancesByAccount(allTxs);
+  // Pick the «biggest» accounts. With real balances (API mode, where the chart
+  // shows actual balances) rank by |real balance| — so the largest accounts by
+  // money get their own area and small ones fold into «Прочие». Without them
+  // (CSV) rank by turnover + net flow, since that's all we have.
+  const score = (b: { account: string; balance: number; income: number; expense: number }) =>
+    realBalances
+      ? Math.abs(realBalances[b.account] ?? 0)
+      : Math.abs(b.balance) + b.income + b.expense;
   const topAccounts = balances
     .slice()
-    .sort((a, b) => Math.abs(b.balance) + b.income + b.expense - (Math.abs(a.balance) + a.income + a.expense))
+    .sort((a, b) => score(b) - score(a))
     .slice(0, topN)
     .map((b) => b.account);
   const accountSet = new Set(topAccounts);

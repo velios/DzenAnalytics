@@ -14,10 +14,14 @@ export const CATEGORY_PALETTE = [
   "#8B5CF6", "#06B6D4", "#FBBF24", "#34D399", "#F472B6",
 ];
 
-/** Local-only synthetic categories the mapper mints (no real Zenmoney tag). */
+/** Local-only synthetic categories the mapper mints (no real Zenmoney tag).
+ *  «Без категории» / «Прочие» get a neutral grey so «нет категории» doesn't
+ *  read as a real, vivid category. */
 export const SYNTHETIC_CATEGORY_COLORS: Record<string, string> = {
   Перевод: "#A78BFA",
   Долг: "#64748B",
+  "Без категории": "#94A3B8",
+  Прочие: "#94A3B8",
 };
 
 function hashIndex(s: string, mod: number): number {
