@@ -56,8 +56,11 @@ export function RecurringPage() {
     [filterPool, cadenceFilter]
   );
 
+  // Respects the «Только активные» toggle (but not the price-up filter itself,
+  // which this card toggles): counts price-jumped subscriptions among active
+  // ones when the toggle is on, so the number matches what clicking it reveals.
   const priceUpCount = allCandidates.filter(
-    (c) => c.priceTrend.priceFlag === "up"
+    (c) => c.priceTrend.priceFlag === "up" && (!onlyActive || !c.stale)
   ).length;
 
   if (transactions.length === 0) return <EmptyState />;
