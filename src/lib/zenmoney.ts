@@ -48,6 +48,9 @@ export interface ZenTag {
   showOutcome: boolean;
   budgetIncome: boolean;
   budgetOutcome: boolean;
+  /** «Обязательная» — are expenses in this category mandatory. Nullable
+   *  (Zenmoney treats null as mandatory). Drives needs/wants in 50/30/20. */
+  required: boolean | null;
   icon: string | null;
   picture: string | null;
   color: number | null;

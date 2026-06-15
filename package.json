@@ -1,7 +1,7 @@
 {
   "name": "dzenanalytics",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "release:notes": "node scripts/release-notes.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",

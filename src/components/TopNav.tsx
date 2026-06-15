@@ -27,6 +27,7 @@ import {
   FlaskConical,
   Sparkles,
   Newspaper,
+  Percent,
   Settings,
   Menu,
   X,
@@ -50,13 +51,14 @@ const PRIMARY = [
 // списка (перед Cash-flow), чтобы было легко найти.
 const SECONDARY = [
   { to: "/trends", label: "Тренды", icon: Activity },
-  { to: "/goals", label: "Цели", icon: Target },
+  { to: "/goals", label: "Цели & FIRE", icon: Target },
   { to: "/cashflow", label: "Cash-flow", icon: LineChart },
   { to: "/health", label: "Здоровье", icon: HeartPulse },
   { to: "/whatif", label: "Что-если", icon: FlaskConical },
   { to: "/year-review", label: "Год в цифрах", icon: Sparkles },
   { to: "/digest", label: "Дайджест", icon: Newspaper },
   { to: "/budgets", label: "Бюджеты", icon: Target },
+  { to: "/50-30-20", label: "50/30/20", icon: Percent },
   { to: "/calendar", label: "Календарь", icon: CalendarDays },
   { to: "/sankey", label: "Потоки", icon: GitFork },
   { to: "/anomalies", label: "Аномалии", icon: Zap },

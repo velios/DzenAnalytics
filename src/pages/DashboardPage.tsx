@@ -35,6 +35,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
+import { AnnotationMarker } from "../components/AnnotationMarker";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { currentPeriod, periodKey } from "../lib/period";
@@ -563,7 +564,7 @@ export function DashboardPage() {
               </div>
             </div>
             <Link to="/cashflow" className="text-xs text-accent hover:underline flex items-center gap-1">
-              подробнее <ArrowRight className="w-3 h-3" />
+              Подробнее <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <div className="h-64">
@@ -603,7 +604,7 @@ export function DashboardPage() {
               </div>
             </div>
             <Link to="/accounts" className="text-xs text-accent hover:underline flex items-center gap-1">
-              счета <ArrowRight className="w-3 h-3" />
+              Счета <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <div className="h-64">
@@ -654,7 +655,7 @@ export function DashboardPage() {
                     x={a.date}
                     stroke={a.color || "#A78BFA"}
                     strokeDasharray="2 2"
-                    label={{ value: a.title, position: "top", fontSize: 9, fill: a.color || "#A78BFA" }}
+                    label={<AnnotationMarker ann={a} />}
                   />
                 ))}
               </AreaChart>
@@ -758,7 +759,7 @@ export function DashboardPage() {
               to="/accounts"
               className="text-xs text-accent hover:underline flex items-center gap-1"
             >
-              все <ArrowRight className="w-3 h-3" />
+              Все <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -873,16 +874,13 @@ export function DashboardPage() {
           <div className="flex items-center justify-between mb-3">
             <div className="font-semibold flex items-center gap-2">
               <PieChart className="w-4 h-4 text-accent" />
-              Топ-10 категорий за{" "}
-              <span className="text-muted font-normal text-xs">
-                {monthLabel(currentYM)}
-              </span>
+              <span>Топ-10 категорий за {monthLabel(currentYM)}</span>
             </div>
             <Link
               to="/categories"
               className="text-xs text-accent hover:underline flex items-center gap-1"
             >
-              все <ArrowRight className="w-3 h-3" />
+              Все <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {catsThisMonth.length === 0 ? (
@@ -936,7 +934,7 @@ export function DashboardPage() {
               Ближайшие регулярные
             </div>
             <Link to="/recurring" className="text-xs text-accent hover:underline flex items-center gap-1">
-              все ({recurring.length}) <ArrowRight className="w-3 h-3" />
+              Все ({recurring.length}) <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {upcoming.length === 0 ? (
@@ -978,7 +976,7 @@ export function DashboardPage() {
               Активность за 90 дней
             </div>
             <Link to="/calendar" className="text-xs text-accent hover:underline flex items-center gap-1">
-              календарь <ArrowRight className="w-3 h-3" />
+              Календарь <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <MiniHeatmap dayMap={dayMap} days={90} base={base} />

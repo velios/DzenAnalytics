@@ -15,7 +15,7 @@ import {
 import { DateField } from "./DateField";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
-import { useFiltersStore, type DatePreset } from "../store/useFiltersStore";
+import { useFiltersStore, FILTER_NONE, type DatePreset } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { confirm } from "../store/useConfirmStore";
 import { monthLabel } from "../lib/format";
@@ -33,24 +33,45 @@ function MultiSelect({
   label,
   options,
   selected,
-  onToggle,
-  onReset,
+  onChange,
 }: {
   label: string;
   options: string[];
   selected: Set<string>;
-  onToggle: (v: string) => void;
-  onReset: () => void;
+  onChange: (next: Set<string>) => void;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const summary =
-    selected.size === 0
+
+  // Set semantics: empty = ALL, {FILTER_NONE} = NONE, else a subset.
+  const isAll = selected.size === 0;
+  const isNone = selected.has(FILTER_NONE);
+  const isChecked = (opt: string) => isAll || (!isNone && selected.has(opt));
+
+  // Toggle one option, normalising the result back to the canonical empty
+  // set (all) or the {FILTER_NONE} marker (none).
+  const toggle = (opt: string) => {
+    const eff = isNone
+      ? new Set<string>()
+      : isAll
+        ? new Set(options)
+        : new Set(selected);
+    eff.delete(FILTER_NONE);
+    if (eff.has(opt)) eff.delete(opt);
+    else eff.add(opt);
+    if (eff.size >= options.length) onChange(new Set()); // all → empty
+    else if (eff.size === 0) onChange(new Set([FILTER_NONE])); // none
+    else onChange(eff);
+  };
+
+  const summary = isNone
+    ? "Ничего"
+    : isAll
       ? `Все (${options.length})`
       : selected.size === 1
         ? Array.from(selected)[0]
-        : `Выбрано ${selected.size}`;
+        : `Выбрано ${selected.size} из ${options.length}`;
 
   // The menu renders in a portal (position: fixed) so it floats above the
   // table below — `absolute` left it under a later stacking context. Its
@@ -142,16 +163,24 @@ function MultiSelect({
                 maxHeight: pos.maxHeight,
               }}
             >
-              <div className="flex items-center justify-between px-2 py-1 mb-1">
+              <div className="flex items-center justify-between gap-2 px-2 py-1 mb-1 border-b border-border/60">
                 <span className="text-xs text-muted">{options.length} вариантов</span>
-                {selected.size > 0 && (
+                <div className="flex items-center gap-3">
                   <button
-                    onClick={onReset}
-                    className="text-xs text-accent hover:underline"
+                    onClick={() => onChange(new Set())}
+                    disabled={isAll}
+                    className="text-xs text-accent hover:underline disabled:opacity-40 disabled:no-underline"
                   >
-                    сбросить
+                    Выбрать все
                   </button>
-                )}
+                  <button
+                    onClick={() => onChange(new Set([FILTER_NONE]))}
+                    disabled={isNone}
+                    className="text-xs text-accent hover:underline disabled:opacity-40 disabled:no-underline"
+                  >
+                    Снять все
+                  </button>
+                </div>
               </div>
               {options.map((opt) => (
                 <label
@@ -160,8 +189,8 @@ function MultiSelect({
                 >
                   <input
                     type="checkbox"
-                    checked={selected.has(opt)}
-                    onChange={() => onToggle(opt)}
+                    checked={isChecked(opt)}
+                    onChange={() => toggle(opt)}
                     className="accent-accent"
                   />
                   <span className="truncate">{opt}</span>
@@ -454,16 +483,14 @@ export function GlobalFilters({
           label="Счета"
           options={accounts}
           selected={f.accounts}
-          onToggle={(v) => f.toggleSet("accounts", v)}
-          onReset={() => f.resetSet("accounts")}
+          onChange={(s) => f.setSet("accounts", s)}
         />
 
         <MultiSelect
           label="Категории"
           options={categories}
           selected={f.categories}
-          onToggle={(v) => f.toggleSet("categories", v)}
-          onReset={() => f.resetSet("categories")}
+          onChange={(s) => f.setSet("categories", s)}
         />
 
         {currencies.length > 1 && (
@@ -471,8 +498,7 @@ export function GlobalFilters({
             label="Валюта"
             options={currencies}
             selected={f.currencies}
-            onToggle={(v) => f.toggleSet("currencies", v)}
-            onReset={() => f.resetSet("currencies")}
+            onChange={(s) => f.setSet("currencies", s)}
           />
         )}
 

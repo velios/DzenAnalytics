@@ -46,10 +46,19 @@ import type { Transaction } from "../types";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
+import { colorForCategory } from "../lib/categoryColor";
+import { useEffect } from "react";
 
 export function TrendsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const categoryMeta = useCategoryMetaStore((s) => s.meta);
+  const metaLoaded = useCategoryMetaStore((s) => s.loaded);
+  const hydrateMeta = useCategoryMetaStore((s) => s.hydrate);
+  useEffect(() => {
+    if (!metaLoaded) hydrateMeta();
+  }, [metaLoaded, hydrateMeta]);
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const showDrill = useDrillStore((s) => s.show);
@@ -151,8 +160,6 @@ export function TrendsPage() {
 
   if (transactions.length === 0) return <EmptyState />;
 
-  const COLORS = ["#22D3EE", "#A78BFA", "#F59E0B", "#10B981", "#EF4444", "#EC4899", "#3B82F6", "#84CC16"];
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -214,7 +221,7 @@ export function TrendsPage() {
           {allCategories.slice(0, 30).map((cat) => {
             const isActive = activeCategories.includes(cat);
             const isSelected = selected.includes(cat);
-            const color = COLORS[activeCategories.indexOf(cat) % COLORS.length];
+            const color = colorForCategory(cat, categoryMeta);
             return (
               <button
                 key={cat}
@@ -259,12 +266,12 @@ export function TrendsPage() {
                 formatter={(v: unknown) => formatMoney(toNum(v), base)}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              {activeCategories.map((cat, i) => (
+              {activeCategories.map((cat) => (
                 <Line
                   key={cat}
                   type="monotone"
                   dataKey={cat}
-                  stroke={COLORS[i % COLORS.length]}
+                  stroke={colorForCategory(cat, categoryMeta)}
                   strokeWidth={2}
                   dot={{ r: 3 }}
                 />

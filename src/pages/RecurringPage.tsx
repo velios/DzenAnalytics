@@ -26,7 +26,7 @@ export function RecurringPage() {
   const allCandidates = useMemo(() => detectRecurring(transactions), [transactions]);
   const [cadenceFilter, setCadenceFilter] = useState<CadenceFilter>("all");
   const [onlyPriceUp, setOnlyPriceUp] = useState(false);
-  // "Активные" = платёж не «протух» (пропущено не больше ~2 циклов с учётом
+  // "Активные" = платёж идёт по графику (пропущено не больше ~2 циклов с учётом
   // периодичности). ON by default: a subscription cancelled a few months ago
   // isn't really "recurring" anymore, so we hide those unless the user
   // explicitly asks to see the full history. The staleness test is
@@ -34,22 +34,33 @@ export function RecurringPage() {
   // couple of months is hidden long before the old flat "older than a year".
   const [onlyActive, setOnlyActive] = useState(true);
 
-  const candidates = useMemo(() => {
-    return allCandidates.filter((c) => {
-      if (cadenceFilter !== "all" && c.cadence !== cadenceFilter) return false;
-      if (onlyPriceUp && c.priceTrend.priceFlag !== "up") return false;
-      if (onlyActive && c.stale) return false;
-      return true;
-    });
-  }, [allCandidates, cadenceFilter, onlyPriceUp, onlyActive]);
-
-  const activeCount = useMemo(
-    () => allCandidates.filter((c) => !c.stale).length,
-    [allCandidates]
+  // Pool after the toggle filters (active / price-up) but BEFORE the cadence
+  // pick. Used both for the result list AND for the per-cadence pill counts, so
+  // a period pill's number always equals what «Найдено» shows for that cadence
+  // under the current toggles (e.g. «Ежемесячные 17» → выбрал → Найдено 17).
+  const filterPool = useMemo(
+    () =>
+      allCandidates.filter((c) => {
+        if (onlyPriceUp && c.priceTrend.priceFlag !== "up") return false;
+        if (onlyActive && c.stale) return false;
+        return true;
+      }),
+    [allCandidates, onlyPriceUp, onlyActive]
   );
 
+  const candidates = useMemo(
+    () =>
+      cadenceFilter === "all"
+        ? filterPool
+        : filterPool.filter((c) => c.cadence === cadenceFilter),
+    [filterPool, cadenceFilter]
+  );
+
+  // Respects the «Только активные» toggle (but not the price-up filter itself,
+  // which this card toggles): counts price-jumped subscriptions among active
+  // ones when the toggle is on, so the number matches what clicking it reveals.
   const priceUpCount = allCandidates.filter(
-    (c) => c.priceTrend.priceFlag === "up"
+    (c) => c.priceTrend.priceFlag === "up" && (!onlyActive || !c.stale)
   ).length;
 
   if (transactions.length === 0) return <EmptyState />;
@@ -137,8 +148,8 @@ export function RecurringPage() {
             const label = c === "all" ? "Все" : CADENCE_LABEL[c];
             const count =
               c === "all"
-                ? allCandidates.length
-                : allCandidates.filter((x) => x.cadence === c).length;
+                ? filterPool.length
+                : filterPool.filter((x) => x.cadence === c).length;
             const active = cadenceFilter === c;
             return (
               <button
@@ -156,20 +167,6 @@ export function RecurringPage() {
               </button>
             );
           })}
-          <span className="text-border">·</span>
-          <button
-            type="button"
-            onClick={() => setOnlyActive((v) => !v)}
-            title="Скрыть протухшие — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
-            className={`px-3 py-1 rounded-full border transition-colors ${
-              onlyActive
-                ? "bg-accent/10 border-accent/40 text-accent"
-                : "border-border text-muted hover:text-text"
-            }`}
-          >
-            Только активные
-            <span className="ml-1.5 opacity-60">{activeCount}</span>
-          </button>
           {onlyPriceUp && (
             <button
               type="button"
@@ -179,6 +176,31 @@ export function RecurringPage() {
               Только подорожавшие ×
             </button>
           )}
+          {/* Active-only is a toggle, not a period — different style (switch)
+              and pushed to the right edge so it doesn't read as a 5th pill. */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={onlyActive}
+            onClick={() => setOnlyActive((v) => !v)}
+            title="Показывать только активные. Неактивные — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
+            className={`ml-auto flex items-center gap-2 transition-colors ${
+              onlyActive ? "text-text" : "text-muted hover:text-text"
+            }`}
+          >
+            <span>Только активные</span>
+            <span
+              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
+                onlyActive ? "bg-accent" : "bg-border"
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                  onlyActive ? "translate-x-3.5" : "translate-x-0.5"
+                }`}
+              />
+            </span>
+          </button>
         </div>
       )}
 
@@ -240,6 +262,26 @@ export function RecurringPage() {
             exportName="recurring_payments"
             columns={
               [
+                {
+                  // Traffic-light status: green = active (payments on schedule),
+                  // red = inactive (no payment for more than ~2 expected cycles).
+                  key: "status",
+                  label: "Статус",
+                  align: "center",
+                  sortValue: (c) => (c.stale ? "неактивен" : "активен"),
+                  render: (c) => (
+                    <span
+                      className={`inline-block w-2.5 h-2.5 rounded-full ${
+                        c.stale ? "bg-expense" : "bg-income"
+                      }`}
+                      title={
+                        c.stale
+                          ? `Неактивен: нет платежа ${c.daysSinceLast} дн. при периоде ~${c.avgIntervalDays} дн.`
+                          : "Активен: платежи идут по графику"
+                      }
+                    />
+                  ),
+                },
                 {
                   key: "payee",
                   label: "Получатель",
@@ -343,16 +385,8 @@ export function RecurringPage() {
                   label: "Последний",
                   sortValue: (c) => c.lastDate,
                   render: (c) => (
-                    <span className="whitespace-nowrap inline-flex items-center gap-1.5">
-                      <span className="text-muted">{formatDate(c.lastDate, "short")}</span>
-                      {c.stale && (
-                        <span
-                          className="text-[10px] pill text-muted"
-                          title={`Протух: нет платежа ${c.daysSinceLast} дн. при периоде ~${c.avgIntervalDays} дн.`}
-                        >
-                          протух
-                        </span>
-                      )}
+                    <span className="text-muted whitespace-nowrap">
+                      {formatDate(c.lastDate, "short")}
                     </span>
                   ),
                 },

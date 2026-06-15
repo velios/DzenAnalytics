@@ -3,7 +3,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
-import { topPayees, topTransactions, groupByCategory, type CategoryBucket, type PayeeBucket } from "../lib/aggregations";
+import { topPayees, topTransactions, groupByCategory, NO_PAYEE_LABEL, type CategoryBucket, type PayeeBucket } from "../lib/aggregations";
 import { SortableTable, type Column } from "../components/SortableTable";
 import type { Transaction } from "../types";
 import { formatMoney, formatDate, formatPct } from "../lib/format";
@@ -42,7 +42,11 @@ export function TopPage() {
     showDrill(name, list, kind === "expense" ? "Расходы по категории" : "Доходы по категории");
   }
   function openPayee(name: string) {
-    const list = filtered.filter((t) => matchesKind(t.kind) && t.payee === name);
+    // Mirror topPayees' bucketing so the «Без получателя» row opens its
+    // empty-payee operations instead of an empty drawer.
+    const list = filtered.filter(
+      (t) => matchesKind(t.kind) && (t.payee || NO_PAYEE_LABEL) === name
+    );
     showDrill(name, list, kind === "expense" ? "Расходы получателю" : "Поступления от");
   }
   function openSingle(id: string) {

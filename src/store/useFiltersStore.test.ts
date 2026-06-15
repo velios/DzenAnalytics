@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyFilters, presetToRange, useFiltersStore } from "./useFiltersStore";
+import { applyFilters, presetToRange, useFiltersStore, FILTER_NONE } from "./useFiltersStore";
 import { periodRange } from "../lib/period";
 import { tx } from "../test/fixtures";
 
@@ -135,6 +135,16 @@ describe("applyFilters — dimension filters", () => {
 
   it("a set with no matches yields an empty result", () => {
     expect(applyFilters(txs, filt({ accounts: new Set(["Депозит"]) }))).toEqual([]);
+  });
+
+  it("the FILTER_NONE sentinel means 'none included' → empty result", () => {
+    expect(applyFilters(txs, filt({ accounts: new Set([FILTER_NONE]) }))).toEqual([]);
+    expect(applyFilters(txs, filt({ categories: new Set([FILTER_NONE]) }))).toEqual([]);
+  });
+
+  it("empty set (all) and FILTER_NONE (none) are opposite extremes", () => {
+    expect(applyFilters(txs, filt({ accounts: new Set() }))).toHaveLength(3);
+    expect(applyFilters(txs, filt({ accounts: new Set([FILTER_NONE]) }))).toHaveLength(0);
   });
 });
 

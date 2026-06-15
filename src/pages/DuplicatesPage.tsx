@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react";
-import { Copy, AlertCircle, Pencil, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Copy, AlertCircle, Pencil, Trash2, ShieldOff } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useEditsStore } from "../store/useEditsStore";
 import type { TransactionEdit } from "../store/useEditsStore";
-import { detectDuplicates } from "../lib/aggregations";
+import { useDuplicateExclusionsStore } from "../store/useDuplicateExclusionsStore";
+import { detectDuplicates, type DuplicateGroup } from "../lib/aggregations";
 import { formatMoney, formatDate, formatNum } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { BulkEditModal } from "../components/BulkEditModal";
+import { DuplicateExclusionsModal } from "../components/DuplicateExclusionsModal";
 import { confirmBulkDelete } from "../lib/confirmBulkDelete";
 
 export function DuplicatesPage() {
@@ -19,11 +21,35 @@ export function DuplicatesPage() {
   const setEditMany = useEditsStore((s) => s.setEditMany);
   const showDrill = useDrillStore((s) => s.show);
 
+  // «Не дубликаты» exceptions (by group signature), persisted + manageable.
+  const exclusions = useDuplicateExclusionsStore((s) => s.rules);
+  const exclusionsLoaded = useDuplicateExclusionsStore((s) => s.loaded);
+  const hydrateExclusions = useDuplicateExclusionsStore((s) => s.hydrate);
+  const addExclusion = useDuplicateExclusionsStore((s) => s.add);
+  useEffect(() => {
+    if (!exclusionsLoaded) hydrateExclusions();
+  }, [exclusionsLoaded, hydrateExclusions]);
+  const excludedSet = useMemo(() => new Set(Object.keys(exclusions)), [exclusions]);
+  const exclusionsCount = Object.keys(exclusions).length;
+  const [exclusionsModalOpen, setExclusionsModalOpen] = useState(false);
+
   const [windowDays, setWindowDays] = useState(3);
   const groups = useMemo(
-    () => detectDuplicates(transactions, windowDays),
-    [transactions, windowDays]
+    () => detectDuplicates(transactions, windowDays, excludedSet),
+    [transactions, windowDays, excludedSet]
   );
+
+  function markNotDuplicates(g: DuplicateGroup) {
+    const first = g.txs[0];
+    addExclusion({
+      signature: g.signature,
+      payee: first.payee,
+      amount: first.amount,
+      currency: first.currency,
+      kind: first.kind,
+      createdAt: new Date().toISOString(),
+    });
+  }
 
   // ── Bulk selection + edit (global across all duplicate groups) ──────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -84,17 +110,29 @@ export function DuplicatesPage() {
             пределах окна. Часто бывают при двойном импорте.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted">Окно (дней)</span>
-          <input
-            type="range"
-            min="1"
-            max="14"
-            value={windowDays}
-            onChange={(e) => setWindowDays(Number(e.target.value))}
-            className="accent-accent"
-          />
-          <span className="text-xs tabular-nums w-6">{windowDays}</span>
+        <div className="flex items-center gap-4 flex-wrap">
+          {exclusionsCount > 0 && (
+            <button
+              onClick={() => setExclusionsModalOpen(true)}
+              className="btn-ghost text-xs"
+              title="Управление исключениями «не дубликаты»"
+            >
+              <ShieldOff className="w-3.5 h-3.5" />
+              Исключения ({exclusionsCount})
+            </button>
+          )}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted">Окно (дней)</span>
+            <input
+              type="range"
+              min="0"
+              max="14"
+              value={windowDays}
+              onChange={(e) => setWindowDays(Number(e.target.value))}
+              className="accent-accent"
+            />
+            <span className="text-xs tabular-nums w-6">{windowDays}</span>
+          </div>
         </div>
       </div>
 
@@ -117,6 +155,7 @@ export function DuplicatesPage() {
           </div>
         </div>
       </div>
+
 
       {groups.length === 0 ? (
         <div className="card card-pad text-center py-12">
@@ -153,14 +192,34 @@ export function DuplicatesPage() {
                       {g.txs.length} копий
                     </div>
                   </div>
-                  <button
-                    onClick={() => showDrill(first.payee || first.categoryFull, g.txs, "Дубликаты")}
-                    className="btn-ghost text-xs"
-                  >
-                    Открыть в drawer
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => markNotDuplicates(g)}
+                      className="btn-ghost text-xs"
+                      title="Это не дубликаты — больше не помечать эту группу"
+                    >
+                      <ShieldOff className="w-3.5 h-3.5" />
+                      Не дубликаты
+                    </button>
+                    <button
+                      onClick={() => showDrill(first.payee || first.categoryFull, g.txs, "Дубликаты")}
+                      className="btn-ghost text-xs"
+                    >
+                      Открыть в Drawer
+                    </button>
+                  </div>
                 </div>
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
+                  {/* Shared column template — identical in every group so the
+                      columns line up across all duplicate cards. */}
+                  <colgroup>
+                    <col style={{ width: "36px" }} />
+                    <col style={{ width: "92px" }} />
+                    <col style={{ width: "22%" }} />
+                    <col />
+                    <col style={{ width: "16%" }} />
+                    <col style={{ width: "120px" }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th className="table-th w-8">
@@ -203,16 +262,16 @@ export function DuplicatesPage() {
                         <td className="table-td whitespace-nowrap text-muted">
                           {formatDate(t.date, "short")}
                         </td>
-                        <td className="table-td truncate max-w-[160px]">
+                        <td className="table-td truncate" title={t.categoryFull}>
                           {t.categoryFull}
                         </td>
                         <td
-                          className="table-td truncate max-w-[260px] text-xs text-muted"
+                          className="table-td truncate text-xs text-muted"
                           title={t.comment}
                         >
                           {t.comment}
                         </td>
-                        <td className="table-td truncate max-w-[120px] text-xs text-muted">
+                        <td className="table-td truncate text-xs text-muted" title={t.account}>
                           {t.account}
                         </td>
                         <td
@@ -267,6 +326,10 @@ export function DuplicatesPage() {
           onApply={applyBulk}
           onClose={() => setBulkOpen(false)}
         />
+      )}
+
+      {exclusionsModalOpen && (
+        <DuplicateExclusionsModal onClose={() => setExclusionsModalOpen(false)} />
       )}
     </div>
   );

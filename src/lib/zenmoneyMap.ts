@@ -16,6 +16,7 @@ import type {
   ZenTag,
   ZenInstrument,
 } from "./zenmoney";
+import { SYNTHETIC_CATEGORY_COLORS } from "./categoryColor";
 
 export interface CategoryMeta {
   /** CSS rgb() string or null when the tag has no colour set. */
@@ -28,6 +29,11 @@ export interface CategoryMeta {
   showIncome?: boolean;
   /** Tag is offered as a candidate for expense transactions. */
   showOutcome?: boolean;
+  /** Zenmoney «обязательная» flag (`tag.required`). `true`/`null`/absent =
+   *  mandatory (the default — Zenmoney treats null as mandatory), only an
+   *  explicit `false` = optional. Drives needs/wants on the 50/30/20 page
+   *  (need = `required !== false`). Used without manual marking. */
+  required?: boolean | null;
 }
 
 export interface MappedDiff {
@@ -298,6 +304,9 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
     // exists under both an income and an expense parent.
     const nextShowIncome = (cur?.showIncome ?? false) || !!tag.showIncome;
     const nextShowOutcome = (cur?.showOutcome ?? false) || !!tag.showOutcome;
+    // `required` belongs to the category: the top-level (no-parent) tag is
+    // authoritative; a child only fills it if nothing's set yet.
+    const nextRequired = !tag.parent ? tag.required : cur?.required ?? tag.required;
     if (!cur || (!cur.color && color)) {
       categoryMeta[tag.title] = {
         color,
@@ -305,19 +314,23 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
         picture: tag.picture || null,
         showIncome: nextShowIncome,
         showOutcome: nextShowOutcome,
+        required: nextRequired,
       };
     } else {
-      // Keep existing colour/icon but update the show-flags.
+      // Keep existing colour/icon but update the show-flags + required.
       cur.showIncome = nextShowIncome;
       cur.showOutcome = nextShowOutcome;
+      if (!tag.parent) cur.required = tag.required;
+      else if (cur.required == null) cur.required = tag.required;
     }
   }
-  // Our local-only labels — give them neutral tones so they aren't styleless.
+  // Our local-only labels — seed from the shared synthetic palette so charts
+  // (which read `categoryMeta`) and CategoryDot agree on their colour.
   if (!categoryMeta["Перевод"]) {
-    categoryMeta["Перевод"] = { color: "rgb(148, 163, 184)", icon: null, picture: null };
+    categoryMeta["Перевод"] = { color: SYNTHETIC_CATEGORY_COLORS["Перевод"], icon: null, picture: null };
   }
   if (!categoryMeta["Долг"]) {
-    categoryMeta["Долг"] = { color: "rgb(120, 120, 120)", icon: null, picture: null };
+    categoryMeta["Долг"] = { color: SYNTHETIC_CATEGORY_COLORS["Долг"], icon: null, picture: null };
   }
 
   return {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { TopNav } from "./components/TopNav";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -9,6 +10,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { DashboardPage } from "./pages/DashboardPage";
 import { CashflowPage } from "./pages/CashflowPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
+import { Budget503020Page } from "./pages/Budget503020Page";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { TopPage } from "./pages/TopPage";
@@ -42,6 +44,8 @@ import { useEditsStore } from "./store/useEditsStore";
 import { useDeletedStore } from "./store/useDeletedStore";
 import { useDeletedPayloadsStore } from "./store/useDeletedPayloadsStore";
 import { useDraftsStore } from "./store/useDraftsStore";
+import { useTagEditsStore } from "./store/useTagEditsStore";
+import { installTruncatedTitles } from "./lib/truncatedTitle";
 import { useDisplayStore } from "./store/useDisplayStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
 import { useOffBalanceStore } from "./store/useOffBalanceStore";
@@ -54,7 +58,14 @@ import { useFiltersStore } from "./store/useFiltersStore";
  * each route's structure explicit.
  */
 function PlainLayout() {
-  return <Outlet />;
+  // Re-key the boundary on the route so a crash on one page is cleared the
+  // moment you navigate elsewhere (the boundary remounts fresh).
+  const { pathname } = useLocation();
+  return (
+    <ErrorBoundary key={pathname}>
+      <Outlet />
+    </ErrorBoundary>
+  );
 }
 
 function App() {
@@ -85,6 +96,7 @@ function App() {
     useDeletedStore.getState().hydrate();
     useDeletedPayloadsStore.getState().hydrate();
     useDraftsStore.getState().hydrate();
+    useTagEditsStore.getState().hydrate();
     useDisplayStore.getState().hydrate();
     useOffBalanceStore.getState().hydrate();
     hydrate();
@@ -92,6 +104,10 @@ function App() {
     reportPeriodHydrate();
     return initTheme();
   }, [hydrate, backupHydrate, reportPeriodHydrate, initTheme]);
+
+  // Suppress `title` tooltips on truncated table cells unless the text is
+  // actually clipped (and non-empty). One delegated listener covers every table.
+  useEffect(() => installTruncatedTitles(), []);
 
   // Once the report-period setting is known, reset the filter's "current
   // month" to the matching billing period — so that fresh visits always
@@ -139,7 +155,9 @@ function App() {
         useDeletedStore.getState().deletedIds.length > 0;
       const hasDrafts =
         Object.keys(useDraftsStore.getState().drafts).length > 0;
-      if (!hasEdits && !hasDeletions && !hasDrafts) return;
+      const hasTagEdits =
+        Object.keys(useTagEditsStore.getState().edits).length > 0;
+      if (!hasEdits && !hasDeletions && !hasDrafts && !hasTagEdits) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
@@ -178,11 +196,20 @@ function App() {
       if (Object.keys(s.drafts).length <= Object.keys(p.drafts).length) return;
       schedule();
     });
+    // Category-tag edits (the «обязательная» flag) push on the same debounce.
+    // Fire on any change to the edits map that leaves something pending — a
+    // re-set to the same value still counts as intent to push.
+    const unsubTagEdits = useTagEditsStore.subscribe((s, p) => {
+      if (s.edits === p.edits) return;
+      if (Object.keys(s.edits).length === 0) return;
+      schedule();
+    });
     return () => {
       if (timer) clearTimeout(timer);
       unsubEdits();
       unsubDeleted();
       unsubDrafts();
+      unsubTagEdits();
     };
   }, []);
 
@@ -264,6 +291,7 @@ function App() {
             <Route path="/trends" element={<TrendsPage />} />
             <Route path="/sankey" element={<SankeyPage />} />
             <Route path="/wordcloud" element={<WordcloudPage />} />
+            <Route path="/50-30-20" element={<Budget503020Page />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
