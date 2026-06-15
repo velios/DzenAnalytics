@@ -164,19 +164,6 @@ export function RecurringPage() {
               </button>
             );
           })}
-          <span className="text-border">·</span>
-          <button
-            type="button"
-            onClick={() => setOnlyActive((v) => !v)}
-            title="Скрыть протухшие — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
-            className={`px-3 py-1 rounded-full border transition-colors ${
-              onlyActive
-                ? "bg-accent/10 border-accent/40 text-accent"
-                : "border-border text-muted hover:text-text"
-            }`}
-          >
-            Только активные
-          </button>
           {onlyPriceUp && (
             <button
               type="button"
@@ -186,6 +173,31 @@ export function RecurringPage() {
               Только подорожавшие ×
             </button>
           )}
+          {/* Active-only is a toggle, not a period — different style (switch)
+              and pushed to the right edge so it doesn't read as a 5th pill. */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={onlyActive}
+            onClick={() => setOnlyActive((v) => !v)}
+            title="Скрыть протухшие — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
+            className={`ml-auto flex items-center gap-2 transition-colors ${
+              onlyActive ? "text-text" : "text-muted hover:text-text"
+            }`}
+          >
+            <span>Только активные</span>
+            <span
+              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
+                onlyActive ? "bg-accent" : "bg-border"
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                  onlyActive ? "translate-x-3.5" : "translate-x-0.5"
+                }`}
+              />
+            </span>
+          </button>
         </div>
       )}
 
