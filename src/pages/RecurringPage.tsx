@@ -34,18 +34,26 @@ export function RecurringPage() {
   // couple of months is hidden long before the old flat "older than a year".
   const [onlyActive, setOnlyActive] = useState(true);
 
-  const candidates = useMemo(() => {
-    return allCandidates.filter((c) => {
-      if (cadenceFilter !== "all" && c.cadence !== cadenceFilter) return false;
-      if (onlyPriceUp && c.priceTrend.priceFlag !== "up") return false;
-      if (onlyActive && c.stale) return false;
-      return true;
-    });
-  }, [allCandidates, cadenceFilter, onlyPriceUp, onlyActive]);
+  // Pool after the toggle filters (active / price-up) but BEFORE the cadence
+  // pick. Used both for the result list AND for the per-cadence pill counts, so
+  // a period pill's number always equals what «Найдено» shows for that cadence
+  // under the current toggles (e.g. «Ежемесячные 17» → выбрал → Найдено 17).
+  const filterPool = useMemo(
+    () =>
+      allCandidates.filter((c) => {
+        if (onlyPriceUp && c.priceTrend.priceFlag !== "up") return false;
+        if (onlyActive && c.stale) return false;
+        return true;
+      }),
+    [allCandidates, onlyPriceUp, onlyActive]
+  );
 
-  const activeCount = useMemo(
-    () => allCandidates.filter((c) => !c.stale).length,
-    [allCandidates]
+  const candidates = useMemo(
+    () =>
+      cadenceFilter === "all"
+        ? filterPool
+        : filterPool.filter((c) => c.cadence === cadenceFilter),
+    [filterPool, cadenceFilter]
   );
 
   const priceUpCount = allCandidates.filter(
@@ -137,8 +145,8 @@ export function RecurringPage() {
             const label = c === "all" ? "Все" : CADENCE_LABEL[c];
             const count =
               c === "all"
-                ? allCandidates.length
-                : allCandidates.filter((x) => x.cadence === c).length;
+                ? filterPool.length
+                : filterPool.filter((x) => x.cadence === c).length;
             const active = cadenceFilter === c;
             return (
               <button
@@ -168,7 +176,6 @@ export function RecurringPage() {
             }`}
           >
             Только активные
-            <span className="ml-1.5 opacity-60">{activeCount}</span>
           </button>
           {onlyPriceUp && (
             <button
