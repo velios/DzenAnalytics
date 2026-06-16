@@ -7,4 +7,5 @@ declare const __APP_VERSION__: string;
 interface ImportMetaEnv {
   readonly VITE_TOKEN_PROVIDER_URL?: string;
   readonly VITE_LOGIN_URL?: string;
+  readonly VITE_LOGOUT_URL?: string;
 }

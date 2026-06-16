@@ -15,6 +15,7 @@ COPY . /app/
 # the concrete URLs are supplied via --build-arg in deploy.yml.
 ARG VITE_TOKEN_PROVIDER_URL
 ARG VITE_LOGIN_URL
+ARG VITE_LOGOUT_URL
 
 RUN npm run build
 

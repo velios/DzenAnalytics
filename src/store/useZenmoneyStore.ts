@@ -46,8 +46,10 @@ import {
   isProviderActive,
   fetchProviderToken,
   redirectToLogin,
+  postLogout,
   wipeLocalDb,
   shouldWipeForUser,
+  shouldAutoConnectProvider,
 } from "../lib/authProvider";
 
 const TOKEN_KEY = "zenmoneyToken";
@@ -60,6 +62,10 @@ const SNAPSHOT_POLICY_KEY = "zenmoneySnapshotPolicy";
 const AUTO_SYNC_ENABLED_KEY = "zenmoneyAutoSyncEnabled";
 const AUTO_SYNC_VALUE_KEY = "zenmoneyAutoSyncValue";
 const AUTO_SYNC_UNIT_KEY = "zenmoneyAutoSyncUnit";
+// Set when the user explicitly disconnects from the SSO provider. Blocks the
+// silent boot-time auto-connect so a still-live session cookie can't re-adopt
+// the account on the next reload. Cleared when the user opts back in via login.
+const PROVIDER_OPT_OUT_KEY = "zenmoneyProviderOptOut";
 
 /**
  * Overlay pending tag edits onto a freshly-mapped `categoryMeta` map so a
@@ -320,6 +326,29 @@ interface ZenmoneyState {
   validateAndSaveToken: (token: string) => Promise<boolean>;
   removeToken: () => Promise<void>;
   /**
+   * Local disconnect from the SSO provider: drop the in-memory token and
+   * persist an opt-out so the next boot does NOT silently re-fetch the token
+   * by cookie. Keeps local data (mirrors `removeToken`'s "data stays"
+   * contract); does NOT end the server-side SSO session — that's the auth
+   * provider's own logout. Returns the user to the source-choice screen.
+   */
+  disconnectProvider: () => Promise<void>;
+  /**
+   * Full SSO logout: POST the logout endpoint to end the server-side session,
+   * then (only on confirmed success) do the same local reset as
+   * `disconnectProvider`. On failure leaves the session intact and surfaces an
+   * error. Callers gate the button on `isLogoutConfigured()`. The opt-out is
+   * set defensively so even a partial logout can't silently re-adopt the
+   * session on the next boot.
+   */
+  logoutFromProvider: () => Promise<void>;
+  /**
+   * Opt back into the provider and go to login. Clears the opt-out first
+   * (awaited, so the write lands before navigation) — otherwise the return
+   * trip would skip auto-connect and look "broken".
+   */
+  loginViaProvider: () => Promise<void>;
+  /**
    * Synchronise with Zenmoney. By default uses the last `serverTimestamp`
    * for an incremental diff; pass `{force: true}` to drop the local cache
    * and re-pull everything (useful after suspected corruption / renames /
@@ -446,6 +475,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       autoSyncEnabled,
       autoSyncValue,
       autoSyncUnit,
+      providerOptOut,
     ] = await Promise.all([
       db.loadJSON<string>(TOKEN_KEY),
       db.loadJSON<number>(TIMESTAMP_KEY),
@@ -457,6 +487,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       db.loadJSON<boolean>(AUTO_SYNC_ENABLED_KEY),
       db.loadJSON<number>(AUTO_SYNC_VALUE_KEY),
       db.loadJSON<AutoSyncUnit>(AUTO_SYNC_UNIT_KEY),
+      db.loadJSON<boolean>(PROVIDER_OPT_OUT_KEY),
     ]);
     // Migration: callers from the boolean-toggle era stored
     // `pushEnabled: true` without a mode. Treat that as "manual" so
@@ -480,10 +511,11 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       loaded: true,
     });
     // Priority: a persisted token means manual mode (upstream behaviour).
-    // Otherwise, if the build wired up a provider, try the SSO session.
+    // Otherwise, if the build wired up a provider AND the user hasn't
+    // explicitly disconnected, try the SSO session.
     // ponytail: brief EmptyState flash while the background fetch+sync
     // runs is acceptable — not worth a dedicated loading gate.
-    if (!token && isProviderActive()) {
+    if (shouldAutoConnectProvider(isProviderActive(), !!token, providerOptOut === true)) {
       await initProviderSession();
     }
     } finally {
@@ -534,6 +566,34 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       status: "idle",
       error: null,
     });
+  },
+
+  disconnectProvider: async () => {
+    await db.saveJSON(PROVIDER_OPT_OUT_KEY, true);
+    set({
+      token: null,
+      providerMode: false,
+      status: "idle",
+      error: null,
+    });
+  },
+
+  logoutFromProvider: async () => {
+    // End the server session first. Only reset local state on a confirmed
+    // logout — otherwise we'd drop the user to the choice screen while still
+    // logged in server-side, and the next boot would silently reconnect.
+    const ok = await postLogout();
+    if (!ok) {
+      set({ error: "Не удалось выйти из zen-platform. Попробуйте ещё раз." });
+      return;
+    }
+    await db.saveJSON(PROVIDER_OPT_OUT_KEY, true);
+    set({ token: null, providerMode: false, status: "idle", error: null });
+  },
+
+  loginViaProvider: async () => {
+    await db.saveJSON(PROVIDER_OPT_OUT_KEY, false);
+    redirectToLogin();
   },
 
   sync: async (opts = {}) => {

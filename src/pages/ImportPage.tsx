@@ -33,6 +33,7 @@ import {
   HardDrive,
   RotateCcw,
   LogIn,
+  LogOut,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { SyncLog } from "../components/SyncLog";
@@ -50,7 +51,7 @@ import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useDraftsStore } from "../store/useDraftsStore";
 import { confirm } from "../store/useConfirmStore";
-import { redirectToLogin } from "../lib/authProvider";
+import { isProviderActive, isLogoutConfigured } from "../lib/authProvider";
 import { pluralRu } from "../lib/plural";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -181,6 +182,9 @@ export function ImportPage() {
   const zenValidateAndSave = useZenmoneyStore((s) => s.validateAndSaveToken);
   const zenSync = useZenmoneyStore((s) => s.sync);
   const zenRemoveToken = useZenmoneyStore((s) => s.removeToken);
+  const zenDisconnectProvider = useZenmoneyStore((s) => s.disconnectProvider);
+  const zenLogoutFromProvider = useZenmoneyStore((s) => s.logoutFromProvider);
+  const loginViaProvider = useZenmoneyStore((s) => s.loginViaProvider);
   const providerMode = useZenmoneyStore((s) => s.providerMode);
   const autoSyncEnabled = useZenmoneyStore((s) => s.autoSyncEnabled);
   const autoSyncValue = useZenmoneyStore((s) => s.autoSyncValue);
@@ -247,11 +251,19 @@ export function ImportPage() {
   // connected account only", so switching accounts doesn't surface
   // foreign data. Null when there's no cache yet (CSV-only mode).
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  // Human-readable identity of the connected account (Zenmoney `login`, when
+  // the API echoes it) so provider-mode users can tell *which* account they're
+  // on — id is the reliable fallback.
+  const [currentUserLogin, setCurrentUserLogin] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     import("../lib/zenmoneyCache").then(({ loadZenCache }) => {
       loadZenCache().then((cache) => {
-        if (!cancelled) setCurrentUserId(cache?.user?.[0]?.id ?? null);
+        if (cancelled) return;
+        const u = cache?.user?.[0];
+        setCurrentUserId(u?.id ?? null);
+        const login = (u as { login?: unknown } | undefined)?.login;
+        setCurrentUserLogin(typeof login === "string" ? login : null);
       });
     });
     return () => {
@@ -411,7 +423,37 @@ export function ImportPage() {
       });
       if (!ok) return;
     }
-    redirectToLogin();
+    await loginViaProvider();
+  }
+
+  async function disconnectProvider() {
+    // Full SSO logout when the build wired a logout endpoint; otherwise a
+    // local-only disconnect (opt-out), which can't end the server session.
+    if (isLogoutConfigured()) {
+      const ok = await confirm({
+        title: "Выйти из zen-platform?",
+        message:
+          "Завершит SSO-сессию на сервере и вернёт к выбору способа подключения. Локальные данные останутся. После выхода вход потребует повторной аутентификации.",
+        confirmLabel: "Выйти",
+        tone: "danger",
+      });
+      if (!ok) return;
+      // POSTs the logout endpoint; on success resets to the choice screen,
+      // on failure leaves us connected with an inline error (zenError).
+      await zenLogoutFromProvider();
+      return;
+    }
+    const ok = await confirm({
+      title: "Отключить от zen-platform?",
+      message:
+        "Приложение перестанет автоматически входить по SSO-сессии и вернётся к выбору способа подключения. Локальные данные останутся. " +
+        "Это не завершает саму SSO-сессию на сервере — чтобы войти под другим аккаунтом, используйте «Переключить пользователя».",
+      confirmLabel: "Отключить",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await zenDisconnectProvider();
+    setSyncSuccess(null);
   }
 
   // Manual payee aliases — user-curated overrides on top of (or in
@@ -783,6 +825,20 @@ export function ImportPage() {
 
         {!zenToken ? (
           <div className="space-y-3">
+            {isProviderActive() && (
+              <div className="flex items-center gap-2 flex-wrap pb-1">
+                <button
+                  onClick={() => loginViaProvider()}
+                  className="btn-primary text-sm"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  Войти через zen-platform
+                </button>
+                <span className="text-xs text-muted">
+                  единый вход по сессии — или введите токен вручную ниже
+                </span>
+              </div>
+            )}
             <div className="text-xs text-muted">
               <KeyRound className="w-3.5 h-3.5 inline align-text-bottom mr-1" />
               Личный токен — это длинная строка из букв и цифр. Получить можно в{" "}
@@ -853,7 +909,14 @@ export function ImportPage() {
               {providerMode ? (
                 <div className="flex items-center gap-2 flex-1 min-w-[220px] text-sm text-text">
                   <LogIn className="w-4 h-4 text-accent shrink-0" />
-                  <span>Подключено через zen-platform</span>
+                  <span>
+                    Подключено через zen-platform
+                    {currentUserLogin
+                      ? ` · ${currentUserLogin}`
+                      : currentUserId != null
+                        ? ` · аккаунт #${currentUserId}`
+                        : ""}
+                  </span>
                 </div>
               ) : (
                 <div className="relative flex-1 min-w-[220px]">
@@ -900,15 +963,34 @@ export function ImportPage() {
                 Полная синхронизация
               </button>
               {providerMode ? (
-                <button
-                  onClick={switchUser}
-                  disabled={zenStatus === "syncing"}
-                  className="btn-ghost text-sm text-muted"
-                  title="Войти под другим аккаунтом zen-platform"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  Переключить пользователя
-                </button>
+                <>
+                  <button
+                    onClick={switchUser}
+                    disabled={zenStatus === "syncing"}
+                    className="btn-ghost text-sm text-muted"
+                    title="Войти под другим аккаунтом zen-platform"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    Переключить пользователя
+                  </button>
+                  <button
+                    onClick={disconnectProvider}
+                    disabled={zenStatus === "syncing"}
+                    className="btn-danger text-sm"
+                    title={
+                      isLogoutConfigured()
+                        ? "Завершить SSO-сессию на сервере"
+                        : "Перестать входить по SSO и вернуться к выбору способа подключения"
+                    }
+                  >
+                    {isLogoutConfigured() ? (
+                      <LogOut className="w-3.5 h-3.5" />
+                    ) : (
+                      <Unlink className="w-3.5 h-3.5" />
+                    )}
+                    {isLogoutConfigured() ? "Выйти" : "Отключить"}
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={disconnectToken}

@@ -13,10 +13,20 @@ import { closeDB } from "./db";
 
 const PROVIDER_URL = import.meta.env.VITE_TOKEN_PROVIDER_URL;
 const LOGIN_URL = import.meta.env.VITE_LOGIN_URL;
+const LOGOUT_URL = import.meta.env.VITE_LOGOUT_URL;
 
 /** True when the build wired up a token provider. */
 export function isProviderActive(): boolean {
   return !!PROVIDER_URL;
+}
+
+/**
+ * True when the build wired up an SSO logout endpoint. Without it the
+ * frontend can only do a *local* disconnect (opt-out) — it cannot end the
+ * server-side session, because the session cookie is HttpOnly / cross-origin.
+ */
+export function isLogoutConfigured(): boolean {
+  return !!LOGOUT_URL;
 }
 
 /**
@@ -30,6 +40,23 @@ export function shouldWipeForUser(
   tokenId: number | null
 ): boolean {
   return cachedId != null && tokenId != null && tokenId !== cachedId;
+}
+
+/**
+ * Whether boot should silently pull the SSO token. Only when the build wired
+ * a provider, there's no manual token, AND the user hasn't explicitly
+ * disconnected (opt-out). The opt-out is the thing that breaks the "I cleared
+ * everything but it reconnects on reload" loop: a live SSO cookie alone must
+ * NOT re-adopt the session after a deliberate disconnect — clearing local
+ * state can't kill a server-side / cross-origin session cookie, so the user
+ * needs a local "stop auto-connecting" flag instead.
+ */
+export function shouldAutoConnectProvider(
+  providerActive: boolean,
+  hasManualToken: boolean,
+  optedOut: boolean
+): boolean {
+  return providerActive && !hasManualToken && !optedOut;
 }
 
 /**
@@ -60,6 +87,30 @@ export function redirectToLogin(): void {
   const u = new URL(LOGIN_URL, location.origin);
   u.searchParams.set("redirect_to", location.href);
   location.href = u.href;
+}
+
+/**
+ * End the server-side SSO session via the logout endpoint (POST, cookie sent
+ * with `credentials:"include"`). Returns true only on an explicit `{ok:true}`
+ * — anything else (a same-origin SPA fallback returning HTML, a non-2xx, a
+ * network error) counts as failure, so the UI never fakes a logout the server
+ * didn't actually perform. The local opt-out / token reset is the caller's job
+ * (store), same split as `redirectToLogin`. No-op (false) when no logout
+ * endpoint was wired.
+ */
+export async function postLogout(): Promise<boolean> {
+  if (!LOGOUT_URL) return false;
+  try {
+    const res = await fetch(LOGOUT_URL, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!res.ok) return false;
+    const j = (await res.json()) as { ok?: boolean };
+    return j.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Cloud, Upload, LogIn } from "lucide-react";
-import { isProviderActive, redirectToLogin } from "../lib/authProvider";
+import { isProviderActive } from "../lib/authProvider";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
 
 /**
  * Shown on every analytics page while there are no transactions yet.
@@ -22,7 +23,7 @@ export function EmptyState() {
         {isProviderActive() && (
           <button
             type="button"
-            onClick={() => redirectToLogin()}
+            onClick={() => useZenmoneyStore.getState().loginViaProvider()}
             className="rounded-xl border border-border bg-panel2/40 p-5 text-left transition-colors hover:border-accent hover:bg-panel2 sm:col-span-2"
           >
             <div className="flex items-center gap-2 mb-2">
