@@ -144,6 +144,26 @@ export function CategoryFilterPicker({
     return active.subs.filter((s) => s.toLowerCase().includes(q));
   }, [active, q]);
 
+  // While searching, a FLAT list of every matching leaf with its full path —
+  // so identically-named subs in different parents («Животные / Кот»,
+  // «Тест / Кот») are each directly toggleable, no hover/cascade needed.
+  type SearchItem =
+    | { key: string; kind: "cat"; node: CategoryNode }
+    | { key: string; kind: "sub"; node: CategoryNode; sub: string };
+  const searchResults = useMemo<SearchItem[] | null>(() => {
+    if (!q) return null;
+    const items: SearchItem[] = [];
+    for (const n of nodes) {
+      if (n.name.toLowerCase().includes(q))
+        items.push({ key: `c:${n.name}`, kind: "cat", node: n });
+      for (const s of n.subs) {
+        if (s.toLowerCase().includes(q))
+          items.push({ key: `s:${n.name}/${s}`, kind: "sub", node: n, sub: s });
+      }
+    }
+    return items;
+  }, [q, nodes]);
+
   // Portal positioning — float above page content (mirrors MultiSelect).
   type MenuPos = { left: number; width: number; top?: number; bottom?: number; maxHeight: number };
   const [pos, setPos] = useState<MenuPos | null>(null);
@@ -242,6 +262,57 @@ export function CategoryFilterPicker({
                   className="bg-transparent text-sm w-full outline-none"
                 />
               </div>
+              {searchResults ? (
+                /* Search — flat, directly-toggleable list with full paths. */
+                <div className="overflow-y-auto min-h-0 flex-1">
+                  {searchResults.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted">Ничего не найдено</div>
+                  ) : (
+                    searchResults.map((item) =>
+                      item.kind === "cat" ? (
+                        (() => {
+                          const st = catState(item.node);
+                          return (
+                            <label
+                              key={item.key}
+                              className="flex items-center gap-2 px-3 py-1.5 hover:bg-panel2 cursor-pointer text-sm"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={st === "all"}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = st === "some";
+                                }}
+                                onChange={() => toggleParent(item.node)}
+                                className="accent-accent shrink-0"
+                              />
+                              <CategoryDot category={item.node.name} size="w-4 h-4" />
+                              <span className="truncate">{item.node.name}</span>
+                            </label>
+                          );
+                        })()
+                      ) : (
+                        <label
+                          key={item.key}
+                          className="flex items-center gap-2 px-3 py-1.5 hover:bg-panel2 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={leafChecked(subKey(item.node.name, item.sub))}
+                            onChange={() => toggleLeaf(subKey(item.node.name, item.sub))}
+                            className="accent-accent shrink-0"
+                          />
+                          <CategoryDot category={item.sub} size="w-4 h-4" />
+                          <span className="truncate">
+                            <span className="text-muted">{item.node.name} / </span>
+                            {item.sub}
+                          </span>
+                        </label>
+                      )
+                    )
+                  )}
+                </div>
+              ) : (
               <div className="flex min-h-0 flex-1">
                 {/* Left — parent categories */}
                 <div className="w-[55%] overflow-y-auto border-r border-border/60">
@@ -307,6 +378,7 @@ export function CategoryFilterPicker({
                   )}
                 </div>
               </div>
+              )}
             </div>
           </>,
           document.body
