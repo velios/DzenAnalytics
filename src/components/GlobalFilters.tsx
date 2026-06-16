@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarRange,
+  Coins,
 } from "lucide-react";
 import { DateField } from "./DateField";
 import { AccountLogo } from "./AccountLogo";
@@ -28,6 +29,7 @@ import { useFiltersStore, FILTER_NONE, type DatePreset } from "../store/useFilte
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { confirm } from "../store/useConfirmStore";
 import { monthLabel } from "../lib/format";
+import { currencyFlagEmoji } from "../lib/currencyFlag";
 
 const PRESETS: { value: DatePreset; label: string }[] = [
   { value: "30d", label: "30 дней" },
@@ -542,6 +544,14 @@ export function GlobalFilters({
             options={currencies}
             selected={f.currencies}
             onChange={(s) => f.setSet("currencies", s)}
+            renderIcon={(code) => {
+              const flag = currencyFlagEmoji(code);
+              return flag ? (
+                <span className="text-base leading-none">{flag}</span>
+              ) : (
+                <Coins className="w-4 h-4 text-muted" />
+              );
+            }}
           />
         )}
 
