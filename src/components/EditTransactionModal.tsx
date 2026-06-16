@@ -19,7 +19,9 @@ import {
   type DraftFields,
 } from "../lib/zenmoneyPush";
 import { Combobox } from "./Combobox";
+import { CategoryCascadePicker, type CategoryNode } from "./CategoryCascadePicker";
 import { DateField } from "./DateField";
+import type { ZenTag } from "../lib/zenmoney";
 import { HashtagTextarea } from "./HashtagTextarea";
 import type { Transaction, TxKind } from "../types";
 
@@ -180,6 +182,65 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
       subcatByCategory: subByCat,
     };
   }, [allTransactions, kind, categoryMeta]);
+
+  // Raw Zenmoney tags — the only place the real parent→child hierarchy lives
+  // (categoryMeta is keyed by title and flattens it, which is why sub-tags
+  // currently leak into the first level). Loaded once for the cascade picker.
+  const [cacheTags, setCacheTags] = useState<ZenTag[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadZenCache().then((c) => {
+      if (!cancelled) setCacheTags(c?.tags ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Top-level categories (this kind only) each with their sub-categories, for
+  // the single cascade field. Hierarchy comes from the raw tags (authoritative)
+  // unioned with sub-categories observed in the data; child tags that leaked
+  // into `categoryOptions` are dropped from the first level.
+  const categoryNodes = useMemo<CategoryNode[]>(() => {
+    const subsMap = new Map<string, Set<string>>();
+    const addSub = (cat: string, sub: string) => {
+      let s = subsMap.get(cat);
+      if (!s) {
+        s = new Set<string>();
+        subsMap.set(cat, s);
+      }
+      s.add(sub);
+    };
+    for (const [cat, subs] of subcatByCategory)
+      for (const sub of subs) addSub(cat, sub);
+    const realTop = new Set<string>();
+    if (cacheTags) {
+      const byId = new Map(cacheTags.map((t) => [t.id, t] as const));
+      for (const t of cacheTags) {
+        if (t.archive) continue;
+        if (t.parent) {
+          const parent = byId.get(t.parent);
+          if (parent) addSub(parent.title, t.title);
+        } else {
+          realTop.add(t.title);
+        }
+      }
+    }
+    // Names that are a child of some category — drop them from the first level
+    // unless they're *also* a genuine top-level tag (e.g. a "Прочее" that exists
+    // both as its own category and as a sub elsewhere).
+    const childNames = new Set<string>();
+    for (const subs of subsMap.values()) for (const s of subs) childNames.add(s);
+    const tops = categoryOptions.filter(
+      (c) => realTop.has(c) || !childNames.has(c)
+    );
+    return tops.map((name) => ({
+      name,
+      subs: Array.from(subsMap.get(name) ?? []).sort((a, b) =>
+        a.localeCompare(b, "ru")
+      ),
+    }));
+  }, [categoryOptions, subcatByCategory, cacheTags]);
 
   // "Получатель" suggestions, served as two distinct groups so the
   // user can tell at a glance which bucket a suggestion comes from:
@@ -688,42 +749,19 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
               just money moving between the user's own accounts, it has no
               spending/income category. */}
           {kind !== "transfer" && (
-            <div className="grid grid-cols-2 gap-3">
-              {/* Picker-only. Free-form text is blocked (`allowCustom={false}`)
-                  so we can never end up with a value that doesn't exist in
-                  Zenmoney's tag dictionary — that'd just get rejected by the
-                  push transformer with a "tag not found" error anyway. */}
-              <Field label="Категория">
-                <Combobox
-                  value={category}
-                  options={categoryOptions}
-                  allowCustom={false}
-                  maxHeight={DROPDOWN_MAX}
-                  onChange={(next) => {
-                    setCategory(next);
-                    if (
-                      subcategory &&
-                      !subcatByCategory.get(next)?.has(subcategory)
-                    ) {
-                      setSubcategory("");
-                    }
-                  }}
-                />
-              </Field>
-              <Field label="Подкатегория">
-                <Combobox
-                  value={subcategory}
-                  options={Array.from(subcatByCategory.get(category) || []).sort(
-                    (a, b) => a.localeCompare(b, "ru")
-                  )}
-                  allowCustom={false}
-                  clearable
-                  onChange={setSubcategory}
-                  placeholder="—"
-                  maxHeight={DROPDOWN_MAX}
-                />
-              </Field>
-            </div>
+            // Single full-width field: top level lists only real categories;
+            // a category's sub-categories open to the right (issue #12).
+            <Field label="Категория">
+              <CategoryCascadePicker
+                category={category}
+                subcategory={subcategory}
+                categories={categoryNodes}
+                onChange={(cat, sub) => {
+                  setCategory(cat);
+                  setSubcategory(sub);
+                }}
+              />
+            </Field>
           )}
           {/* Account(s): one field for income/expense, two for transfer.
               Placed right under category — it's the second-most
