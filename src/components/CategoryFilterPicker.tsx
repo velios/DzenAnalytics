@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -6,7 +7,9 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
+
+const MENU_W = 500;
 import clsx from "clsx";
 import { FILTER_NONE } from "../store/useFiltersStore";
 import { pluralRu } from "../lib/plural";
@@ -48,15 +51,10 @@ export function CategoryFilterPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  // Which categories are expanded (accordion, non-search view).
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggleExpand = (name: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
+  // The expanded category (non-search): its subs slide out to the right.
+  const [active, setActive] = useState<string | null>(null);
+  const toggleActive = (name: string) =>
+    setActive((prev) => (prev === name ? null : name));
 
   const isAll = selected.size === 0;
   const isNone = selected.has(FILTER_NONE);
@@ -145,41 +143,64 @@ export function CategoryFilterPicker({
     return items;
   }, [q, nodes]);
 
-  // Portal positioning — float above page content (mirrors MultiSelect).
+  const activeNode = useMemo(
+    () => nodes.find((n) => n.name === active) ?? null,
+    [nodes, active]
+  );
+
+  // Portal positioning — anchored to the button. Recomputed on scroll/resize so
+  // the dropdown FOLLOWS the button instead of floating away (and closes only
+  // when the button scrolls out of view). Repositioning rather than closing also
+  // means a checkbox-focus scroll never dismisses the picker mid-selection.
   type MenuPos = { left: number; width: number; top?: number; bottom?: number; maxHeight: number };
   const [pos, setPos] = useState<MenuPos | null>(null);
-  const MENU_W = 360;
-  useLayoutEffect(() => {
+  const computePos = useCallback(() => {
     const el = btnRef.current;
-    let next: MenuPos | null = null;
-    if (open && el) {
-      const r = el.getBoundingClientRect();
-      const width = Math.min(Math.max(r.width, MENU_W), window.innerWidth - 16);
-      const estH = 400;
-      const below = window.innerHeight - r.bottom - 8;
-      const above = r.top - 8;
-      const flipUp = above > below && above >= Math.min(estH, 48);
-      let left = r.left;
-      if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
-      if (left < 8) left = 8;
-      next = flipUp
-        ? { left, width, bottom: window.innerHeight - r.top + 4, maxHeight: Math.min(estH, above) }
-        : { left, width, top: r.bottom + 4, maxHeight: Math.min(estH, below) };
+    if (!open || !el) {
+      setPos(null);
+      return;
     }
-    setPos(next);
+    const r = el.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) {
+      setOpen(false);
+      return;
+    }
+    const width = Math.min(Math.max(r.width, MENU_W), window.innerWidth - 16);
+    const estH = 400;
+    const below = window.innerHeight - r.bottom - 8;
+    const above = r.top - 8;
+    const flipUp = above > below && above >= Math.min(estH, 48);
+    let left = r.left;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+    if (left < 8) left = 8;
+    setPos(
+      flipUp
+        ? { left, width, bottom: window.innerHeight - r.top + 4, maxHeight: Math.min(estH, above) }
+        : { left, width, top: r.bottom + 4, maxHeight: Math.min(estH, below) }
+    );
   }, [open]);
+  useLayoutEffect(() => {
+    computePos();
+  }, [computePos]);
   useEffect(() => {
     if (!open) return;
-    // Close only on resize / Escape — NOT on scroll: clicking a checkbox near
-    // the viewport edge can scroll the window, which used to close the picker
-    // mid-selection. Outside clicks are handled by the overlay below.
+    // Anchored to the button like the account/currency selects: a page scroll
+    // closes the picker (so it never floats away). A scroll INSIDE the menu
+    // (its own lists) is ignored, so selecting a checkbox never dismisses it.
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (menuRef.current && t instanceof Node && menuRef.current.contains(t)) return;
+      setOpen(false);
+    };
     const onResize = () => setOpen(false);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onResize);
     window.addEventListener("keydown", onKey);
     return () => {
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", onKey);
     };
@@ -211,20 +232,20 @@ export function CategoryFilterPicker({
               className="fixed z-[80] card p-0 overflow-hidden flex flex-col"
               style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
             >
-              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/60">
-                <span className="text-xs text-muted">{totalLabel}</span>
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border/60">
+                <span className="text-xs text-muted whitespace-nowrap truncate">{totalLabel}</span>
+                <div className="flex items-center gap-3 shrink-0">
                   <button
                     onClick={() => onChange(new Set())}
                     disabled={isAll}
-                    className="text-xs text-accent hover:underline disabled:opacity-40 disabled:no-underline"
+                    className="text-xs text-accent hover:underline disabled:opacity-40 disabled:no-underline whitespace-nowrap"
                   >
                     Выбрать все
                   </button>
                   <button
                     onClick={() => onChange(new Set([FILTER_NONE]))}
                     disabled={isNone}
-                    className="text-xs text-accent hover:underline disabled:opacity-40 disabled:no-underline"
+                    className="text-xs text-accent hover:underline disabled:opacity-40 disabled:no-underline whitespace-nowrap"
                   >
                     Снять все
                   </button>
@@ -291,14 +312,18 @@ export function CategoryFilterPicker({
                   )}
                 </div>
               ) : (
-                /* Accordion — sub-categories expand under a category on click. */
-                <div className="overflow-y-auto min-h-0 flex-1">
-                  {nodes.map((n) => {
-                    const st = catState(n);
-                    const isOpen = expanded.has(n.name);
-                    return (
-                      <div key={n.name}>
-                        <div className="flex items-center gap-1">
+                /* Sideways accordion — click a category, its subs slide out to
+                   the right (animated width); click again to collapse. */
+                <div className="flex min-h-0 flex-1">
+                  <div className="flex-1 min-w-0 overflow-y-auto">
+                    {nodes.map((n) => {
+                      const st = catState(n);
+                      const isActive = n.name === active;
+                      return (
+                        <div
+                          key={n.name}
+                          className={clsx("flex items-center gap-1 pr-1", isActive && "bg-panel2")}
+                        >
                           <input
                             type="checkbox"
                             checked={st === "all"}
@@ -311,9 +336,9 @@ export function CategoryFilterPicker({
                           <button
                             type="button"
                             onClick={() =>
-                              n.subs.length > 0 ? toggleExpand(n.name) : toggleParent(n)
+                              n.subs.length > 0 ? toggleActive(n.name) : toggleParent(n)
                             }
-                            className="flex-1 min-w-0 text-left px-1.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 rounded"
+                            className="flex-1 min-w-0 text-left px-1.5 py-1.5 text-sm flex items-center gap-2"
                           >
                             <CategoryDot category={n.name} size="w-4 h-4" />
                             <span className="truncate flex-1">{n.name}</span>
@@ -323,38 +348,39 @@ export function CategoryFilterPicker({
                               </span>
                             )}
                             {n.subs.length > 0 && (
-                              <ChevronDown
-                                className={`w-3.5 h-3.5 shrink-0 text-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
+                              <ChevronRight
+                                className={`w-3.5 h-3.5 shrink-0 text-muted transition-transform ${isActive ? "rotate-90" : ""}`}
                               />
                             )}
                           </button>
                         </div>
-                        {n.subs.length > 0 && (
-                          <div
-                            className={`grid transition-all duration-200 ${isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
-                          >
-                            <div className="overflow-hidden">
-                              {n.subs.map((s) => (
-                                <label
-                                  key={s}
-                                  className="flex items-center gap-2 pl-9 pr-2 py-1.5 hover:bg-panel2 cursor-pointer text-sm"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={subChecked(n, s)}
-                                    onChange={() => toggleLeaf(subKey(n.name, s))}
-                                    className="accent-accent shrink-0"
-                                  />
-                                  <CategoryDot category={s} parent={n.name} size="w-4 h-4" />
-                                  <span className="truncate">{s}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                  {/* Right panel — slides out (to the right) when a category is
+                      expanded; click the category again to collapse. */}
+                  {activeNode && (
+                    <div
+                      key={activeNode.name}
+                      className="w-[190px] shrink-0 overflow-y-auto border-l border-border/60 animate-cat-subs"
+                    >
+                      {activeNode.subs.map((s) => (
+                        <label
+                          key={s}
+                          className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={subChecked(activeNode, s)}
+                            onChange={() => toggleLeaf(subKey(activeNode.name, s))}
+                            className="accent-accent shrink-0"
+                          />
+                          <CategoryDot category={s} parent={activeNode.name} size="w-4 h-4" />
+                          <span className="truncate">{s}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
