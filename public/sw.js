@@ -1,6 +1,6 @@
 // DzenAnalytics service worker
 // Cache-first для статических ассетов, network-first для HTML.
-const VERSION = "v1";
+const VERSION = "v2";
 const STATIC_CACHE = `dzen-static-${VERSION}`;
 const RUNTIME_CACHE = `dzen-runtime-${VERSION}`;
 
@@ -40,6 +40,10 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
+
+  // Динамические per-session ручки (SSO-токен и т.п.) кэшировать нельзя:
+  // cache-first прибил бы приложение к токену старого аккаунта. Всегда в сеть.
+  if (url.pathname.startsWith("/api/")) return;
 
   // Network-first для HTML — чтобы получить свежий код, если онлайн
   const isHTML =
