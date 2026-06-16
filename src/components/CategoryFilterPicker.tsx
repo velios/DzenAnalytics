@@ -14,6 +14,9 @@ import { CategoryDot } from "./CategoryDot";
 
 export interface CategoryNode {
   name: string;
+  /** True when the category has «bare» transactions (tagged with just the
+   *  parent, no sub) — a distinct leaf, toggled only via the parent checkbox. */
+  hasBare: boolean;
   /** Sub-category titles (sorted). */
   subs: string[];
 }
@@ -23,12 +26,14 @@ export interface CategoryNode {
  * left, the active parent's sub-categories on the right — same shape as the
  * edit-modal picker, with checkboxes (issue #9).
  *
- * Selection keys (stored in the filter set; empty = ALL, `{FILTER_NONE}` = NONE):
- *   - a bare category name «Еда» → the WHOLE category (matches its bare and all
- *     sub transactions via `has(t.category)`);
- *   - a full «Еда / Кафе» key → that sub-category only (`has(t.categoryFull)`).
- * Picking a parent stores its name; un-ticking one sub of a fully-selected
- * parent expands it to the remaining subs.
+ * Pure leaf model — selection keys equal `categoryFull` (empty = ALL,
+ * `{FILTER_NONE}` = NONE):
+ *   - the bare category «Еда» (its no-sub transactions) — a leaf only when the
+ *     category actually has such transactions (`hasBare`);
+ *   - each «Еда / Кафе».
+ * Category and sub-category are independent: ticking a sub never selects the
+ * parent's bare leaf, and vice-versa. The parent checkbox just bulk-toggles all
+ * of the category's leaves.
  */
 export function CategoryFilterPicker({
   nodes,
@@ -49,82 +54,52 @@ export function CategoryFilterPicker({
   const isNone = selected.has(FILTER_NONE);
   const subKey = (cat: string, sub: string) => `${cat} / ${sub}`;
 
-  // Explicit per-category model: each node → "all" | Set<subKey> | undefined(none).
-  type CatSel = "all" | Set<string>;
-  const explicit = (): Map<string, CatSel> => {
-    const m = new Map<string, CatSel>();
-    if (isAll) {
-      for (const n of nodes) m.set(n.name, "all");
-      return m;
-    }
-    if (isNone) return m;
-    for (const n of nodes) {
-      if (selected.has(n.name)) m.set(n.name, "all");
-      else {
-        const subs = new Set(
-          n.subs.map((s) => subKey(n.name, s)).filter((k) => selected.has(k))
-        );
-        if (subs.size) m.set(n.name, subs);
-      }
-    }
-    return m;
-  };
+  // Leaf keys of a category = its bare leaf (if any) + its sub leaves.
+  const leavesOf = (n: CategoryNode) => [
+    ...(n.hasBare ? [n.name] : []),
+    ...n.subs.map((s) => subKey(n.name, s)),
+  ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- leavesOf is pure of nodes
+  const allLeaves = useMemo(() => nodes.flatMap(leavesOf), [nodes]);
 
-  const serialize = (m: Map<string, CatSel>) => {
-    const keys: string[] = [];
-    let fullCats = 0;
-    for (const n of nodes) {
-      const e = m.get(n.name);
-      if (e === "all") {
-        keys.push(n.name);
-        fullCats++;
-      } else if (e instanceof Set) {
-        for (const k of e) keys.push(k);
-      }
+  const leafChecked = (leaf: string) =>
+    isAll || (!isNone && selected.has(leaf));
+  // Resolve the ALL / NONE markers into a concrete leaf set.
+  const effective = () =>
+    isAll
+      ? new Set(allLeaves)
+      : isNone
+        ? new Set<string>()
+        : new Set([...selected].filter((x) => x !== FILTER_NONE));
+  const commit = (eff: Set<string>) => {
+    if (eff.size >= allLeaves.length) onChange(new Set()); // everything → ALL
+    else if (eff.size === 0) onChange(new Set([FILTER_NONE]));
+    else onChange(eff);
+  };
+  const toggleLeaf = (leaf: string) => {
+    const eff = effective();
+    if (eff.has(leaf)) eff.delete(leaf);
+    else eff.add(leaf);
+    commit(eff);
+  };
+  const toggleParent = (n: CategoryNode) => {
+    const eff = effective();
+    const leaves = leavesOf(n);
+    const allOn = leaves.every((l) => eff.has(l));
+    for (const l of leaves) {
+      if (allOn) eff.delete(l);
+      else eff.add(l);
     }
-    if (fullCats === nodes.length) onChange(new Set()); // everything → ALL
-    else if (keys.length === 0) onChange(new Set([FILTER_NONE]));
-    else onChange(new Set(keys));
+    commit(eff);
   };
 
   const catState = (n: CategoryNode): "all" | "some" | "none" => {
-    if (isNone) return "none";
-    if (isAll || selected.has(n.name)) return "all";
-    const on = n.subs.filter((s) => selected.has(subKey(n.name, s))).length;
-    if (on === 0) return "none";
-    return on === n.subs.length ? "all" : "some";
+    const leaves = leavesOf(n);
+    const on = leaves.filter(leafChecked).length;
+    return on === 0 ? "none" : on === leaves.length ? "all" : "some";
   };
   const subChecked = (n: CategoryNode, sub: string) =>
-    isAll || (!isNone && (selected.has(n.name) || selected.has(subKey(n.name, sub))));
-
-  const toggleParent = (n: CategoryNode) => {
-    const m = explicit();
-    if (m.get(n.name) === "all" || (catState(n) === "all")) m.delete(n.name);
-    else m.set(n.name, "all");
-    serialize(m);
-  };
-  const toggleSub = (n: CategoryNode, sub: string) => {
-    const m = explicit();
-    const cur = m.get(n.name);
-    const key = subKey(n.name, sub);
-    if (cur === "all") {
-      // Whole category was on → switch to explicit subs minus this one.
-      const rest = new Set(
-        n.subs.filter((s) => s !== sub).map((s) => subKey(n.name, s))
-      );
-      if (rest.size) m.set(n.name, rest);
-      else m.delete(n.name);
-    } else if (cur instanceof Set) {
-      if (cur.has(key)) cur.delete(key);
-      else cur.add(key);
-      if (cur.size === n.subs.length) m.set(n.name, "all");
-      else if (cur.size === 0) m.delete(n.name);
-      else m.set(n.name, cur);
-    } else {
-      m.set(n.name, new Set([key]));
-    }
-    serialize(m);
-  };
+    leafChecked(subKey(n.name, sub));
 
   const subCount = nodes.reduce((s, n) => s + n.subs.length, 0);
   const total = nodes.length + subCount; // categories + sub-categories
@@ -318,7 +293,7 @@ export function CategoryFilterPicker({
                         <input
                           type="checkbox"
                           checked={subChecked(active, s)}
-                          onChange={() => toggleSub(active, s)}
+                          onChange={() => toggleLeaf(subKey(active.name, s))}
                           className="accent-accent shrink-0"
                         />
                         <CategoryDot category={s} size="w-4 h-4" />

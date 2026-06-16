@@ -323,20 +323,24 @@ export function GlobalFilters({
   // Parent categories each with their observed sub-categories — for the cascade
   // category filter (parent on the left, subs on the right).
   const categoryNodes = useMemo(() => {
-    const map = new Map<string, Set<string>>();
+    const map = new Map<string, { subs: Set<string>; hasBare: boolean }>();
     for (const t of transactions) {
       if (!t.category) continue;
-      let s = map.get(t.category);
-      if (!s) {
-        s = new Set<string>();
-        map.set(t.category, s);
+      let e = map.get(t.category);
+      if (!e) {
+        e = { subs: new Set<string>(), hasBare: false };
+        map.set(t.category, e);
       }
-      if (t.subcategory) s.add(t.subcategory);
+      // A transaction tagged with just the parent (no sub) is "bare" — a
+      // distinct leaf from any «Category / Subcategory».
+      if (t.subcategory) e.subs.add(t.subcategory);
+      else e.hasBare = true;
     }
     return [...map.entries()]
-      .map(([name, subs]) => ({
+      .map(([name, e]) => ({
         name,
-        subs: [...subs].sort((a, b) => a.localeCompare(b, "ru")),
+        hasBare: e.hasBare,
+        subs: [...e.subs].sort((a, b) => a.localeCompare(b, "ru")),
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [transactions]);

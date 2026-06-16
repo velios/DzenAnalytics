@@ -34,9 +34,15 @@ describe("applyFilters — category leaf matching (issue #9)", () => {
     tx({ id: "taxi", category: "Транспорт", subcategory: null, categoryFull: "Транспорт" }),
   ];
 
-  it("a sub leaf matches only that sub-category", () => {
+  it("a sub leaf matches only that sub-category (parent's bare is NOT pulled in)", () => {
     const out = applyFilters(txs, filt({ categories: new Set(["Еда / Кафе"]) }));
     expect(ids(out)).toEqual(["kafe"]);
+  });
+
+  it("the bare-category leaf matches ONLY no-sub transactions, not the subs", () => {
+    // Category and sub-category are distinct in Zenmoney — «Еда» ≠ «Еда / Кафе».
+    const out = applyFilters(txs, filt({ categories: new Set(["Еда"]) }));
+    expect(ids(out)).toEqual(["bareEda"]);
   });
 
   it("selecting all of a parent's leaves keeps the whole category", () => {
@@ -44,11 +50,6 @@ describe("applyFilters — category leaf matching (issue #9)", () => {
       txs,
       filt({ categories: new Set(["Еда", "Еда / Кафе", "Еда / Продукты"]) })
     );
-    expect(ids(out)).toEqual(["bareEda", "kafe", "prod"]);
-  });
-
-  it("an old saved view (parent name only) still keeps every sub of it", () => {
-    const out = applyFilters(txs, filt({ categories: new Set(["Еда"]) }));
     expect(ids(out)).toEqual(["bareEda", "kafe", "prod"]);
   });
 
