@@ -22,6 +22,14 @@ function getDB(): Promise<IDBPDatabase> {
   return dbPromise;
 }
 
+/** Close the open idb handle so `indexedDB.deleteDatabase` won't block. */
+export function closeDB(): void {
+  if (dbPromise) {
+    void dbPromise.then((db) => db.close());
+    dbPromise = null;
+  }
+}
+
 export async function saveTransactions(txs: Transaction[]): Promise<void> {
   const db = await getDB();
   const tx = db.transaction("transactions", "readwrite");

@@ -21,7 +21,10 @@ jobs:
 
       - name: Build and push image
         run: |
-          docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+          docker build \
+            --build-arg VITE_TOKEN_PROVIDER_URL=/api/me/zenmoney-token \
+            --build-arg VITE_LOGIN_URL=https://auth.zentable.ru/ \
+            -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
 

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { Cloud, Upload } from "lucide-react";
+import { Cloud, Upload, LogIn } from "lucide-react";
+import { isProviderActive, redirectToLogin } from "../lib/authProvider";
 
 /**
  * Shown on every analytics page while there are no transactions yet.
@@ -18,6 +19,27 @@ export function EmptyState() {
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl">
+        {isProviderActive() && (
+          <button
+            type="button"
+            onClick={() => redirectToLogin()}
+            className="rounded-xl border border-border bg-panel2/40 p-5 text-left transition-colors hover:border-accent hover:bg-panel2 sm:col-span-2"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-accent/10 text-accent shrink-0">
+                <LogIn className="w-5 h-5" />
+              </span>
+              <span className="font-semibold">Войти через zen-platform</span>
+              <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent shrink-0">
+                Рекомендуем
+              </span>
+            </div>
+            <p className="text-sm text-muted">
+              Единый вход по сессии — токен подтянется автоматически, без
+              ручного ввода.
+            </p>
+          </button>
+        )}
         <Link
           to="/settings?source=api"
           className="rounded-xl border border-border bg-panel2/40 p-5 text-left transition-colors hover:border-accent hover:bg-panel2"
@@ -27,9 +49,11 @@ export function EmptyState() {
               <Cloud className="w-5 h-5" />
             </span>
             <span className="font-semibold">Подключить Дзен-мани</span>
-            <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent shrink-0">
-              Рекомендуем
-            </span>
+            {!isProviderActive() && (
+              <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent shrink-0">
+                Рекомендуем
+              </span>
+            )}
           </div>
           <p className="text-sm text-muted">
             Онлайн-синхронизация по токену API: операции, счета и категории

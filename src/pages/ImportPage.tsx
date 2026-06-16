@@ -32,6 +32,7 @@ import {
   ChevronDown,
   HardDrive,
   RotateCcw,
+  LogIn,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { SyncLog } from "../components/SyncLog";
@@ -49,6 +50,7 @@ import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useDraftsStore } from "../store/useDraftsStore";
 import { confirm } from "../store/useConfirmStore";
+import { redirectToLogin } from "../lib/authProvider";
 import { pluralRu } from "../lib/plural";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -179,6 +181,7 @@ export function ImportPage() {
   const zenValidateAndSave = useZenmoneyStore((s) => s.validateAndSaveToken);
   const zenSync = useZenmoneyStore((s) => s.sync);
   const zenRemoveToken = useZenmoneyStore((s) => s.removeToken);
+  const providerMode = useZenmoneyStore((s) => s.providerMode);
   const autoSyncEnabled = useZenmoneyStore((s) => s.autoSyncEnabled);
   const autoSyncValue = useZenmoneyStore((s) => s.autoSyncValue);
   const autoSyncUnit = useZenmoneyStore((s) => s.autoSyncUnit);
@@ -392,6 +395,23 @@ export function ImportPage() {
     if (!ok) return;
     await zenRemoveToken();
     setSyncSuccess(null);
+  }
+
+  async function switchUser() {
+    // Only warn when there's local data to lose — and only if the user
+    // actually logs in as someone else (the wipe happens on return, after
+    // a real user-id mismatch). Cancelling / same account keeps everything.
+    if (transactions.length > 0) {
+      const ok = await confirm({
+        title: "Переключить пользователя?",
+        message:
+          "Откроется вход zen-platform. Если войти другим аккаунтом, локальные данные этого браузера заменятся данными нового аккаунта. Тот же аккаунт или отмена — данные останутся на месте.",
+        confirmLabel: "Перейти ко входу",
+        tone: "warning",
+      });
+      if (!ok) return;
+    }
+    redirectToLogin();
   }
 
   // Manual payee aliases — user-curated overrides on top of (or in
@@ -830,27 +850,34 @@ export function ImportPage() {
           <div className="space-y-3">
             {/* Row 1: token field (read-only) + action buttons. */}
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-[220px]">
-                <input
-                  type={tokenVisible ? "text" : "password"}
-                  value={zenToken}
-                  readOnly
-                  aria-label="Текущий токен Дзен-мани"
-                  className="input text-sm pr-9 w-full font-mono opacity-70 cursor-default"
-                />
-                <button
-                  type="button"
-                  onClick={() => setTokenVisible((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                  title={tokenVisible ? "Скрыть" : "Показать"}
-                >
-                  {tokenVisible ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
+              {providerMode ? (
+                <div className="flex items-center gap-2 flex-1 min-w-[220px] text-sm text-text">
+                  <LogIn className="w-4 h-4 text-accent shrink-0" />
+                  <span>Подключено через zen-platform</span>
+                </div>
+              ) : (
+                <div className="relative flex-1 min-w-[220px]">
+                  <input
+                    type={tokenVisible ? "text" : "password"}
+                    value={zenToken}
+                    readOnly
+                    aria-label="Текущий токен Дзен-мани"
+                    className="input text-sm pr-9 w-full font-mono opacity-70 cursor-default"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setTokenVisible((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                    title={tokenVisible ? "Скрыть" : "Показать"}
+                  >
+                    {tokenVisible ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              )}
               <button
                 onClick={runSync}
                 disabled={zenStatus === "syncing"}
@@ -872,15 +899,27 @@ export function ImportPage() {
                 <CloudDownload className="w-3.5 h-3.5" />
                 Полная синхронизация
               </button>
-              <button
-                onClick={disconnectToken}
-                disabled={zenStatus === "syncing"}
-                className="btn-danger text-sm"
-                title="Удалить токен из браузера"
-              >
-                <Unlink className="w-3.5 h-3.5" />
-                Отключить
-              </button>
+              {providerMode ? (
+                <button
+                  onClick={switchUser}
+                  disabled={zenStatus === "syncing"}
+                  className="btn-ghost text-sm text-muted"
+                  title="Войти под другим аккаунтом zen-platform"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  Переключить пользователя
+                </button>
+              ) : (
+                <button
+                  onClick={disconnectToken}
+                  disabled={zenStatus === "syncing"}
+                  className="btn-danger text-sm"
+                  title="Удалить токен из браузера"
+                >
+                  <Unlink className="w-3.5 h-3.5" />
+                  Отключить
+                </button>
+              )}
             </div>
 
             {/* Row 2: status info + auto-sync schedule. */}

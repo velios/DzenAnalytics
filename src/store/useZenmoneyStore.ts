@@ -42,6 +42,13 @@ import {
 import { useSyncLogStore } from "./useSyncLogStore";
 import { formatNum } from "../lib/format";
 import type { ImportMeta } from "../types";
+import {
+  isProviderActive,
+  fetchProviderToken,
+  redirectToLogin,
+  wipeLocalDb,
+  shouldWipeForUser,
+} from "../lib/authProvider";
 
 const TOKEN_KEY = "zenmoneyToken";
 const TIMESTAMP_KEY = "zenmoneyServerTimestamp";
@@ -271,6 +278,10 @@ export interface PushResult {
 
 interface ZenmoneyState {
   token: string | null;
+  /** True when the token came from the external provider (in-memory, not
+   *  persisted). Drives the 401→login redirect and the "Подключено через
+   *  zen-platform" UI. Stays false in manual-token / CSV mode. */
+  providerMode: boolean;
   serverTimestamp: number;
   lastSyncAt: string | null;
   status: SyncStatus;
@@ -346,8 +357,61 @@ interface ZenmoneyState {
   runAutoSyncIfDue: () => Promise<boolean>;
 }
 
+/** In-flight guard for hydrate() — see the comment there. */
+let hydrating = false;
+
+/**
+ * Resolve the Zenmoney `user.id` behind a token. Cheap incremental probe
+ * first (most servers echo `user` regardless of serverTimestamp); falls
+ * back to a full pull, which always carries it.
+ * ponytail: the fallback full pull only fires if the API never echoes user
+ * on an incremental diff — if that's the case, cache a user-id stamp to skip it.
+ */
+async function fetchProviderUserId(token: string): Promise<number | null> {
+  const now = Math.floor(Date.now() / 1000);
+  const inc = await fetchDiff(token, now);
+  if (inc.user?.length) return inc.user[0].id;
+  const full = await fetchDiff(token, 0);
+  return full.user?.[0]?.id ?? null;
+}
+
+/**
+ * Boot the provider session: fetch the token by cookie, then either show
+ * the choice screen (no session), wipe+reload on a user switch, or set the
+ * in-memory token and sync. Nothing is wiped unless the ZenMoney user id of
+ * the new token differs from the locally-cached one.
+ */
+async function initProviderSession(): Promise<void> {
+  const store = useZenmoneyStore;
+  const token = await fetchProviderToken();
+  if (!token) return; // 401 / no session → EmptyState shows the choice screen
+  // Detect a user switch (explicit "переключить" OR an external change of
+  // the shared session's active account) before adopting the token.
+  const cache = await loadZenCache();
+  const cachedId = cache?.user?.[0]?.id ?? null;
+  if (cachedId != null) {
+    try {
+      const tokenId = await fetchProviderUserId(token);
+      if (shouldWipeForUser(cachedId, tokenId)) {
+        await wipeLocalDb(); // reloads; fresh full sync runs for the new user
+        return;
+      }
+    } catch {
+      // Couldn't determine the new user's id (network / bad token). Don't
+      // wipe on uncertainty — fall through to sync, which redirects on 401.
+    }
+  }
+  store.setState({ token, providerMode: true });
+  try {
+    await store.getState().sync(); // incremental if cache exists, else full
+  } catch {
+    /* surfaced in store state + sync log */
+  }
+}
+
 export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   token: null,
+  providerMode: false,
   serverTimestamp: 0,
   lastSyncAt: null,
   status: "idle",
@@ -365,6 +429,12 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   autoSyncUnit: AUTO_SYNC_UNIT_DEFAULT,
 
   hydrate: async () => {
+    // Two effects (App + ImportPage) both call hydrate guarded only by
+    // `!loaded`, which flips asynchronously — guard the in-flight window
+    // too so provider init (and its sync) can't fire twice.
+    if (get().loaded || hydrating) return;
+    hydrating = true;
+    try {
     const [
       token,
       ts,
@@ -409,12 +479,22 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       autoSyncUnit: autoSyncUnit || AUTO_SYNC_UNIT_DEFAULT,
       loaded: true,
     });
+    // Priority: a persisted token means manual mode (upstream behaviour).
+    // Otherwise, if the build wired up a provider, try the SSO session.
+    // ponytail: brief EmptyState flash while the background fetch+sync
+    // runs is acceptable — not worth a dedicated loading gate.
+    if (!token && isProviderActive()) {
+      await initProviderSession();
+    }
+    } finally {
+      hydrating = false;
+    }
   },
 
   saveToken: async (token) => {
     const trimmed = token.trim();
     await db.saveJSON(TOKEN_KEY, trimmed);
-    set({ token: trimmed, error: null });
+    set({ token: trimmed, providerMode: false, error: null });
   },
 
   validateAndSaveToken: async (token) => {
@@ -431,7 +511,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         return false;
       }
       await db.saveJSON(TOKEN_KEY, trimmed);
-      set({ token: trimmed, status: "idle", error: null });
+      set({ token: trimmed, providerMode: false, status: "idle", error: null });
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Не удалось проверить токен";
@@ -448,6 +528,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     await useCategoryMetaStore.getState().clear();
     set({
       token: null,
+      providerMode: false,
       serverTimestamp: 0,
       lastSyncAt: null,
       status: "idle",
@@ -572,6 +653,12 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         },
       };
     } catch (e) {
+      // Provider mode: a 401 means the SSO session expired — send the user
+      // to re-login instead of showing a dead-end inline error.
+      if (e instanceof ZenApiError && e.status === 401 && get().providerMode) {
+        redirectToLogin();
+        throw e; // page is navigating away
+      }
       let msg: string;
       if (e instanceof ZenApiError) {
         msg =
@@ -919,6 +1006,10 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       });
       return result;
     } catch (e) {
+      if (e instanceof ZenApiError && e.status === 401 && get().providerMode) {
+        redirectToLogin();
+        throw e; // page is navigating away
+      }
       let msg: string;
       if (e instanceof ZenApiError) {
         msg =
