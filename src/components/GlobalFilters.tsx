@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   Search,
@@ -13,6 +20,8 @@ import {
   CalendarRange,
 } from "lucide-react";
 import { DateField } from "./DateField";
+import { AccountLogo } from "./AccountLogo";
+import { CategoryDot } from "./CategoryDot";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, FILTER_NONE, type DatePreset } from "../store/useFiltersStore";
@@ -34,15 +43,25 @@ function MultiSelect({
   options,
   selected,
   onChange,
+  renderIcon,
 }: {
   label: string;
   options: string[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
+  /** Optional leading icon per option (e.g. account logo / category dot). */
+  renderIcon?: (opt: string) => ReactNode;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  // Search appears only for longer lists (currency etc. don't need it).
+  const showSearch = options.length > 8;
+  const q = query.trim().toLowerCase();
+  const filteredOptions = q
+    ? options.filter((o) => o.toLowerCase().includes(q))
+    : options;
 
   // Set semantics: empty = ALL, {FILTER_NONE} = NONE, else a subset.
   const isAll = selected.size === 0;
@@ -93,7 +112,7 @@ function MultiSelect({
     if (open && el) {
       const r = el.getBoundingClientRect();
       const width = Math.max(r.width, MENU_W);
-      const estH = Math.min(options.length * 32 + 44, 340);
+      const estH = Math.min(options.length * 32 + 44 + (showSearch ? 40 : 0), 360);
       const below = window.innerHeight - r.bottom - 8;
       const above = r.top - 8;
       const flipUp = above > below && above >= Math.min(estH, 48);
@@ -112,7 +131,7 @@ function MultiSelect({
           };
     }
     setPos(next);
-  }, [open, options.length]);
+  }, [open, options.length, showSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -136,7 +155,10 @@ function MultiSelect({
     <div className="relative">
       <button
         ref={btnRef}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+          setQuery("");
+        }}
         className={clsx(
           "btn-ghost text-sm w-full justify-between",
           selected.size > 0 && "border-accent text-accent"
@@ -182,20 +204,39 @@ function MultiSelect({
                   </button>
                 </div>
               </div>
-              {options.map((opt) => (
-                <label
-                  key={opt}
-                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm"
-                >
+              {showSearch && (
+                <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-border/60">
+                  <Search className="w-3.5 h-3.5 text-muted shrink-0" />
                   <input
-                    type="checkbox"
-                    checked={isChecked(opt)}
-                    onChange={() => toggle(opt)}
-                    className="accent-accent"
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={`Поиск: ${label.toLowerCase()}`}
+                    className="bg-transparent text-sm w-full outline-none"
                   />
-                  <span className="truncate">{opt}</span>
-                </label>
-              ))}
+                </div>
+              )}
+              {filteredOptions.length === 0 ? (
+                <div className="px-2 py-2 text-xs text-muted">Ничего не найдено</div>
+              ) : (
+                filteredOptions.map((opt) => (
+                  <label
+                    key={opt}
+                    className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked(opt)}
+                      onChange={() => toggle(opt)}
+                      className="accent-accent shrink-0"
+                    />
+                    {renderIcon && (
+                      <span className="shrink-0">{renderIcon(opt)}</span>
+                    )}
+                    <span className="truncate">{opt}</span>
+                  </label>
+                ))
+              )}
             </div>
           </>,
           document.body
@@ -484,6 +525,7 @@ export function GlobalFilters({
           options={accounts}
           selected={f.accounts}
           onChange={(s) => f.setSet("accounts", s)}
+          renderIcon={(name) => <AccountLogo title={name} size={18} />}
         />
 
         <MultiSelect
@@ -491,6 +533,7 @@ export function GlobalFilters({
           options={categories}
           selected={f.categories}
           onChange={(s) => f.setSet("categories", s)}
+          renderIcon={(name) => <CategoryDot category={name} size="w-4 h-4" />}
         />
 
         {currencies.length > 1 && (
