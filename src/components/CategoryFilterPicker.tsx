@@ -9,7 +9,10 @@ import {
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 
-const MENU_W = 500;
+// Narrow by default (just the categories + the one-line header); widens by
+// SUB_W to the right when a category is expanded.
+const MENU_BASE = 410;
+const SUB_W = 190;
 import clsx from "clsx";
 import { FILTER_NONE } from "../store/useFiltersStore";
 import { pluralRu } from "../lib/plural";
@@ -165,7 +168,9 @@ export function CategoryFilterPicker({
       setOpen(false);
       return;
     }
-    const width = Math.min(Math.max(r.width, MENU_W), window.innerWidth - 16);
+    // Grows to the right (by SUB_W) when a category is expanded.
+    const wantW = MENU_BASE + (active ? SUB_W : 0);
+    const width = Math.min(Math.max(r.width, wantW), window.innerWidth - 16);
     const estH = 400;
     const below = window.innerHeight - r.bottom - 8;
     const above = r.top - 8;
@@ -178,7 +183,7 @@ export function CategoryFilterPicker({
         ? { left, width, bottom: window.innerHeight - r.top + 4, maxHeight: Math.min(estH, above) }
         : { left, width, top: r.bottom + 4, maxHeight: Math.min(estH, below) }
     );
-  }, [open]);
+  }, [open, active]);
   useLayoutEffect(() => {
     computePos();
   }, [computePos]);
@@ -229,7 +234,7 @@ export function CategoryFilterPicker({
             <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
             <div
               ref={menuRef}
-              className="fixed z-[80] card p-0 overflow-hidden flex flex-col"
+              className="fixed z-[80] card p-0 overflow-hidden flex flex-col transition-[width,left] duration-200 ease-out"
               style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
             >
               <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border/60">
@@ -315,7 +320,10 @@ export function CategoryFilterPicker({
                 /* Sideways accordion — click a category, its subs slide out to
                    the right (animated width); click again to collapse. */
                 <div className="flex min-h-0 flex-1">
-                  <div className="flex-1 min-w-0 overflow-y-auto">
+                  <div
+                    className="shrink-0 overflow-y-auto"
+                    style={{ width: pos.width - (active ? SUB_W : 0) }}
+                  >
                     {nodes.map((n) => {
                       const st = catState(n);
                       const isActive = n.name === active;
