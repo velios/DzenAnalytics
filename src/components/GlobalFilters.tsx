@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { DateField } from "./DateField";
 import { AccountLogo } from "./AccountLogo";
-import { CategoryDot } from "./CategoryDot";
+import { CategoryFilterPicker } from "./CategoryFilterPicker";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, FILTER_NONE, type DatePreset } from "../store/useFiltersStore";
@@ -307,10 +307,25 @@ export function GlobalFilters({
     return Array.from(set).sort();
   }, [transactions]);
 
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of transactions) if (t.category) set.add(t.category);
-    return Array.from(set).sort();
+  // Parent categories each with their observed sub-categories — for the cascade
+  // category filter (parent on the left, subs on the right).
+  const categoryNodes = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const t of transactions) {
+      if (!t.category) continue;
+      let s = map.get(t.category);
+      if (!s) {
+        s = new Set<string>();
+        map.set(t.category, s);
+      }
+      if (t.subcategory) s.add(t.subcategory);
+    }
+    return [...map.entries()]
+      .map(([name, subs]) => ({
+        name,
+        subs: [...subs].sort((a, b) => a.localeCompare(b, "ru")),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [transactions]);
 
   const currencies = useMemo(() => {
@@ -530,12 +545,10 @@ export function GlobalFilters({
           renderIcon={(name) => <AccountLogo title={name} size={18} />}
         />
 
-        <MultiSelect
-          label="Категории"
-          options={categories}
+        <CategoryFilterPicker
+          nodes={categoryNodes}
           selected={f.categories}
           onChange={(s) => f.setSet("categories", s)}
-          renderIcon={(name) => <CategoryDot category={name} size="w-4 h-4" />}
         />
 
         {currencies.length > 1 && (
