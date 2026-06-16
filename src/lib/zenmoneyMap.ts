@@ -331,6 +331,22 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       if (!tag.parent) cur.required = tag.required;
       else if (cur.required == null) cur.required = tag.required;
     }
+    // Sub-categories also get a FULL-PATH entry («Родитель / Тег») so that two
+    // subs with the same title under different parents keep their own icon /
+    // colour (the title-keyed entry above collides — first one wins).
+    if (tag.parent) {
+      const parent = tagsById.get(tag.parent);
+      if (parent) {
+        categoryMeta[`${parent.title} / ${tag.title}`] = {
+          color,
+          icon: tag.icon || null,
+          picture: tag.picture || null,
+          showIncome: !!tag.showIncome,
+          showOutcome: !!tag.showOutcome,
+          required: tag.required,
+        };
+      }
+    }
   }
   // Our local-only labels — seed from the shared synthetic palette so charts
   // (which read `categoryMeta`) and CategoryDot agree on their colour.

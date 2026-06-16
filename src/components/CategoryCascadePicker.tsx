@@ -185,7 +185,7 @@ export function CategoryCascadePicker({
                           isSel ? "text-accent" : ""
                         }`}
                       >
-                        <CategoryDot category={s} size="w-4 h-4" />
+                        <CategoryDot category={s} parent={active.name} size="w-4 h-4" />
                         <span className="truncate">{s}</span>
                       </button>
                     );

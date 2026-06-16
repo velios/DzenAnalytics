@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import clsx from "clsx";
 import { FILTER_NONE } from "../store/useFiltersStore";
 import { pluralRu } from "../lib/plural";
@@ -48,7 +48,15 @@ export function CategoryFilterPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [activeParent, setActiveParent] = useState<string | null>(null);
+  // Which categories are expanded (accordion, non-search view).
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (name: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
 
   const isAll = selected.size === 0;
   const isNone = selected.has(FILTER_NONE);
@@ -116,33 +124,6 @@ export function CategoryFilterPicker({
     ` и ${subCount} ${pluralRu(subCount, ["подкатегория", "подкатегории", "подкатегорий"])}`;
 
   const q = query.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    if (!q) return nodes;
-    return nodes.filter(
-      (n) =>
-        n.name.toLowerCase().includes(q) ||
-        n.subs.some((s) => s.toLowerCase().includes(q))
-    );
-  }, [nodes, q]);
-  // Which parent's subs show on the right. While searching, auto-jump to the
-  // parent whose sub-category matches (so a found sub is shown immediately,
-  // without hovering) — unless the hovered parent is still a valid match.
-  const active = useMemo(() => {
-    const hovered = nodes.find((n) => n.name === activeParent) ?? null;
-    if (q) {
-      if (hovered && filtered.includes(hovered)) return hovered;
-      const withSub = filtered.find((n) =>
-        n.subs.some((s) => s.toLowerCase().includes(q))
-      );
-      return withSub ?? filtered[0] ?? null;
-    }
-    return hovered;
-  }, [q, filtered, nodes, activeParent]);
-  const activeSubs = useMemo(() => {
-    if (!active) return [];
-    if (!q || active.name.toLowerCase().includes(q)) return active.subs;
-    return active.subs.filter((s) => s.toLowerCase().includes(q));
-  }, [active, q]);
 
   // While searching, a FLAT list of every matching leaf with its full path —
   // so identically-named subs in different parents («Животные / Кот»,
@@ -167,7 +148,7 @@ export function CategoryFilterPicker({
   // Portal positioning — float above page content (mirrors MultiSelect).
   type MenuPos = { left: number; width: number; top?: number; bottom?: number; maxHeight: number };
   const [pos, setPos] = useState<MenuPos | null>(null);
-  const MENU_W = 480;
+  const MENU_W = 360;
   useLayoutEffect(() => {
     const el = btnRef.current;
     let next: MenuPos | null = null;
@@ -209,10 +190,7 @@ export function CategoryFilterPicker({
       <button
         ref={btnRef}
         onClick={() => {
-          if (!open) {
-            setQuery("");
-            setActiveParent(nodes[0]?.name ?? null);
-          }
+          if (!open) setQuery("");
           setOpen((o) => !o);
         }}
         className={clsx(
@@ -302,7 +280,7 @@ export function CategoryFilterPicker({
                             onChange={() => toggleLeaf(subKey(item.node.name, item.sub))}
                             className="accent-accent shrink-0"
                           />
-                          <CategoryDot category={item.sub} size="w-4 h-4" />
+                          <CategoryDot category={item.sub} parent={item.node.name} size="w-4 h-4" />
                           <span className="truncate">
                             <span className="text-muted">{item.node.name} / </span>
                             {item.sub}
@@ -313,21 +291,14 @@ export function CategoryFilterPicker({
                   )}
                 </div>
               ) : (
-              <div className="flex min-h-0 flex-1">
-                {/* Left — parent categories */}
-                <div className="w-[55%] overflow-y-auto border-r border-border/60">
-                  {filtered.length === 0 ? (
-                    <div className="px-3 py-2 text-xs text-muted">Ничего не найдено</div>
-                  ) : (
-                    filtered.map((n) => {
-                      const st = catState(n);
-                      const isActive = n.name === activeParent;
-                      return (
-                        <div
-                          key={n.name}
-                          onMouseEnter={() => n.subs.length > 0 && setActiveParent(n.name)}
-                          className={clsx("flex items-center gap-1 pr-1", isActive && "bg-panel2")}
-                        >
+                /* Accordion — sub-categories expand under a category on click. */
+                <div className="overflow-y-auto min-h-0 flex-1">
+                  {nodes.map((n) => {
+                    const st = catState(n);
+                    const isOpen = expanded.has(n.name);
+                    return (
+                      <div key={n.name}>
+                        <div className="flex items-center gap-1">
                           <input
                             type="checkbox"
                             checked={st === "all"}
@@ -339,45 +310,52 @@ export function CategoryFilterPicker({
                           />
                           <button
                             type="button"
-                            onClick={() => (n.subs.length > 0 ? setActiveParent(n.name) : toggleParent(n))}
-                            className="flex-1 min-w-0 text-left px-1.5 py-1.5 text-sm flex items-center gap-2"
+                            onClick={() =>
+                              n.subs.length > 0 ? toggleExpand(n.name) : toggleParent(n)
+                            }
+                            className="flex-1 min-w-0 text-left px-1.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 rounded"
                           >
                             <CategoryDot category={n.name} size="w-4 h-4" />
                             <span className="truncate flex-1">{n.name}</span>
                             {n.subs.length > 0 && (
-                              <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted" />
+                              <span className="text-[10px] text-muted shrink-0">
+                                {n.subs.length}
+                              </span>
+                            )}
+                            {n.subs.length > 0 && (
+                              <ChevronDown
+                                className={`w-3.5 h-3.5 shrink-0 text-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
+                              />
                             )}
                           </button>
                         </div>
-                      );
-                    })
-                  )}
+                        {n.subs.length > 0 && (
+                          <div
+                            className={`grid transition-all duration-200 ${isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
+                          >
+                            <div className="overflow-hidden">
+                              {n.subs.map((s) => (
+                                <label
+                                  key={s}
+                                  className="flex items-center gap-2 pl-9 pr-2 py-1.5 hover:bg-panel2 cursor-pointer text-sm"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={subChecked(n, s)}
+                                    onChange={() => toggleLeaf(subKey(n.name, s))}
+                                    className="accent-accent shrink-0"
+                                  />
+                                  <CategoryDot category={s} parent={n.name} size="w-4 h-4" />
+                                  <span className="truncate">{s}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                {/* Right — sub-categories of the active parent */}
-                <div className="w-[45%] overflow-y-auto">
-                  {active && active.subs.length > 0 ? (
-                    activeSubs.map((s) => (
-                      <label
-                        key={s}
-                        className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 cursor-pointer text-sm"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={subChecked(active, s)}
-                          onChange={() => toggleLeaf(subKey(active.name, s))}
-                          className="accent-accent shrink-0"
-                        />
-                        <CategoryDot category={s} size="w-4 h-4" />
-                        <span className="truncate">{s}</span>
-                      </label>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-xs text-muted">
-                      {active ? "Нет подкатегорий" : "Наведите на категорию"}
-                    </div>
-                  )}
-                </div>
-              </div>
               )}
             </div>
           </>,
