@@ -115,11 +115,21 @@ function classifyOriginal(
   return { kind, account: inAcc, outAcc, inAcc };
 }
 
-/** Apply the always-safe scalar edits (date, comment) onto a built patch. */
+/** Convert an edited `createdAt` (ISO) into Zenmoney's `created` (unix
+ *  seconds). Zenmoney has no time column — the operation's time-of-day rides
+ *  on `created`, same as Zerro. */
+function applyCreatedAt(zen: ZenTransaction, edit: TransactionEdit): void {
+  if (edit.createdAt === undefined) return;
+  const ms = Date.parse(edit.createdAt);
+  if (Number.isFinite(ms)) zen.created = Math.floor(ms / 1000);
+}
+
+/** Apply the always-safe scalar edits (date, time, comment) onto a built patch. */
 function applyDateComment(zen: ZenTransaction, edit: TransactionEdit): void {
   if (edit.date !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(edit.date)) {
     zen.date = edit.date;
   }
+  applyCreatedAt(zen, edit);
   if (edit.comment !== undefined) {
     zen.comment = edit.comment || null;
   }
@@ -575,6 +585,7 @@ export function buildPushItems(
         zen.date = edit.date;
       }
     }
+    applyCreatedAt(zen, edit);
     if (edit.payee !== undefined) {
       zen.payee = edit.payee || null;
     }
@@ -830,6 +841,10 @@ export interface DraftFields {
    *  destination account's currency). Ignored when both legs share a
    *  currency (income mirrors `amount`). */
   incomeAmount?: number;
+  /** Operation timestamp (unix seconds). When set, becomes the draft's
+   *  `created` (the time-of-day); otherwise the build stamp (≈ now) is used.
+   *  `changed` always stays at the build stamp so sync ordering is correct. */
+  createdSeconds?: number;
   /** Category / subcategory for expense/income/refund (not transfer). */
   category?: string;
   subcategory?: string | null;
@@ -899,7 +914,7 @@ export function buildDraftTransaction(
     changed: stampSeconds,
     incomeInstrument: 0,
     outcomeInstrument: 0,
-    created: stampSeconds,
+    created: fields.createdSeconds ?? stampSeconds,
     originalPayee: null,
     deleted: false,
     viewed: true,

@@ -337,6 +337,22 @@ describe("buildPushItems — account change", () => {
     expect(skipped[0].reason).toMatch(/не найден/i);
   });
 
+  it("sets created (unix seconds) from an edited createdAt (the «Время» field)", () => {
+    const iso = "2026-06-14T09:30:00.000Z";
+    const { toPush, skipped } = pushIn(fullTx({ outcome: 500, created: 111 }), {
+      createdAt: iso,
+    });
+    expect(skipped).toHaveLength(0);
+    expect(toPush[0].zen.created).toBe(Math.floor(Date.parse(iso) / 1000));
+  });
+
+  it("leaves created untouched when the edited createdAt is invalid", () => {
+    const { toPush } = pushIn(fullTx({ outcome: 500, created: 111 }), {
+      createdAt: "not-a-date",
+    });
+    expect(toPush[0].zen.created).toBe(111);
+  });
+
   it("does not trigger when the account equals the original (no-op)", () => {
     // Original is on Карта (acc-1); editing account back to «Карта» is a no-op.
     const { toPush, skipped } = pushIn(fullTx({ outcome: 500 }), { account: "Карта" });
@@ -653,6 +669,16 @@ describe("buildDraftTransaction", () => {
       changed: 1000,
       created: 1000,
     });
+  });
+
+  it("uses createdSeconds for created (the «Время» field), changed stays at the build stamp", () => {
+    const r = buildDraftTransaction({ ...base, createdSeconds: 777 }, draftCache(), 1000);
+    expect(r.zen).toMatchObject({ created: 777, changed: 1000 });
+  });
+
+  it("falls back to the build stamp for created when no createdSeconds given", () => {
+    const r = buildDraftTransaction(base, draftCache(), 1000);
+    expect(r.zen).toMatchObject({ created: 1000, changed: 1000 });
   });
 
   it("builds a single-leg income (amount on income leg)", () => {

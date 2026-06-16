@@ -18,7 +18,8 @@ export const CATEGORY_PALETTE = [
  *  «Без категории» / «Прочие» get a neutral grey so «нет категории» doesn't
  *  read as a real, vivid category. */
 export const SYNTHETIC_CATEGORY_COLORS: Record<string, string> = {
-  Перевод: "#A78BFA",
+  // Переводы между своими счетами — не доход/расход, поэтому нейтральный серый.
+  Перевод: "#64748B",
   Долг: "#64748B",
   "Без категории": "#94A3B8",
   Прочие: "#94A3B8",
