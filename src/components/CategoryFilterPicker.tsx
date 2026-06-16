@@ -140,10 +140,20 @@ export function CategoryFilterPicker({
         n.subs.some((s) => s.toLowerCase().includes(q))
     );
   }, [nodes, q]);
-  const active = useMemo(
-    () => nodes.find((n) => n.name === activeParent) ?? null,
-    [nodes, activeParent]
-  );
+  // Which parent's subs show on the right. While searching, auto-jump to the
+  // parent whose sub-category matches (so a found sub is shown immediately,
+  // without hovering) — unless the hovered parent is still a valid match.
+  const active = useMemo(() => {
+    const hovered = nodes.find((n) => n.name === activeParent) ?? null;
+    if (q) {
+      if (hovered && filtered.includes(hovered)) return hovered;
+      const withSub = filtered.find((n) =>
+        n.subs.some((s) => s.toLowerCase().includes(q))
+      );
+      return withSub ?? filtered[0] ?? null;
+    }
+    return hovered;
+  }, [q, filtered, nodes, activeParent]);
   const activeSubs = useMemo(() => {
     if (!active) return [];
     if (!q || active.name.toLowerCase().includes(q)) return active.subs;
@@ -244,7 +254,7 @@ export function CategoryFilterPicker({
                   autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Поиск категории"
+                  placeholder="Поиск категории и подкатегории"
                   className="bg-transparent text-sm w-full outline-none"
                 />
               </div>
