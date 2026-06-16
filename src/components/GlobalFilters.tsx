@@ -30,6 +30,7 @@ import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { confirm } from "../store/useConfirmStore";
 import { monthLabel } from "../lib/format";
 import { currencyFlagEmoji } from "../lib/currencyFlag";
+import { pluralRu } from "../lib/plural";
 
 const PRESETS: { value: DatePreset; label: string }[] = [
   { value: "30d", label: "30 дней" },
@@ -46,6 +47,8 @@ function MultiSelect({
   selected,
   onChange,
   renderIcon,
+  unitForms,
+  searchPlaceholder,
 }: {
   label: string;
   options: string[];
@@ -53,6 +56,10 @@ function MultiSelect({
   onChange: (next: Set<string>) => void;
   /** Optional leading icon per option (e.g. account logo / category dot). */
   renderIcon?: (opt: string) => ReactNode;
+  /** Russian [one, few, many] noun for the count header (e.g. счёт/счёта/счетов). */
+  unitForms?: [string, string, string];
+  /** Override the search placeholder. */
+  searchPlaceholder?: string;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -188,7 +195,13 @@ function MultiSelect({
               }}
             >
               <div className="flex items-center justify-between gap-2 px-2 py-1 mb-1 border-b border-border/60">
-                <span className="text-xs text-muted">{options.length} вариантов</span>
+                <span className="text-xs text-muted">
+                  {options.length}{" "}
+                  {pluralRu(
+                    options.length,
+                    unitForms ?? ["вариант", "варианта", "вариантов"]
+                  )}
+                </span>
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => onChange(new Set())}
@@ -213,7 +226,7 @@ function MultiSelect({
                     autoFocus
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder={`Поиск: ${label.toLowerCase()}`}
+                    placeholder={searchPlaceholder ?? `Поиск: ${label.toLowerCase()}`}
                     className="bg-transparent text-sm w-full outline-none"
                   />
                 </div>
@@ -543,6 +556,8 @@ export function GlobalFilters({
           selected={f.accounts}
           onChange={(s) => f.setSet("accounts", s)}
           renderIcon={(name) => <AccountLogo title={name} size={18} />}
+          unitForms={["счёт", "счёта", "счетов"]}
+          searchPlaceholder="Поиск счёта"
         />
 
         <CategoryFilterPicker
@@ -557,6 +572,7 @@ export function GlobalFilters({
             options={currencies}
             selected={f.currencies}
             onChange={(s) => f.setSet("currencies", s)}
+            unitForms={["валюта", "валюты", "валют"]}
             renderIcon={(code) => {
               const flag = currencyFlagEmoji(code);
               return flag ? (

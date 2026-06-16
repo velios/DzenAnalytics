@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import clsx from "clsx";
 import { FILTER_NONE } from "../store/useFiltersStore";
+import { pluralRu } from "../lib/plural";
 import { CategoryDot } from "./CategoryDot";
 
 export interface CategoryNode {
@@ -131,6 +132,14 @@ export function CategoryFilterPicker({
       ? `Все (${nodes.length})`
       : `Выбрано ${selected.size}`;
 
+  // Header counts categories AND sub-categories together.
+  const total = nodes.length + nodes.reduce((s, n) => s + n.subs.length, 0);
+  const totalLabel = `${total} ${pluralRu(total, [
+    "категория и подкатегория",
+    "категории и подкатегории",
+    "категорий и подкатегорий",
+  ])}`;
+
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
     if (!q) return nodes;
@@ -230,7 +239,7 @@ export function CategoryFilterPicker({
               style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
             >
               <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/60">
-                <span className="text-xs text-muted">{nodes.length} категорий</span>
+                <span className="text-xs text-muted">{totalLabel}</span>
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => onChange(new Set())}
