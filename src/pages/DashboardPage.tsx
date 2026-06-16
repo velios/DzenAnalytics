@@ -42,7 +42,6 @@ import { currentPeriod, periodKey } from "../lib/period";
 import {
   groupByMonth,
   groupByCategory,
-  netWorthSeries,
   buildInsights,
   detectRecurring,
   dailyExpenseMap,
@@ -50,6 +49,7 @@ import {
   applyCategoryFlags,
   balancesByAccount,
 } from "../lib/aggregations";
+import { useNetWorthSeries } from "../hooks/useNetWorthSeries";
 import {
   getLiveAccountsFromCache,
   type LiveAccount,
@@ -272,10 +272,7 @@ export function DashboardPage() {
     () => buildForecast(transactions, 3, 6, { monthStartDay }),
     [transactions, monthStartDay]
   );
-  const netWorth = useMemo(
-    () => netWorthSeries(transactions, calibration),
-    [transactions, calibration]
-  );
+  const netWorth = useNetWorthSeries(transactions);
   const insights = useMemo(() => {
     // Insights are most actionable when scoped to the current calendar year —
     // year-old MoM swings or annual totals are noise on a dashboard.
@@ -498,7 +495,11 @@ export function DashboardPage() {
             {formatMoney(lastNetWorth, base, { signed: true })}
           </div>
           <div className="text-xs text-muted mt-1">
-            {calibration ? `Откалибровано на ${calibration.date}` : "от 0 в начале истории"}
+            {liveAccounts && liveAccounts.length > 0
+              ? "С учётом начальных остатков счетов"
+              : calibration
+                ? `Откалибровано на ${calibration.date}`
+                : "от 0 в начале истории"}
           </div>
         </div>
 

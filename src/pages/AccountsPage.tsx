@@ -37,12 +37,12 @@ import {
   computeKPI,
   dailyBalanceSeries,
   stackedBalanceByAccount,
-  netWorthSeries,
   accountMonthlyDeltas,
   detectBalanceAnchors,
   cumulativeNetAt,
   lastTransactionDate,
 } from "../lib/aggregations";
+import { useNetWorthSeries } from "../hooks/useNetWorthSeries";
 import {
   formatMoney,
   formatNum,
@@ -220,7 +220,7 @@ export function AccountsPage() {
       ),
     [baseTxs, hasRealBalances, realBalancesByAccount]
   );
-  const netWorth = useMemo(() => netWorthSeries(baseTxs, calibration), [baseTxs, calibration]);
+  const netWorth = useNetWorthSeries(baseTxs);
 
   function applyCalibration() {
     const amt = Number(calibAmount);

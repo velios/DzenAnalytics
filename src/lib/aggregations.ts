@@ -1,4 +1,4 @@
-import type { Transaction } from "../types";
+import type { Transaction, CurrencyRates } from "../types";
 import { ymKey, ymdKey } from "./format";
 import { periodKey } from "./period";
 import { affectsExpense, expenseDelta } from "./txKindStyle";
@@ -1026,19 +1026,108 @@ export function lastTransactionDate(txs: Transaction[]): string {
   return max;
 }
 
+export interface NetWorthOptions {
+  /** Dated opening-balance events (base currency) — each account's startBalance
+   *  placed at its opening date. Seeds initial capital so the curve reflects it
+   *  from the right moment instead of as a flat offset across all of history. */
+  openings?: { date: string; amount: number }[];
+  /** When set, only flows touching these accounts count, and transfers are
+   *  scored by membership: a transfer crossing the set boundary is a real
+   *  in/outflow, one within the set nets to zero. Together with `openings` this
+   *  makes the series end exactly at the real total of these accounts. */
+  accounts?: Set<string> | null;
+}
+
+/** Subset of `LiveAccount` (avoids a store→lib import) needed to seed openings. */
+export interface NetWorthAccount {
+  title: string;
+  currency: string;
+  startBalance: number;
+  startDate: string | null;
+  archive: boolean;
+  inBalance: boolean;
+}
+
+/**
+ * Build the net-worth reconstruction basis from live accounts: which accounts
+ * count, and a dated opening-balance event per account (its `startBalance` in
+ * base currency, placed at `startDate` → first transaction → global earliest).
+ */
+export function netWorthBasis(
+  liveAccounts: NetWorthAccount[],
+  txs: Transaction[],
+  rates: CurrencyRates,
+  includeOffBalance: boolean
+): { accounts: Set<string>; openings: { date: string; amount: number }[] } {
+  const earliest = new Map<string, string>();
+  let globalEarliest = "";
+  for (const t of txs) {
+    const d = t.date;
+    if (!d) continue;
+    if (!globalEarliest || d < globalEarliest) globalEarliest = d;
+    for (const a of [t.outcomeAccount, t.incomeAccount, t.account]) {
+      if (!a) continue;
+      const cur = earliest.get(a);
+      if (!cur || d < cur) earliest.set(a, d);
+    }
+  }
+  const toBaseAmt = (amount: number, currency: string) =>
+    currency === rates.base ? amount : amount * (rates.rates[currency] || 1);
+  const accounts = new Set<string>();
+  const openings: { date: string; amount: number }[] = [];
+  for (const a of liveAccounts) {
+    if (a.archive) continue;
+    if (!a.inBalance && !includeOffBalance) continue;
+    accounts.add(a.title);
+    if (a.startBalance) {
+      const date = a.startDate || earliest.get(a.title) || globalEarliest;
+      if (date) openings.push({ date, amount: toBaseAmt(a.startBalance, a.currency) });
+    }
+  }
+  return { accounts, openings };
+}
+
 export function netWorthSeries(
   allTxs: Transaction[],
-  calibration?: CalibrationInput | null
+  calibration?: CalibrationInput | null,
+  opts?: NetWorthOptions
 ): { date: string; net: number }[] {
+  const set = opts?.accounts ?? null;
+  const inSet = (a: string | null | undefined) => !!a && set!.has(a);
   const days = new Map<string, number>();
+  const add = (d: string, v: number) => {
+    if (v !== 0) days.set(d, (days.get(d) || 0) + v);
+  };
   for (const t of allTxs) {
     const d = ymdKey(t.date);
     if (!d) continue;
     let delta = 0;
-    // Refund increments net worth on the day, like income.
-    if (t.kind === "income" || t.kind === "refund") delta += t.amountBase;
-    else if (t.kind === "expense") delta -= t.amountBase;
-    if (delta !== 0) days.set(d, (days.get(d) || 0) + delta);
+    if (set) {
+      // Account-aware: a flow only moves net worth if its account is in the set;
+      // transfers count only when they cross the set boundary.
+      if (t.kind === "income" || t.kind === "refund") {
+        if (inSet(t.incomeAccount)) delta += t.amountBase;
+      } else if (t.kind === "expense") {
+        if (inSet(t.outcomeAccount)) delta -= t.amountBase;
+      } else if (t.kind === "transfer") {
+        const out = inSet(t.outcomeAccount);
+        const inc = inSet(t.incomeAccount);
+        if (out && !inc) delta -= t.amountBase;
+        else if (inc && !out) delta += t.amountBase;
+      }
+    } else {
+      // Refund increments net worth on the day, like income.
+      if (t.kind === "income" || t.kind === "refund") delta += t.amountBase;
+      else if (t.kind === "expense") delta -= t.amountBase;
+    }
+    add(d, delta);
+  }
+  // Seed dated opening balances (account creation capital).
+  if (opts?.openings) {
+    for (const o of opts.openings) {
+      const d = ymdKey(o.date);
+      if (d) add(d, o.amount);
+    }
   }
   const sorted = Array.from(days.keys()).sort();
   let net = 0;
