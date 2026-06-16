@@ -126,19 +126,19 @@ export function CategoryFilterPicker({
     serialize(m);
   };
 
+  const subCount = nodes.reduce((s, n) => s + n.subs.length, 0);
+  const total = nodes.length + subCount; // categories + sub-categories
+
   const summary = isNone
     ? "Ничего"
     : isAll
-      ? `Все (${nodes.length})`
+      ? `Все (${total})` // total incl. sub-categories
       : `Выбрано ${selected.size}`;
 
-  // Header counts categories AND sub-categories together.
-  const total = nodes.length + nodes.reduce((s, n) => s + n.subs.length, 0);
-  const totalLabel = `${total} ${pluralRu(total, [
-    "категория и подкатегория",
-    "категории и подкатегории",
-    "категорий и подкатегорий",
-  ])}`;
+  // Dropdown header — break it down: «N категорий и M подкатегорий».
+  const totalLabel =
+    `${nodes.length} ${pluralRu(nodes.length, ["категория", "категории", "категорий"])}` +
+    ` и ${subCount} ${pluralRu(subCount, ["подкатегория", "подкатегории", "подкатегорий"])}`;
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
