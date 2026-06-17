@@ -16,6 +16,7 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowLeftRight,
+  Undo2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -37,9 +38,23 @@ import { Stat } from "../components/Stat";
 import { formatMoney, formatNum, displayPayee, secondaryPayee, crossCurrencyReceived } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
 import { pluralOps } from "../lib/plural";
-import type { Transaction } from "../types";
+import type { Transaction, TxKind } from "../types";
 
 type SortMode = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
+
+/** The four operation kinds offered by the «Добавить» dropdown, in the order
+ *  the menu shows them. Colours mirror `kindColorClass`. */
+const ADD_OPTIONS: {
+  kind: TxKind;
+  label: string;
+  Icon: typeof ArrowUp;
+  color: string;
+}[] = [
+  { kind: "expense", label: "Расход", Icon: ArrowDown, color: "text-expense" },
+  { kind: "income", label: "Доход", Icon: ArrowUp, color: "text-income" },
+  { kind: "refund", label: "Возврат", Icon: Undo2, color: "text-accent2" },
+  { kind: "transfer", label: "Перевод", Icon: ArrowLeftRight, color: "text-slate-400" },
+];
 
 /**
  * For transfer transactions `payee` is blank. The "Счёт" column already
@@ -120,7 +135,28 @@ export function TransactionsPage() {
   const [pageSearch, setPageSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("date-desc");
   const [editing, setEditing] = useState<Transaction | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<TxKind | null>(null);
+
+  // ── «Добавить» dropdown: pick which kind of operation to create. ─────
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setAddMenuOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAddMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [addMenuOpen]);
 
   // ── Scroll-to-top FAB: shown once the user has scrolled the window
   //    well past the first screen of the (often long) list. ─────────────
@@ -359,14 +395,40 @@ export function TransactionsPage() {
             </select>
           </div>
           {apiConnected && (
-            <button
-              onClick={() => setCreating(true)}
-              className="btn-primary text-xs whitespace-nowrap"
-              title="Добавить новую операцию"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Добавить
-            </button>
+            <div className="relative" ref={addMenuRef}>
+              <button
+                onClick={() => setAddMenuOpen((o) => !o)}
+                className="btn-primary text-xs whitespace-nowrap"
+                title="Добавить новую операцию"
+                aria-haspopup="menu"
+                aria-expanded={addMenuOpen}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Добавить
+              </button>
+              {addMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 mt-1 z-30 w-full rounded-lg border border-border bg-panel shadow-xl py-1"
+                >
+                  {ADD_OPTIONS.map((opt, i) => (
+                    <button
+                      key={opt.kind}
+                      role="menuitem"
+                      onClick={() => {
+                        setCreating(opt.kind);
+                        setAddMenuOpen(false);
+                      }}
+                      className="animate-menu-item flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left hover:bg-panel2"
+                      style={{ animationDelay: `${i * 45}ms` }}
+                    >
+                      <opt.Icon className={`w-4 h-4 ${opt.color}`} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <button onClick={exportCsv} className="btn-ghost text-xs whitespace-nowrap">
             <Download className="w-3.5 h-3.5" />
@@ -460,7 +522,10 @@ export function TransactionsPage() {
       )}
 
       {creating && (
-        <EditTransactionModal onClose={() => setCreating(false)} />
+        <EditTransactionModal
+          initialKind={creating}
+          onClose={() => setCreating(null)}
+        />
       )}
 
       {/* Floating bulk-action bar — appears when ≥1 row is selected. */}
@@ -499,29 +564,17 @@ export function TransactionsPage() {
         />
       )}
 
-      {/* Floating side buttons: scroll-to-top (when scrolled far) + quick add. */}
-      <div className="fixed bottom-6 right-6 z-30 flex flex-col items-center gap-3">
-        {showTop && (
-          <button
-            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            className="w-11 h-11 rounded-full border border-border bg-panel shadow-xl flex items-center justify-center text-muted hover:text-accent transition-colors"
-            title="Наверх"
-            aria-label="Вернуться к началу списка"
-          >
-            <ArrowUp className="w-5 h-5" />
-          </button>
-        )}
-        {apiConnected && (
-          <button
-            onClick={() => setCreating(true)}
-            className="w-14 h-14 rounded-full bg-accent text-accent-fg shadow-xl flex items-center justify-center hover:opacity-90 transition-opacity"
-            title="Добавить операцию"
-            aria-label="Добавить операцию"
-          >
-            <Plus className="w-6 h-6" />
-          </button>
-        )}
-      </div>
+      {/* Floating scroll-to-top button — appears once scrolled far down. */}
+      {showTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          className="fixed bottom-6 right-6 z-30 w-10 h-10 rounded-full border border-border bg-panel shadow-xl flex items-center justify-center text-muted hover:text-accent transition-colors"
+          title="Наверх"
+          aria-label="Вернуться к началу списка"
+        >
+          <ArrowUp className="w-5 h-5" />
+        </button>
+      )}
     </div>
   );
 }

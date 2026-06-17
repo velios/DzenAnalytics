@@ -29,6 +29,9 @@ interface Props {
   /** The transaction to edit. Omit (or null) to open the modal in
    *  "create" mode — a brand-new draft operation. */
   tx?: Transaction | null;
+  /** Pre-selected kind for a freshly created operation (create mode only).
+   *  Defaults to "expense". Ignored when editing an existing `tx`. */
+  initialKind?: TxKind;
   onClose: () => void;
 }
 
@@ -67,7 +70,7 @@ function dateTimeToDate(dateIso: string, time: string): Date {
  * away and is sent to Zenmoney on the next push. API mode only (the caller
  * only offers the button when a token is present).
  */
-export function EditTransactionModal({ tx: txProp, onClose }: Props) {
+export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props) {
   const isCreate = !txProp;
   const rates = useDataStore((s) => s.rates);
   // A blank seed so every `tx.<field>` read below works uniformly in
@@ -89,14 +92,14 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
         incomeAccount: "",
         incomeAmount: 0,
         incomeCurrency: rates.base,
-        kind: "expense",
+        kind: initialKind ?? "expense",
         amount: 0,
         currency: rates.base,
         account: "",
         amountBase: 0,
         createdAt: `${todayIso()}T00:00:00Z`,
       },
-    [txProp, rates.base]
+    [txProp, rates.base, initialKind]
   );
   const allTransactions = useDataStore((s) => s.transactions);
   const reapply = useDataStore((s) => s.reapplyRules);

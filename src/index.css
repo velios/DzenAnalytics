@@ -161,9 +161,14 @@ body {
   from { opacity: 0; transform: translateX(-8px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+@keyframes menuItemIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .animate-slide { animation: drawerSlide 0.18s ease-out; }
 .animate-fade { animation: fadeIn 0.18s ease-out; }
 .animate-cat-subs { animation: catSubsIn 0.18s ease-out; }
+.animate-menu-item { animation: menuItemIn 0.18s ease-out both; }
 .animate-flash-in { animation: flashSlideDown 0.22s ease-out; }
 .animate-flash-out { animation: flashFadeOut 0.18s ease-in forwards; }
 
