@@ -421,7 +421,14 @@ export function DashboardPage() {
 
   const netWorthChart = netWorth.map((p) => ({ date: p.date, net: Math.round(p.net) }));
 
-  const totalRecurringMonthly = recurring.reduce(
+  // Only ACTIVE subscriptions (not stale ones — those whose schedule lapsed
+  // by >~2 cycles). Used for both the monthly estimate and the count badge so
+  // a cancelled-months-ago plan neither inflates the figure nor the count.
+  const activeRecurring = recurring.filter((c) => !c.stale);
+  // Active subscriptions on a monthly cadence — the headline count for the
+  // «Ближайшие регулярные» widget (its estimate below is a per-month figure).
+  const activeMonthly = activeRecurring.filter((c) => c.cadence === "monthly");
+  const totalRecurringMonthly = activeRecurring.reduce(
     (s, c) => s + (c.avgIntervalDays > 0 ? (c.avgAmount * 30) / c.avgIntervalDays : 0),
     0
   );
@@ -916,7 +923,7 @@ export function DashboardPage() {
               Ближайшие регулярные
             </div>
             <Link to="/recurring" className="text-xs text-accent hover:underline flex items-center gap-1">
-              Все ({recurring.length}) <ArrowRight className="w-3 h-3" />
+              Ежемесячные ({activeMonthly.length}) <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {upcoming.length === 0 ? (
@@ -945,7 +952,7 @@ export function DashboardPage() {
                 );
               })}
               <div className="mt-3 pt-3 border-t border-border text-xs text-muted">
-                ≈ {formatMoney(totalRecurringMonthly, base)} / мес всего на регулярные
+                ≈ {formatMoney(totalRecurringMonthly, base)} / мес на активные регулярные
               </div>
             </div>
           )}
@@ -994,7 +1001,7 @@ export function DashboardPage() {
           <Repeat className="w-5 h-5 text-accent" />
           <div>
             <div className="font-medium text-sm">Регулярные</div>
-            <div className="text-xs text-muted">{recurring.length} найдено</div>
+            <div className="text-xs text-muted">{activeRecurring.length} активных</div>
           </div>
         </Link>
       </div>
