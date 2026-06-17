@@ -232,7 +232,10 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
     const childNames = new Set<string>();
     for (const subs of subsMap.values()) for (const s of subs) childNames.add(s);
     const tops = categoryOptions.filter(
-      (c) => realTop.has(c) || !childNames.has(c)
+      // Drop full-path «Parent / Sub» entries — categoryMeta carries those keys
+      // (for same-named-sub icons), but the first level is top-level only; subs
+      // are reached via the right panel.
+      (c) => !c.includes(" / ") && (realTop.has(c) || !childNames.has(c))
     );
     return tops.map((name) => ({
       name,
