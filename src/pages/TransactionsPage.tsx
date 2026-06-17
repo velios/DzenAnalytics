@@ -8,7 +8,6 @@ import {
   TrendingUp,
   TrendingDown,
   Wallet,
-  Hash,
   ListFilter,
   ListChecks,
   CloudUpload,
@@ -365,7 +364,7 @@ export function TransactionsPage() {
         <Stat
           label="Операций"
           value={formatNum(totals.count)}
-          icon={<Hash className="w-4 h-4" />}
+          icon={<List className="w-4 h-4" />}
           hint={pageSearch ? `из ${filtered.length} в фильтре` : "под фильтрами"}
         />
       </div>
