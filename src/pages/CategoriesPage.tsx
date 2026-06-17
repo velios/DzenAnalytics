@@ -431,8 +431,8 @@ export function CategoriesPage() {
   // side we draw our own: anchor on the ring → elbow → horizontal line out to
   // a label, with the per-side column spread vertically so nothing collides.
   // Needs the live pixel size, so we measure the chart box.
-  const DONUT_OUTER = 145;
-  const DONUT_INNER = 80;
+  const DONUT_OUTER = 178;
+  const DONUT_INNER = 104;
   const donutBoxRef = useRef<HTMLDivElement>(null);
   const [donutBox, setDonutBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -678,6 +678,10 @@ export function CategoriesPage() {
                       // like the tooltip "flies in" from the corner.
                       isAnimationActive={false}
                       cursor={false}
+                      // The leader-line overlay below is a later DOM sibling,
+                      // so it would otherwise paint over the tooltip — lift the
+                      // tooltip above it.
+                      wrapperStyle={{ zIndex: 50 }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
