@@ -719,7 +719,11 @@ export function detectDuplicates(
       });
     }
   }
-  return out.sort((a, b) => b.totalAmount - a.totalAmount);
+  // Most-recent groups first — the common case is a botched recent import, so
+  // the user wants the latest duplicates at the top (not the biggest by sum).
+  const lastDate = (g: DuplicateGroup) =>
+    g.txs.reduce((m, t) => (t.date > m ? t.date : m), "");
+  return out.sort((a, b) => lastDate(b).localeCompare(lastDate(a)));
 }
 
 export function detectUncategorized(txs: Transaction[]): Transaction[] {

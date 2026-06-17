@@ -270,6 +270,21 @@ describe("detectDuplicates", () => {
     expect(groups.length).toBe(1);
   });
 
+  it("orders groups by most-recent date first, not by total amount (issue #10)", () => {
+    const groups = detectDuplicates(
+      [
+        // Older but BIGGER duplicate pair.
+        tx({ id: "o1", date: "2026-01-10", payee: "Старый", amount: 9000, kind: "expense" }),
+        tx({ id: "o2", date: "2026-01-11", payee: "Старый", amount: 9000, kind: "expense" }),
+        // Newer but smaller duplicate pair.
+        tx({ id: "n1", date: "2026-06-10", payee: "Новый", amount: 100, kind: "expense" }),
+        tx({ id: "n2", date: "2026-06-11", payee: "Новый", amount: 100, kind: "expense" }),
+      ],
+      3
+    );
+    expect(groups.map((g) => g.txs[0].payee)).toEqual(["Новый", "Старый"]);
+  });
+
   it("does not flag ops far apart in time", () => {
     const groups = detectDuplicates(
       [

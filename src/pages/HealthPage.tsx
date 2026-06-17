@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   HeartPulse,
   TrendingUp,
@@ -13,6 +13,11 @@ import {
 import { useDataStore } from "../store/useDataStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
+import { useOffBalanceStore } from "../store/useOffBalanceStore";
+import {
+  getLiveAccountsFromCache,
+  type LiveAccount,
+} from "../store/useZenmoneyStore";
 import { computeHealthScore, type HealthComponent } from "../lib/health";
 import { formatPct } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
@@ -75,8 +80,20 @@ function gradeColor(grade: string): string {
 
 export function HealthPage() {
   const transactions = useDataStore((s) => s.transactions);
-  const baseCurrency = useDataStore((s) => s.rates.base);
+  const rates = useDataStore((s) => s.rates);
+  const baseCurrency = rates.base;
   const calibration = useCalibrationStore((s) => s.calibration);
+  const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
+  const [liveAccounts, setLiveAccounts] = useState<LiveAccount[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getLiveAccountsFromCache().then((d) => {
+      if (!cancelled) setLiveAccounts(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const calibLoaded = useCalibrationStore((s) => s.loaded);
   const hydrateCalibration = useCalibrationStore((s) => s.hydrate);
   const flags = useCategoryFlagsStore((s) => s.flags);
@@ -99,14 +116,27 @@ export function HealthPage() {
         .filter(([, v]) => v === "discretionary")
         .map(([k]) => k)
     );
+    // Off-balance accounts' total — added to the emergency fund. When «include
+    // off-balance» is on, the net-worth calibration already counts them, so we
+    // add nothing extra (avoids double-counting).
+    const toBase = (amt: number, cur: string) =>
+      cur === rates.base ? amt : amt * (rates.rates[cur] || 1);
+    const extraLiquid =
+      includeOffBalance || !liveAccounts
+        ? 0
+        : liveAccounts
+            .filter((a) => !a.archive && !a.inBalance)
+            .reduce((s, a) => s + toBase(a.balance, a.currency), 0);
+
     return computeHealthScore({
       transactions,
       baseCurrency,
       calibration,
       fixedCategories,
       discretionaryCategories,
+      extraLiquid,
     });
-  }, [transactions, baseCurrency, calibration, flags]);
+  }, [transactions, rates, baseCurrency, calibration, flags, includeOffBalance, liveAccounts]);
 
   if (transactions.length === 0) return <EmptyState />;
 
