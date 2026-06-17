@@ -23,4 +23,4 @@ EXPOSE 8000/tcp
 
 COPY --from=build /app/dist/ /var/www/html/
 
-COPY nginx.conf /etc/nginx/templates/dzenalitics.conf.template
+COPY docker/nginx.conf /etc/nginx/templates/dzenalitics.conf.template
