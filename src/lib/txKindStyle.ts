@@ -17,9 +17,10 @@ export function kindColorClass(kind: TxKind): string {
     case "refund":
       return "text-accent2";
     default:
-      // transfer — neither income nor expense, so render neutral (theme text:
-      // black on light, white on dark) instead of a money-in/out colour.
-      return "text-text";
+      // transfer — neither income nor expense, so render in a flat muted grey
+      // (same slate in both themes) instead of theme text (which read as plain
+      // black on light / white on dark) or a money-in/out colour.
+      return "text-slate-400";
   }
 }
 

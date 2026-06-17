@@ -12,6 +12,10 @@ import {
   ListFilter,
   ListChecks,
   CloudUpload,
+  List,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -32,6 +36,7 @@ import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
 import { formatMoney, formatNum, displayPayee, secondaryPayee, crossCurrencyReceived } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
+import { pluralOps } from "../lib/plural";
 import type { Transaction } from "../types";
 
 type SortMode = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
@@ -394,6 +399,7 @@ export function TransactionsPage() {
                 ymd={ymd}
                 txs={txs}
                 base={base}
+                showTransfers={!filters.excludeTransfers}
                 edits={edits}
                 drafts={drafts}
                 onEdit={setEditing}
@@ -530,6 +536,7 @@ function DayGroup({
   ymd,
   txs,
   base,
+  showTransfers,
   edits,
   drafts,
   onEdit,
@@ -540,6 +547,7 @@ function DayGroup({
   ymd: string;
   txs: Transaction[];
   base: string;
+  showTransfers: boolean;
   edits: Record<string, unknown>;
   drafts: Record<string, unknown>;
   onEdit: (t: Transaction) => void;
@@ -551,13 +559,15 @@ function DayGroup({
   const totals = useMemo(() => {
     let inc = 0;
     let exp = 0;
+    let xfer = 0;
     for (const t of txs) {
       if (t.kind === "income") inc += t.amountBase;
       else if (t.kind === "expense") exp += t.amountBase;
       // Refund subtracts from the day header's expense total.
       else if (t.kind === "refund") exp -= t.amountBase;
+      else if (t.kind === "transfer") xfer += t.amountBase;
     }
-    return { inc, exp, net: inc - exp };
+    return { inc, exp, xfer, net: inc - exp };
   }, [txs]);
 
   return (
@@ -567,21 +577,44 @@ function DayGroup({
           <span className="font-semibold truncate">{label}</span>
           {weekday && <span className="text-xs text-muted">{weekday}</span>}
         </div>
-        <div className="ml-auto flex items-center gap-3 text-xs tabular-nums">
-          <span className="text-muted whitespace-nowrap">{txs.length} оп.</span>
+        <div className="ml-auto flex items-center gap-3 sm:gap-4 text-xs tabular-nums">
+          <span
+            className="flex items-center gap-1 text-muted whitespace-nowrap"
+            title={`${txs.length} ${pluralOps(txs.length)}`}
+          >
+            <List className="w-3.5 h-3.5" aria-hidden />
+            {txs.length}
+          </span>
+          {showTransfers && totals.xfer > 0 && (
+            <span
+              className="flex items-center gap-1 text-slate-400 whitespace-nowrap"
+              title="Переводы за день"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" aria-hidden />
+              {formatMoney(totals.xfer, base)}
+            </span>
+          )}
           {totals.inc > 0 && (
-            <span className="text-income whitespace-nowrap">
-              +{formatMoney(totals.inc, base)}
+            <span
+              className="flex items-center gap-1 text-income whitespace-nowrap"
+              title="Поступления за день"
+            >
+              <ArrowUp className="w-3.5 h-3.5" aria-hidden />
+              {formatMoney(totals.inc, base)}
             </span>
           )}
           {totals.exp > 0 && (
-            <span className="text-expense whitespace-nowrap">
-              −{formatMoney(totals.exp, base)}
+            <span
+              className="flex items-center gap-1 text-expense whitespace-nowrap"
+              title="Траты за день"
+            >
+              <ArrowDown className="w-3.5 h-3.5" aria-hidden />
+              {formatMoney(totals.exp, base)}
             </span>
           )}
           <span
-            className={`font-medium whitespace-nowrap ${totals.net >= 0 ? "text-income" : "text-expense"}`}
-            title="Чистый поток за день"
+            className={`px-2 py-0.5 rounded-md font-bold tabular-nums whitespace-nowrap ${totals.net >= 0 ? "bg-income/15 text-income" : "bg-expense/15 text-expense"}`}
+            title="Итог за день"
           >
             {formatMoney(totals.net, base, { signed: true })}
           </span>
@@ -704,7 +737,11 @@ function Row({
       <div
         className={`text-right tabular-nums font-medium whitespace-nowrap ${amountColor}`}
       >
-        <span className={amountSignClass}>{amountSign}</span>
+        {tx.kind === "transfer" ? (
+          <ArrowLeftRight className="inline-block w-3.5 h-3.5 align-[-2px] mr-0.5" aria-hidden />
+        ) : (
+          <span className={amountSignClass}>{amountSign}</span>
+        )}
         {formatMoney(tx.amount, tx.currency)}
         {(() => {
           const received = crossCurrencyReceived(tx);
