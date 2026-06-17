@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   Search,
@@ -11,14 +19,20 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarRange,
+  Coins,
 } from "lucide-react";
 import { DateField } from "./DateField";
+import { AccountLogo } from "./AccountLogo";
+import { CategoryFilterPicker } from "./CategoryFilterPicker";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
+import { getLiveAccountsFromCache } from "../store/useZenmoneyStore";
 import { useFiltersStore, FILTER_NONE, type DatePreset } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { confirm } from "../store/useConfirmStore";
 import { monthLabel } from "../lib/format";
+import { currencyFlagEmoji } from "../lib/currencyFlag";
+import { pluralRu } from "../lib/plural";
 
 const PRESETS: { value: DatePreset; label: string }[] = [
   { value: "30d", label: "30 дней" },
@@ -34,15 +48,35 @@ function MultiSelect({
   options,
   selected,
   onChange,
+  renderIcon,
+  unitForms,
+  searchPlaceholder,
+  archivedSet,
 }: {
   label: string;
   options: string[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
+  /** Optional leading icon per option (e.g. account logo / category dot). */
+  renderIcon?: (opt: string) => ReactNode;
+  /** Russian [one, few, many] noun for the count header (e.g. счёт/счёта/счетов). */
+  unitForms?: [string, string, string];
+  /** Override the search placeholder. */
+  searchPlaceholder?: string;
+  /** Options in this set are «archived» — rendered below an «Архивные»
+   *  divider (the caller must place them last in `options`). */
+  archivedSet?: Set<string>;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  // Search appears only for longer lists (currency etc. don't need it).
+  const showSearch = options.length > 8;
+  const q = query.trim().toLowerCase();
+  const filteredOptions = q
+    ? options.filter((o) => o.toLowerCase().includes(q))
+    : options;
 
   // Set semantics: empty = ALL, {FILTER_NONE} = NONE, else a subset.
   const isAll = selected.size === 0;
@@ -93,7 +127,7 @@ function MultiSelect({
     if (open && el) {
       const r = el.getBoundingClientRect();
       const width = Math.max(r.width, MENU_W);
-      const estH = Math.min(options.length * 32 + 44, 340);
+      const estH = Math.min(options.length * 32 + 44 + (showSearch ? 40 : 0), 360);
       const below = window.innerHeight - r.bottom - 8;
       const above = r.top - 8;
       const flipUp = above > below && above >= Math.min(estH, 48);
@@ -112,7 +146,7 @@ function MultiSelect({
           };
     }
     setPos(next);
-  }, [open, options.length]);
+  }, [open, options.length, showSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -136,7 +170,10 @@ function MultiSelect({
     <div className="relative">
       <button
         ref={btnRef}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+          setQuery("");
+        }}
         className={clsx(
           "btn-ghost text-sm w-full justify-between",
           selected.size > 0 && "border-accent text-accent"
@@ -164,7 +201,13 @@ function MultiSelect({
               }}
             >
               <div className="flex items-center justify-between gap-2 px-2 py-1 mb-1 border-b border-border/60">
-                <span className="text-xs text-muted">{options.length} вариантов</span>
+                <span className="text-xs text-muted">
+                  {options.length}{" "}
+                  {pluralRu(
+                    options.length,
+                    unitForms ?? ["вариант", "варианта", "вариантов"]
+                  )}
+                </span>
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => onChange(new Set())}
@@ -182,20 +225,49 @@ function MultiSelect({
                   </button>
                 </div>
               </div>
-              {options.map((opt) => (
-                <label
-                  key={opt}
-                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm"
-                >
+              {showSearch && (
+                <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-border/60">
+                  <Search className="w-3.5 h-3.5 text-muted shrink-0" />
                   <input
-                    type="checkbox"
-                    checked={isChecked(opt)}
-                    onChange={() => toggle(opt)}
-                    className="accent-accent"
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={searchPlaceholder ?? `Поиск: ${label.toLowerCase()}`}
+                    className="bg-transparent text-sm w-full outline-none"
                   />
-                  <span className="truncate">{opt}</span>
-                </label>
-              ))}
+                </div>
+              )}
+              {filteredOptions.length === 0 ? (
+                <div className="px-2 py-2 text-xs text-muted">Ничего не найдено</div>
+              ) : (
+                filteredOptions.map((opt, i) => {
+                  // First archived option → render an «Архивные» divider above it.
+                  const showArchivedHeader =
+                    !!archivedSet?.has(opt) &&
+                    (i === 0 || !archivedSet.has(filteredOptions[i - 1]));
+                  return (
+                    <Fragment key={opt}>
+                      {showArchivedHeader && (
+                        <div className="mt-1 pt-1 border-t border-border px-2 pb-0.5 text-[11px] uppercase tracking-wide text-muted">
+                          Архивные
+                        </div>
+                      )}
+                      <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          checked={isChecked(opt)}
+                          onChange={() => toggle(opt)}
+                          className="accent-accent shrink-0"
+                        />
+                        {renderIcon && (
+                          <span className="shrink-0">{renderIcon(opt)}</span>
+                        )}
+                        <span className="truncate">{opt}</span>
+                      </label>
+                    </Fragment>
+                  );
+                })
+              )}
             </div>
           </>,
           document.body
@@ -258,16 +330,55 @@ export function GlobalFilters({
     setSaveOpen(false);
   }
 
+  // Archived (closed) account titles from the Zenmoney cache — used to sort the
+  // archived accounts to the bottom of the filter and group them under a divider.
+  const [archivedAccounts, setArchivedAccounts] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    getLiveAccountsFromCache().then((live) => {
+      if (cancelled || !live) return;
+      setArchivedAccounts(new Set(live.filter((a) => a.archive).map((a) => a.title)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
+
   const accounts = useMemo(() => {
     const set = new Set<string>();
     for (const t of transactions) if (t.account) set.add(t.account);
-    return Array.from(set).sort();
-  }, [transactions]);
+    // Active accounts first (alpha), archived grouped at the bottom (alpha).
+    return Array.from(set).sort((a, b) => {
+      const aa = archivedAccounts.has(a);
+      const ba = archivedAccounts.has(b);
+      if (aa !== ba) return aa ? 1 : -1;
+      return a.localeCompare(b, "ru");
+    });
+  }, [transactions, archivedAccounts]);
 
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of transactions) if (t.category) set.add(t.category);
-    return Array.from(set).sort();
+  // Parent categories each with their observed sub-categories — for the cascade
+  // category filter (parent on the left, subs on the right).
+  const categoryNodes = useMemo(() => {
+    const map = new Map<string, { subs: Set<string>; hasBare: boolean }>();
+    for (const t of transactions) {
+      if (!t.category) continue;
+      let e = map.get(t.category);
+      if (!e) {
+        e = { subs: new Set<string>(), hasBare: false };
+        map.set(t.category, e);
+      }
+      // A transaction tagged with just the parent (no sub) is "bare" — a
+      // distinct leaf from any «Category / Subcategory».
+      if (t.subcategory) e.subs.add(t.subcategory);
+      else e.hasBare = true;
+    }
+    return [...map.entries()]
+      .map(([name, e]) => ({
+        name,
+        hasBare: e.hasBare,
+        subs: [...e.subs].sort((a, b) => a.localeCompare(b, "ru")),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [transactions]);
 
   const currencies = useMemo(() => {
@@ -484,11 +595,14 @@ export function GlobalFilters({
           options={accounts}
           selected={f.accounts}
           onChange={(s) => f.setSet("accounts", s)}
+          renderIcon={(name) => <AccountLogo title={name} size={18} />}
+          unitForms={["счёт", "счёта", "счетов"]}
+          searchPlaceholder="Поиск счёта"
+          archivedSet={archivedAccounts}
         />
 
-        <MultiSelect
-          label="Категории"
-          options={categories}
+        <CategoryFilterPicker
+          nodes={categoryNodes}
           selected={f.categories}
           onChange={(s) => f.setSet("categories", s)}
         />
@@ -499,6 +613,15 @@ export function GlobalFilters({
             options={currencies}
             selected={f.currencies}
             onChange={(s) => f.setSet("currencies", s)}
+            unitForms={["валюта", "валюты", "валют"]}
+            renderIcon={(code) => {
+              const flag = currencyFlagEmoji(code);
+              return flag ? (
+                <span className="text-base leading-none">{flag}</span>
+              ) : (
+                <Coins className="w-4 h-4 text-muted" />
+              );
+            }}
           />
         )}
 

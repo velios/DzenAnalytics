@@ -17,6 +17,9 @@ export interface DupExclusion {
   amount: number;
   currency: string;
   kind: TxKind;
+  /** Full category path of the group's first transaction («Еда / Кафе»).
+   *  Optional — rules saved before this field stay without it. */
+  category?: string;
   createdAt: string;
 }
 

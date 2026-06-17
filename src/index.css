@@ -157,8 +157,13 @@ body {
   from { opacity: 1; transform: translateY(0); }
   to   { opacity: 0; transform: translateY(-4px); }
 }
+@keyframes catSubsIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
 .animate-slide { animation: drawerSlide 0.18s ease-out; }
 .animate-fade { animation: fadeIn 0.18s ease-out; }
+.animate-cat-subs { animation: catSubsIn 0.18s ease-out; }
 .animate-flash-in { animation: flashSlideDown 0.22s ease-out; }
 .animate-flash-out { animation: flashFadeOut 0.18s ease-in forwards; }
 

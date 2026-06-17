@@ -33,6 +33,10 @@ interface ComputeOptions {
   calibration: CalibrationInput | null;
   fixedCategories: Set<string>;
   discretionaryCategories: Set<string>;
+  /** Off-balance accounts' total (base currency) to add to the emergency fund —
+   *  savings kept off-balance ARE the cushion. Pass the sum NOT already counted
+   *  by the net-worth calibration (i.e. when «include off-balance» is off). */
+  extraLiquid?: number;
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -99,7 +103,10 @@ function computeSavingsRate(opts: ComputeOptions): HealthComponent {
 
 function computeEmergencyFund(opts: ComputeOptions): HealthComponent {
   const series = netWorthSeries(opts.transactions, opts.calibration);
-  const liquid = series.length > 0 ? series[series.length - 1].net : 0;
+  const netWorth = series.length > 0 ? series[series.length - 1].net : 0;
+  // Off-balance savings count toward the cushion even when they're excluded
+  // from the headline net worth.
+  const liquid = netWorth + (opts.extraLiquid ?? 0);
   const months = groupByMonth(opts.transactions);
   const recent = months.slice(-6);
   const avgExpense = mean(recent.map((m) => m.expense));
@@ -116,7 +123,7 @@ function computeEmergencyFund(opts: ComputeOptions): HealthComponent {
     value: coverage,
     status: avgExpense <= 0 ? "na" : classify(score),
     detail:
-      "Сколько месяцев средних расходов покрывает текущий совокупный баланс (с учётом калибровки).",
+      "Сколько месяцев средних расходов покрывает текущий баланс — включая забалансовые накопительные счета.",
     hint:
       coverage < 1
         ? "Меньше месяца! Это критично — отложите подушку как первоочередную цель."

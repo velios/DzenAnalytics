@@ -161,6 +161,13 @@ export interface LiveAccount {
   /** True when the user marked this account as a savings account in Zenmoney.
    *  Independent of `inBalance` — a savings account can be in or out of balance. */
   savings: boolean;
+  /** Opening balance (native currency) — the money on the account before any
+   *  recorded transaction. Needed to reconstruct net worth over time. */
+  startBalance: number;
+  /** ISO date the account was opened, or null. Where the opening balance lands
+   *  on the net-worth timeline (fallback: account's first transaction, else the
+   *  global earliest date). */
+  startDate: string | null;
 }
 
 /**
@@ -180,6 +187,8 @@ export async function getLiveAccountsFromCache(): Promise<LiveAccount[] | null> 
     archive: a.archive,
     inBalance: a.inBalance,
     savings: a.savings,
+    startBalance: a.startBalance || 0,
+    startDate: a.startDate ?? null,
   }));
 }
 

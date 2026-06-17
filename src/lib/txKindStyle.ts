@@ -17,7 +17,9 @@ export function kindColorClass(kind: TxKind): string {
     case "refund":
       return "text-accent2";
     default:
-      return "text-warn"; // transfer
+      // transfer — neither income nor expense, so render neutral (theme text:
+      // black on light, white on dark) instead of a money-in/out colour.
+      return "text-text";
   }
 }
 

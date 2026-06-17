@@ -82,6 +82,28 @@ function merge<T extends { id: string | number }>(
 }
 
 /**
+ * Drop transactions that reference an account no longer present in the cache.
+ *
+ * When an account is deleted in Zenmoney, the incremental diff reliably removes
+ * the *account* but doesn't always enumerate a `deletion` entry for each of its
+ * (often old) transactions — so those linger as orphans. Their balances/charts
+ * re-anchor to the live accounts and drop, but raw flow sums (Поступления/
+ * Списания) keep counting the orphans. Pruning here keeps the cache internally
+ * consistent and self-heals on the very next sync.
+ */
+function pruneOrphanTransactions(cache: ZenCache): ZenCache {
+  const accountIds = new Set(cache.accounts.map((a) => String(a.id)));
+  const transactions = cache.transactions.filter((t) =>
+    [t.incomeAccount, t.outcomeAccount]
+      .filter((a) => a != null && a !== "")
+      .every((a) => accountIds.has(String(a)))
+  );
+  return transactions.length === cache.transactions.length
+    ? cache
+    : { ...cache, transactions };
+}
+
+/**
  * Apply a server diff onto the previous cache, returning a fresh cache.
  * If `prev` is null this is the initial full sync result.
  */
@@ -94,7 +116,7 @@ export function applyDiff(
     // sections missing (the field is just absent rather than `[]`).
     // Default each to an empty array so downstream code can always
     // iterate without an `is not iterable` runtime error.
-    return {
+    return pruneOrphanTransactions({
       serverTimestamp: diff.serverTimestamp,
       instruments: diff.instrument || [],
       accounts: diff.account || [],
@@ -102,10 +124,10 @@ export function applyDiff(
       merchants: diff.merchant || [],
       transactions: diff.transaction || [],
       user: diff.user || [],
-    };
+    });
   }
   const deletions = diff.deletion || [];
-  return {
+  return pruneOrphanTransactions({
     serverTimestamp: diff.serverTimestamp,
     instruments: merge(prev.instruments, diff.instrument, "instrument", deletions),
     accounts: merge(prev.accounts, diff.account, "account", deletions),
@@ -119,7 +141,7 @@ export function applyDiff(
     ),
     // user record rarely changes; if diff omits it, keep previous.
     user: diff.user && diff.user.length > 0 ? diff.user : prev.user,
-  };
+  });
 }
 
 /**

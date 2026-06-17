@@ -1,4 +1,4 @@
-import type { Transaction } from "../types";
+import type { Transaction, CurrencyRates } from "../types";
 import { ymKey, ymdKey } from "./format";
 import { periodKey } from "./period";
 import { affectsExpense, expenseDelta } from "./txKindStyle";
@@ -161,12 +161,25 @@ export interface StackedBalancePoint {
 
 export function stackedBalanceByAccount(
   allTxs: Transaction[],
-  topN = 8
+  topN = 8,
+  /** Real current balance per account title (base currency), API mode only.
+   *  When given, each line is shifted to END at the real balance — turning the
+   *  «накопленный поток с нуля» into an actual balance-over-time, so the stack
+   *  sums to real net worth and funded accounts don't sink below zero. */
+  realBalances?: Record<string, number | null> | null
 ): { series: StackedBalancePoint[]; accounts: string[] } {
   const balances = balancesByAccount(allTxs);
+  // Pick the «biggest» accounts. With real balances (API mode, where the chart
+  // shows actual balances) rank by |real balance| — so the largest accounts by
+  // money get their own area and small ones fold into «Прочие». Without them
+  // (CSV) rank by turnover + net flow, since that's all we have.
+  const score = (b: { account: string; balance: number; income: number; expense: number }) =>
+    realBalances
+      ? Math.abs(realBalances[b.account] ?? 0)
+      : Math.abs(b.balance) + b.income + b.expense;
   const topAccounts = balances
     .slice()
-    .sort((a, b) => Math.abs(b.balance) + b.income + b.expense - (Math.abs(a.balance) + a.income + a.expense))
+    .sort((a, b) => score(b) - score(a))
     .slice(0, topN)
     .map((b) => b.account);
   const accountSet = new Set(topAccounts);
@@ -219,6 +232,38 @@ export function stackedBalanceByAccount(
     point.total = Math.round(total);
     series.push(point);
   }
+
+  // Anchor to real balances (API mode): after the loop, `running[a]` is each
+  // account's cumulative flow at the last day. Shift the whole line by a
+  // constant so it ends at the real balance; the day-to-day shape (real flows)
+  // is preserved. «Прочие» is anchored to the combined real balance of every
+  // account that isn't one of the shown top ones.
+  if (realBalances) {
+    const topSet = new Set(accountList.filter((a) => a !== "Прочие"));
+    let prochieReal = 0;
+    for (const [acc, bal] of Object.entries(realBalances)) {
+      if (bal != null && !topSet.has(acc)) prochieReal += bal;
+    }
+    const offset: Record<string, number> = {};
+    for (const a of accountList) {
+      if (a === "Прочие") {
+        offset[a] = prochieReal - (running[a] || 0);
+      } else {
+        const real = realBalances[a];
+        offset[a] = real == null ? 0 : real - running[a];
+      }
+    }
+    for (const point of series) {
+      let total = 0;
+      for (const a of accountList) {
+        const v = (point[a] as number) + offset[a];
+        point[a] = Math.round(v);
+        total += v;
+      }
+      point.total = Math.round(total);
+    }
+  }
+
   return { series, accounts: accountList };
 }
 
@@ -674,7 +719,11 @@ export function detectDuplicates(
       });
     }
   }
-  return out.sort((a, b) => b.totalAmount - a.totalAmount);
+  // Most-recent groups first — the common case is a botched recent import, so
+  // the user wants the latest duplicates at the top (not the biggest by sum).
+  const lastDate = (g: DuplicateGroup) =>
+    g.txs.reduce((m, t) => (t.date > m ? t.date : m), "");
+  return out.sort((a, b) => lastDate(b).localeCompare(lastDate(a)));
 }
 
 export function detectUncategorized(txs: Transaction[]): Transaction[] {
@@ -836,7 +885,10 @@ export function yearOverYearMonthly(
 }
 
 export interface SankeyData {
-  nodes: { name: string; kind?: "income" | "account" | "category" }[];
+  nodes: {
+    name: string;
+    kind?: "income" | "account" | "category" | "savings" | "funding";
+  }[];
   links: { source: number; target: number; value: number }[];
 }
 
@@ -881,23 +933,48 @@ export function buildSankey(txs: Transaction[]): SankeyData {
   const finalExpense = [...expenseArr];
   if (expenseOther > 0) finalExpense.push(["Прочие траты", expenseOther]);
 
-  const nodes: { name: string; kind?: "income" | "account" | "category" }[] = [];
+  // Period balance: did income cover spending? The Sankey only tracks
+  // income/expense category flows (transfers are ignored), so the surplus
+  // (income − expense) is what was effectively SAVED this period, and a
+  // deficit is what had to be PULLED from existing balances / savings to
+  // cover the spending. Round against the same per-link rounding so the
+  // budget node stays visually balanced (in == out).
+  const inSum = finalIncome.reduce((s, e) => s + Math.round(e[1] as number), 0);
+  const outSum = finalExpense.reduce((s, e) => s + Math.round(e[1] as number), 0);
+  const net = inSum - outSum;
+
+  const nodes: SankeyData["nodes"] = [];
   const links: { source: number; target: number; value: number }[] = [];
   const POOL_NAME = "Бюджет";
 
   finalIncome.forEach(([name]) => nodes.push({ name: name as string, kind: "income" }));
+  // Deficit funding sits on the LEFT as an extra source feeding the budget.
+  let fundingIdx = -1;
+  if (net < 0) {
+    fundingIdx = nodes.length;
+    nodes.push({ name: "Из накоплений", kind: "funding" });
+  }
   const poolIdx = nodes.length;
   nodes.push({ name: POOL_NAME, kind: "account" });
+  const expenseStart = nodes.length;
   finalExpense.forEach(([name]) => nodes.push({ name: name as string, kind: "category" }));
+  // Surplus sits on the RIGHT as an extra target drawn from the budget.
+  let savingsIdx = -1;
+  if (net > 0) {
+    savingsIdx = nodes.length;
+    nodes.push({ name: "Сбережения", kind: "savings" });
+  }
 
   finalIncome.forEach((entry, i) => {
     const v = Math.round(entry[1] as number);
     if (v > 0) links.push({ source: i, target: poolIdx, value: v });
   });
+  if (fundingIdx >= 0) links.push({ source: fundingIdx, target: poolIdx, value: -net });
   finalExpense.forEach((entry, i) => {
     const v = Math.round(entry[1] as number);
-    if (v > 0) links.push({ source: poolIdx, target: poolIdx + 1 + i, value: v });
+    if (v > 0) links.push({ source: poolIdx, target: expenseStart + i, value: v });
   });
+  if (savingsIdx >= 0) links.push({ source: poolIdx, target: savingsIdx, value: net });
 
   return { nodes, links };
 }
@@ -981,19 +1058,108 @@ export function lastTransactionDate(txs: Transaction[]): string {
   return max;
 }
 
+export interface NetWorthOptions {
+  /** Dated opening-balance events (base currency) — each account's startBalance
+   *  placed at its opening date. Seeds initial capital so the curve reflects it
+   *  from the right moment instead of as a flat offset across all of history. */
+  openings?: { date: string; amount: number }[];
+  /** When set, only flows touching these accounts count, and transfers are
+   *  scored by membership: a transfer crossing the set boundary is a real
+   *  in/outflow, one within the set nets to zero. Together with `openings` this
+   *  makes the series end exactly at the real total of these accounts. */
+  accounts?: Set<string> | null;
+}
+
+/** Subset of `LiveAccount` (avoids a store→lib import) needed to seed openings. */
+export interface NetWorthAccount {
+  title: string;
+  currency: string;
+  startBalance: number;
+  startDate: string | null;
+  archive: boolean;
+  inBalance: boolean;
+}
+
+/**
+ * Build the net-worth reconstruction basis from live accounts: which accounts
+ * count, and a dated opening-balance event per account (its `startBalance` in
+ * base currency, placed at `startDate` → first transaction → global earliest).
+ */
+export function netWorthBasis(
+  liveAccounts: NetWorthAccount[],
+  txs: Transaction[],
+  rates: CurrencyRates,
+  includeOffBalance: boolean
+): { accounts: Set<string>; openings: { date: string; amount: number }[] } {
+  const earliest = new Map<string, string>();
+  let globalEarliest = "";
+  for (const t of txs) {
+    const d = t.date;
+    if (!d) continue;
+    if (!globalEarliest || d < globalEarliest) globalEarliest = d;
+    for (const a of [t.outcomeAccount, t.incomeAccount, t.account]) {
+      if (!a) continue;
+      const cur = earliest.get(a);
+      if (!cur || d < cur) earliest.set(a, d);
+    }
+  }
+  const toBaseAmt = (amount: number, currency: string) =>
+    currency === rates.base ? amount : amount * (rates.rates[currency] || 1);
+  const accounts = new Set<string>();
+  const openings: { date: string; amount: number }[] = [];
+  for (const a of liveAccounts) {
+    if (a.archive) continue;
+    if (!a.inBalance && !includeOffBalance) continue;
+    accounts.add(a.title);
+    if (a.startBalance) {
+      const date = a.startDate || earliest.get(a.title) || globalEarliest;
+      if (date) openings.push({ date, amount: toBaseAmt(a.startBalance, a.currency) });
+    }
+  }
+  return { accounts, openings };
+}
+
 export function netWorthSeries(
   allTxs: Transaction[],
-  calibration?: CalibrationInput | null
+  calibration?: CalibrationInput | null,
+  opts?: NetWorthOptions
 ): { date: string; net: number }[] {
+  const set = opts?.accounts ?? null;
+  const inSet = (a: string | null | undefined) => !!a && set!.has(a);
   const days = new Map<string, number>();
+  const add = (d: string, v: number) => {
+    if (v !== 0) days.set(d, (days.get(d) || 0) + v);
+  };
   for (const t of allTxs) {
     const d = ymdKey(t.date);
     if (!d) continue;
     let delta = 0;
-    // Refund increments net worth on the day, like income.
-    if (t.kind === "income" || t.kind === "refund") delta += t.amountBase;
-    else if (t.kind === "expense") delta -= t.amountBase;
-    if (delta !== 0) days.set(d, (days.get(d) || 0) + delta);
+    if (set) {
+      // Account-aware: a flow only moves net worth if its account is in the set;
+      // transfers count only when they cross the set boundary.
+      if (t.kind === "income" || t.kind === "refund") {
+        if (inSet(t.incomeAccount)) delta += t.amountBase;
+      } else if (t.kind === "expense") {
+        if (inSet(t.outcomeAccount)) delta -= t.amountBase;
+      } else if (t.kind === "transfer") {
+        const out = inSet(t.outcomeAccount);
+        const inc = inSet(t.incomeAccount);
+        if (out && !inc) delta -= t.amountBase;
+        else if (inc && !out) delta += t.amountBase;
+      }
+    } else {
+      // Refund increments net worth on the day, like income.
+      if (t.kind === "income" || t.kind === "refund") delta += t.amountBase;
+      else if (t.kind === "expense") delta -= t.amountBase;
+    }
+    add(d, delta);
+  }
+  // Seed dated opening balances (account creation capital).
+  if (opts?.openings) {
+    for (const o of opts.openings) {
+      const d = ymdKey(o.date);
+      if (d) add(d, o.amount);
+    }
   }
   const sorted = Array.from(days.keys()).sort();
   let net = 0;

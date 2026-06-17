@@ -18,8 +18,10 @@ import {
   newDraftId,
   type DraftFields,
 } from "../lib/zenmoneyPush";
-import { Combobox } from "./Combobox";
+import { Combobox, type ComboboxGroup } from "./Combobox";
+import { CategoryCascadePicker, type CategoryNode } from "./CategoryCascadePicker";
 import { DateField } from "./DateField";
+import type { ZenTag } from "../lib/zenmoney";
 import { HashtagTextarea } from "./HashtagTextarea";
 import type { Transaction, TxKind } from "../types";
 
@@ -33,6 +35,25 @@ interface Props {
 /** Today's date as ISO YYYY-MM-DD, for seeding a new draft. */
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** Local "HH:MM" time-of-day from an ISO timestamp (the operation's `created`).
+ *  Empty string when the timestamp is missing/invalid (e.g. some CSV rows). */
+function isoToLocalTime(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Combine an accounting date (YYYY-MM-DD) + local "HH:MM" into a Date built in
+ *  local time, so it round-trips with `isoToLocalTime`. */
+function dateTimeToDate(dateIso: string, time: string): Date {
+  const [y, mo, d] = dateIso.split("-").map(Number);
+  const m = /^(\d{2}):(\d{2})$/.exec(time);
+  return new Date(y, (mo || 1) - 1, d || 1, m ? +m[1] : 0, m ? +m[2] : 0, 0, 0);
 }
 
 /**
@@ -82,15 +103,19 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
   const refresh = useDataStore((s) => s.refresh);
   const setEdit = useEditsStore((s) => s.setEdit);
   const addDraft = useDraftsStore((s) => s.add);
+  // A not-yet-pushed draft: deleting discards it permanently (no cloud row, no
+  // restore), so the confirm copy below is tailored for that case.
+  const isDraftEdit = useDraftsStore((s) => !isCreate && Boolean(s.drafts[tx.id]));
   const deleteTransaction = useDataStore((s) => s.deleteTransaction);
   const [error, setError] = useState<string | null>(null);
 
   async function handleDelete() {
     const pushMode = useZenmoneyStore.getState().pushMode;
     const ok = await confirm({
-      title: "Удалить операцию?",
-      message:
-        pushMode !== "off"
+      title: isDraftEdit ? "Удалить черновик?" : "Удалить операцию?",
+      message: isDraftEdit
+        ? "Это несинхронизированный черновик — он будет удалён локально и не отправится в Дзен-мани. Действие необратимо."
+        : pushMode !== "off"
           ? "Операция скроется из всех расчётов и списков. Так как включён Push, при следующей отправке она будет удалена и в облаке Дзен-мани. Вернуть можно на странице «Удалённые» — в т.ч. в облако."
           : "Операция скроется из всех расчётов и списков. Вернуть можно на странице «Удалённые». В облаке Дзен-мани она не тронется.",
       confirmLabel: "Удалить",
@@ -158,6 +183,68 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
     };
   }, [allTransactions, kind, categoryMeta]);
 
+  // Raw Zenmoney tags — the only place the real parent→child hierarchy lives
+  // (categoryMeta is keyed by title and flattens it, which is why sub-tags
+  // currently leak into the first level). Loaded once for the cascade picker.
+  const [cacheTags, setCacheTags] = useState<ZenTag[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadZenCache().then((c) => {
+      if (!cancelled) setCacheTags(c?.tags ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Top-level categories (this kind only) each with their sub-categories, for
+  // the single cascade field. Hierarchy comes from the raw tags (authoritative)
+  // unioned with sub-categories observed in the data; child tags that leaked
+  // into `categoryOptions` are dropped from the first level.
+  const categoryNodes = useMemo<CategoryNode[]>(() => {
+    const subsMap = new Map<string, Set<string>>();
+    const addSub = (cat: string, sub: string) => {
+      let s = subsMap.get(cat);
+      if (!s) {
+        s = new Set<string>();
+        subsMap.set(cat, s);
+      }
+      s.add(sub);
+    };
+    for (const [cat, subs] of subcatByCategory)
+      for (const sub of subs) addSub(cat, sub);
+    const realTop = new Set<string>();
+    if (cacheTags) {
+      const byId = new Map(cacheTags.map((t) => [t.id, t] as const));
+      for (const t of cacheTags) {
+        if (t.archive) continue;
+        if (t.parent) {
+          const parent = byId.get(t.parent);
+          if (parent) addSub(parent.title, t.title);
+        } else {
+          realTop.add(t.title);
+        }
+      }
+    }
+    // Names that are a child of some category — drop them from the first level
+    // unless they're *also* a genuine top-level tag (e.g. a "Прочее" that exists
+    // both as its own category and as a sub elsewhere).
+    const childNames = new Set<string>();
+    for (const subs of subsMap.values()) for (const s of subs) childNames.add(s);
+    const tops = categoryOptions.filter(
+      // Drop full-path «Parent / Sub» entries — categoryMeta carries those keys
+      // (for same-named-sub icons), but the first level is top-level only; subs
+      // are reached via the right panel.
+      (c) => !c.includes(" / ") && (realTop.has(c) || !childNames.has(c))
+    );
+    return tops.map((name) => ({
+      name,
+      subs: Array.from(subsMap.get(name) ?? []).sort((a, b) =>
+        a.localeCompare(b, "ru")
+      ),
+    }));
+  }, [categoryOptions, subcatByCategory, cacheTags]);
+
   // "Получатель" suggestions, served as two distinct groups so the
   // user can tell at a glance which bucket a suggestion comes from:
   //   1) "Получатели Дзен-мани" — everything that's been through
@@ -186,11 +273,13 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
     new Map()
   );
   const [defaultAccount, setDefaultAccount] = useState<string | null>(null);
+  const [archivedAccounts, setArchivedAccounts] = useState<Set<string>>(new Set());
   useEffect(() => {
     let cancelled = false;
     getLiveAccountsFromCache().then((list) => {
       if (cancelled || !list) return;
       setAccountCurrency(new Map(list.map((a) => [a.title, a.currency])));
+      setArchivedAccounts(new Set(list.filter((a) => a.archive).map((a) => a.title)));
       // Remember the first non-archived account so create mode can seed
       // the account fields (applied in a dedicated effect below).
       const firstActive = list.find((a) => !a.archive) ?? list[0];
@@ -251,7 +340,42 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
     return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
   }, [allTransactions, accountCurrency]);
 
+  // Grouped account list for the pickers: «Часто используемые» (top-10 by how
+  // many transactions touch the account), then «Активные» / «Архивные» (archive
+  // flag from the Zenmoney cache). Falls back to the flat list for short lists.
+  const accountGroups = useMemo<ComboboxGroup[]>(() => {
+    const counts = new Map<string, number>();
+    for (const t of allTransactions) {
+      const accs = new Set(
+        [t.account, t.outcomeAccount, t.incomeAccount].filter(Boolean)
+      );
+      for (const a of accs) counts.set(a, (counts.get(a) ?? 0) + 1);
+    }
+    const top = [...counts.entries()]
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name]) => name);
+    const groups: ComboboxGroup[] = [];
+    // Only worth a separate «frequent» shortcut when the full list is long;
+    // its accounts are then excluded from «Активные»/«Архивные» so nothing
+    // is shown twice.
+    const showTop = accountOptions.length > 10 && top.length > 0;
+    const topSet = showTop ? new Set(top) : new Set<string>();
+    if (showTop) groups.push({ label: "Часто используемые", items: top });
+    const active = accountOptions.filter((a) => !archivedAccounts.has(a) && !topSet.has(a));
+    const archived = accountOptions.filter((a) => archivedAccounts.has(a) && !topSet.has(a));
+    if (active.length) groups.push({ label: "Активные", items: active });
+    if (archived.length) groups.push({ label: "Архивные", items: archived });
+    return groups;
+  }, [allTransactions, accountOptions, archivedAccounts]);
+
   const [date, setDate] = useState(tx.date);
+  // Operation time-of-day. New draft → seed with the current local time;
+  // edit → the original `created` time. Persisted via the `createdAt` patch.
+  const [time, setTime] = useState(() =>
+    isCreate ? isoToLocalTime(new Date().toISOString()) : isoToLocalTime(tx.createdAt)
+  );
   const [category, setCategory] = useState(tx.category);
   const [subcategory, setSubcategory] = useState(tx.subcategory ?? "");
   // Single "Получатель" field — saves into `brand`, which is the
@@ -383,6 +507,9 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
       id: newDraftId(),
       kind,
       date,
+      createdSeconds: /^\d{2}:\d{2}$/.test(time)
+        ? Math.floor(dateTimeToDate(date, time).getTime() / 1000)
+        : undefined,
       amount: Number(amount.replace(",", ".")),
       account: kind === "transfer" ? outAcc.trim() : account.trim(),
       incomeAccount: kind === "transfer" ? inAcc.trim() : undefined,
@@ -440,6 +567,14 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
         norm(next) !== norm(before);
 
       if (safeDate !== tx.date) patch.date = safeDate;
+
+      // Time-of-day lives in `created`/`createdAt`. Only patch it when the user
+      // actually changed the time — otherwise a no-op save (or a date-only
+      // edit) would needlessly rewrite the original timestamp. The created date
+      // follows the accounting date so what you see (Дата + Время) is stored.
+      if (/^\d{2}:\d{2}$/.test(time) && time !== isoToLocalTime(tx.createdAt)) {
+        patch.createdAt = dateTimeToDate(safeDate, time).toISOString();
+      }
 
       const nextCategory = category.trim() || tx.category;
       if (changed(nextCategory, tx.category)) patch.category = nextCategory;
@@ -626,53 +761,42 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
               />
             </div>
           </Field>
-          <Field label="Дата">
-            <DateField
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="input text-sm w-full"
-            />
-          </Field>
+          {/* Date needs room for «дд.мм.гггг» + the calendar icon; time only
+              holds «чч:мм», so give the date the wider column. */}
+          <div className="grid grid-cols-[3fr_2fr] gap-3">
+            <Field label="Дата">
+              <DateField
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="input text-sm w-full"
+              />
+            </Field>
+            <Field label="Время">
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="input text-sm w-full"
+              />
+            </Field>
+          </div>
           {/* Category / Subcategory — not shown for transfers: a transfer is
               just money moving between the user's own accounts, it has no
               spending/income category. */}
           {kind !== "transfer" && (
-            <div className="grid grid-cols-2 gap-3">
-              {/* Picker-only. Free-form text is blocked (`allowCustom={false}`)
-                  so we can never end up with a value that doesn't exist in
-                  Zenmoney's tag dictionary — that'd just get rejected by the
-                  push transformer with a "tag not found" error anyway. */}
-              <Field label="Категория">
-                <Combobox
-                  value={category}
-                  options={categoryOptions}
-                  allowCustom={false}
-                  maxHeight={DROPDOWN_MAX}
-                  onChange={(next) => {
-                    setCategory(next);
-                    if (
-                      subcategory &&
-                      !subcatByCategory.get(next)?.has(subcategory)
-                    ) {
-                      setSubcategory("");
-                    }
-                  }}
-                />
-              </Field>
-              <Field label="Подкатегория">
-                <Combobox
-                  value={subcategory}
-                  options={Array.from(subcatByCategory.get(category) || []).sort(
-                    (a, b) => a.localeCompare(b, "ru")
-                  )}
-                  allowCustom={false}
-                  clearable
-                  onChange={setSubcategory}
-                  placeholder="—"
-                  maxHeight={DROPDOWN_MAX}
-                />
-              </Field>
-            </div>
+            // Single full-width field: top level lists only real categories;
+            // a category's sub-categories open to the right (issue #12).
+            <Field label="Категория">
+              <CategoryCascadePicker
+                category={category}
+                subcategory={subcategory}
+                categories={categoryNodes}
+                onChange={(cat, sub) => {
+                  setCategory(cat);
+                  setSubcategory(sub);
+                }}
+              />
+            </Field>
           )}
           {/* Account(s): one field for income/expense, two for transfer.
               Placed right under category — it's the second-most
@@ -683,6 +807,7 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
                 <Combobox
                   value={outAcc}
                   options={accountOptions}
+                  groups={accountGroups}
                   onChange={setOutAcc}
                   placeholder="Источник"
                   maxHeight={DROPDOWN_MAX}
@@ -692,6 +817,7 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
                 <Combobox
                   value={inAcc}
                   options={accountOptions}
+                  groups={accountGroups}
                   onChange={setInAcc}
                   placeholder="Получатель"
                   maxHeight={DROPDOWN_MAX}
@@ -703,6 +829,7 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
               <Combobox
                 value={account}
                 options={accountOptions}
+                groups={accountGroups}
                 onChange={setAccount}
                 placeholder="Введите или выберите из списка"
                 maxHeight={DROPDOWN_MAX}

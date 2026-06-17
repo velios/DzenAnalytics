@@ -26,6 +26,39 @@ function filt(p: Partial<FiltersState> = {}): FiltersState {
 
 const ids = (txs: { id: string }[]) => txs.map((t) => t.id).sort();
 
+describe("applyFilters — category leaf matching (issue #9)", () => {
+  const txs = [
+    tx({ id: "kafe", category: "Еда", subcategory: "Кафе", categoryFull: "Еда / Кафе" }),
+    tx({ id: "prod", category: "Еда", subcategory: "Продукты", categoryFull: "Еда / Продукты" }),
+    tx({ id: "bareEda", category: "Еда", subcategory: null, categoryFull: "Еда" }),
+    tx({ id: "taxi", category: "Транспорт", subcategory: null, categoryFull: "Транспорт" }),
+  ];
+
+  it("a sub leaf matches only that sub-category (parent's bare is NOT pulled in)", () => {
+    const out = applyFilters(txs, filt({ categories: new Set(["Еда / Кафе"]) }));
+    expect(ids(out)).toEqual(["kafe"]);
+  });
+
+  it("the bare-category leaf matches ONLY no-sub transactions, not the subs", () => {
+    // Category and sub-category are distinct in Zenmoney — «Еда» ≠ «Еда / Кафе».
+    const out = applyFilters(txs, filt({ categories: new Set(["Еда"]) }));
+    expect(ids(out)).toEqual(["bareEda"]);
+  });
+
+  it("selecting all of a parent's leaves keeps the whole category", () => {
+    const out = applyFilters(
+      txs,
+      filt({ categories: new Set(["Еда", "Еда / Кафе", "Еда / Продукты"]) })
+    );
+    expect(ids(out)).toEqual(["bareEda", "kafe", "prod"]);
+  });
+
+  it("FILTER_NONE excludes everything; empty set keeps everything", () => {
+    expect(applyFilters(txs, filt({ categories: new Set([FILTER_NONE]) }))).toHaveLength(0);
+    expect(applyFilters(txs, filt({ categories: new Set() }))).toHaveLength(4);
+  });
+});
+
 describe("applyFilters — date window", () => {
   it("preset 'all' keeps every transaction regardless of date", () => {
     const txs = [

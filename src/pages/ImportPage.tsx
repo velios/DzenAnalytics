@@ -28,6 +28,7 @@ import {
   History,
   CloudDownload,
   CloudUpload,
+  CloudOff,
   Info,
   ChevronDown,
   HardDrive,
@@ -37,6 +38,8 @@ import {
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { SyncLog } from "../components/SyncLog";
+import { PendingChangesModal } from "../components/PendingChangesModal";
+import { useDeletedStore } from "../store/useDeletedStore";
 import { useDataStore } from "../store/useDataStore";
 import { useGoalsStore } from "../store/useGoalsStore";
 import { useBudgetsStore } from "../store/useBudgetsStore";
@@ -216,6 +219,9 @@ export function ImportPage() {
   const draftsMap = useDraftsStore((s) => s.drafts);
   const pendingDraftCount = Object.keys(draftsMap).length;
   const pendingTotal = pendingEditCount + pendingDraftCount;
+  // Local deletions also revert from the pending-changes modal.
+  const deletedCount = useDeletedStore((s) => s.deletedIds.length);
+  const [pendingModalOpen, setPendingModalOpen] = useState(false);
   // Orphaned edits: overrides whose transaction no longer exists in the data
   // (e.g. edits made on a CSV import, then switched to API — ids changed). They
   // can never apply or push, and a re-sync won't clear them, so we offer to
@@ -1254,11 +1260,32 @@ export function ImportPage() {
                   const ok = await confirm({
                     title: "Очистить локальные данные?",
                     message:
-                      "Удалить все локально сохранённые данные из этого браузера. Данные в облаке Дзен-мани НЕ пострадают.",
+                      "Удалятся ВСЕ локальные данные из этого браузера: операции, кэш, правки, черновики, исключения дубликатов, калибровка, бюджеты, правила, аннотации и т.п. Подключение к Дзен-мани и настройки сохранятся, данные в облаке НЕ пострадают. Страница перезагрузится.",
                     confirmLabel: "Очистить",
                     tone: "danger",
                   });
-                  if (ok) await clearAll();
+                  if (!ok) return;
+                  // Allow-list: keep only the connection + preferences. Everything
+                  // else (incl. duplicate exclusions, categoryMeta, server
+                  // timestamp & cache) is wiped, so the next sync is a clean FULL
+                  // re-pull and nothing «resurrects».
+                  await db.clearAllExcept([
+                    "zenmoneyToken",
+                    "zenmoneyPushEnabled",
+                    "zenmoneyPushMode",
+                    "zenmoneySnapshotPolicy",
+                    "zenmoneyAutoSyncEnabled",
+                    "zenmoneyAutoSyncValue",
+                    "zenmoneyAutoSyncUnit",
+                    "displaySettings",
+                    "reportPeriod",
+                    "includeOffBalance",
+                    "payeeGrouping",
+                    "backupInterval",
+                    "backupLastAt",
+                    "rates",
+                  ]);
+                  window.location.reload();
                 }}
                 className="btn-danger text-sm ml-auto self-center"
               >
@@ -2327,6 +2354,17 @@ export function ImportPage() {
               })}
             </div>
 
+            {pendingTotal + deletedCount > 0 && (
+              <button
+                onClick={() => setPendingModalOpen(true)}
+                className="btn-ghost text-xs mb-3"
+                title="Просмотр и откат локальных изменений, ещё не отправленных в облако"
+              >
+                <CloudOff className="w-3.5 h-3.5" />
+                Посмотреть и откатить изменения ({pendingTotal + deletedCount})
+              </button>
+            )}
+
             {pushMode === "manual" && (
               <>
                 <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -2525,6 +2563,10 @@ export function ImportPage() {
           specific row. Hidden on tabs other than "Данные" so it
           doesn't compete with Бэкапы / Обработка content. */}
       {settingsTab === "source" && <SyncLog />}
+
+      {pendingModalOpen && (
+        <PendingChangesModal onClose={() => setPendingModalOpen(false)} />
+      )}
     </div>
   );
 }

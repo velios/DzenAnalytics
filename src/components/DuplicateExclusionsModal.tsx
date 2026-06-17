@@ -35,6 +35,7 @@ export function DuplicateExclusionsModal({ onClose }: { onClose: () => void }) {
     return arr.filter(
       (r) =>
         (r.payee || "без получателя").toLowerCase().includes(q) ||
+        (r.category || "").toLowerCase().includes(q) ||
         String(Math.round(r.amount)).includes(q)
     );
   }, [rules, search]);
@@ -64,7 +65,7 @@ export function DuplicateExclusionsModal({ onClose }: { onClose: () => void }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="card w-full max-w-lg max-h-[85vh] flex flex-col"
+        className="card w-full max-w-2xl max-h-[85vh] flex flex-col"
         style={{ scrollbarGutter: "stable" }}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -108,25 +109,43 @@ export function DuplicateExclusionsModal({ onClose }: { onClose: () => void }) {
               По запросу ничего не найдено.
             </div>
           ) : (
-            list.map((r) => (
-              <div
-                key={r.signature}
-                className="flex items-center gap-3 py-2 border-b border-border/40 last:border-b-0"
-              >
-                <span className="text-sm truncate">{r.payee || "Без получателя"}</span>
-                <span className="text-xs text-muted whitespace-nowrap">
-                  {kindLabel(r.kind)} · {formatMoney(r.amount, r.currency)}
-                </span>
-                <button
-                  onClick={() => remove(r.signature)}
-                  className="ml-auto p-1 text-muted hover:text-expense shrink-0"
-                  title="Удалить правило — снова проверять эту группу"
-                  aria-label="Удалить правило"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-muted text-left">
+                  <th className="font-normal py-1.5 pr-2">Получатель</th>
+                  <th className="font-normal py-1.5 px-2">Тип</th>
+                  <th className="font-normal py-1.5 px-2">Категория</th>
+                  <th className="font-normal py-1.5 px-2 text-right">Сумма</th>
+                  <th className="w-6" />
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r) => (
+                  <tr key={r.signature} className="border-t border-border/40">
+                    <td className="py-2 pr-2 max-w-[240px] truncate" title={r.payee || "Без получателя"}>
+                      {r.payee || "Без получателя"}
+                    </td>
+                    <td className="py-2 px-2 text-muted whitespace-nowrap capitalize">{kindLabel(r.kind)}</td>
+                    <td className="py-2 px-2 max-w-[200px] truncate text-muted" title={r.category || ""}>
+                      {r.category || "—"}
+                    </td>
+                    <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap">
+                      {formatMoney(r.amount, r.currency)}
+                    </td>
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={() => remove(r.signature)}
+                        className="p-1 text-muted hover:text-expense shrink-0"
+                        title="Удалить правило — снова проверять эту группу"
+                        aria-label="Удалить правило"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       </div>

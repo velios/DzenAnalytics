@@ -6,6 +6,10 @@ import { SYNTHETIC_CATEGORY_COLORS, fallbackColorForName } from "../lib/category
 
 interface Props {
   category: string;
+  /** Parent category — when set, the icon/colour is resolved by the full path
+   *  «Parent / category» first, so two same-named sub-categories under
+   *  different parents keep their own Zenmoney icon. */
+  parent?: string;
   /** Tailwind size for the round wrapper. Default w-5 h-5. */
   size?: string;
   /** Fallback colour when the category has no meta — defaults to muted. */
@@ -41,11 +45,15 @@ const SYNTHETIC_CATEGORIES: Record<
  */
 export function CategoryDot({
   category,
+  parent,
   size = "w-5 h-5",
   fallback = null,
   hideEmpty = false,
 }: Props) {
-  const meta = useCategoryMetaStore((s) => s.meta[category]);
+  // Resolve by full path «Parent / category» when a parent is given (distinct
+  // icon per sub), falling back to the bare title.
+  const fullKey = parent ? `${parent} / ${category}` : category;
+  const meta = useCategoryMetaStore((s) => s.meta[fullKey] ?? s.meta[category]);
   const loaded = useCategoryMetaStore((s) => s.loaded);
   const hydrate = useCategoryMetaStore((s) => s.hydrate);
   useEffect(() => {
@@ -60,7 +68,7 @@ export function CategoryDot({
   // "color-only" branch would beat our icon. We *do* defer to a real
   // `meta.icon` (an emoji set by the user on a Zenmoney tag of the same
   // name would win), but if there isn't one, render the Lucide glyph.
-  const synthetic = SYNTHETIC_CATEGORIES[category];
+  const synthetic = parent ? undefined : SYNTHETIC_CATEGORIES[category];
   if (synthetic && !meta?.icon) {
     const Icon = synthetic.icon;
     return (
@@ -80,7 +88,7 @@ export function CategoryDot({
   // for callers that genuinely want nothing when there's no real meta.
   const emoji = zenIconToEmoji(meta?.icon);
   const color =
-    meta?.color ?? fallback ?? (hideEmpty ? null : fallbackColorForName(category));
+    meta?.color ?? fallback ?? (hideEmpty ? null : fallbackColorForName(fullKey));
 
   if (!color && !emoji) {
     return null;

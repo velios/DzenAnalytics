@@ -15,6 +15,9 @@ import type { Transaction } from "../types";
 // stomping derived fields like `amountBase` (we recompute that ourselves).
 export type EditableField =
   | "date"
+  // Operation timestamp (ISO). Edited via the «Время» field — Zenmoney has no
+  // separate time column, so the time-of-day lives in `created`/`createdAt`.
+  | "createdAt"
   | "category"
   | "subcategory"
   | "categoryFull"

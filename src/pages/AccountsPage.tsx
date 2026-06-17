@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   LayoutGrid,
   Table as TableIcon,
+  Archive,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
@@ -34,14 +35,15 @@ import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import type { LiveAccount } from "../store/useZenmoneyStore";
 import {
   balancesByAccount,
+  computeKPI,
   dailyBalanceSeries,
   stackedBalanceByAccount,
-  netWorthSeries,
   accountMonthlyDeltas,
   detectBalanceAnchors,
   cumulativeNetAt,
   lastTransactionDate,
 } from "../lib/aggregations";
+import { useNetWorthSeries } from "../hooks/useNetWorthSeries";
 import {
   formatMoney,
   formatNum,
@@ -78,7 +80,8 @@ export function AccountsPage() {
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [view, setView] = useState<View>("stacked");
   const [scope, setScope] = useState<Scope>("all");
-  const [accountsView, setAccountsView] = useState<AccountsView>("cards");
+  const [accountsView, setAccountsView] = useState<AccountsView>("table");
+  const [hideArchived, setHideArchived] = useState(false);
   // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage) are
   // shown only when the global setting (Настройки → Обработка) is on.
   const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
@@ -157,7 +160,8 @@ export function AccountsPage() {
     const titles = new Set<string>();
     for (const a of accounts) titles.add(a.account);
     for (const a of liveList) {
-      if (a.archive) continue; // archived = closed, never in the list
+      // Archived (closed) accounts are kept but grouped below active ones
+      // (see the sort), so the user can still review them without clutter up top.
       // Off-balance accounts only when the global setting opts them in.
       if (!a.inBalance && !includeOffBalance) continue;
       // Skip dormant zero-balance accounts with no activity — they'd be noise.
@@ -184,20 +188,46 @@ export function AccountsPage() {
         offBalance: live ? !live.inBalance : false,
       };
     });
-    // Sort by real balance when we have it, otherwise by the flow delta.
-    rows.sort((x, y) => (y.balanceBase ?? y.delta) - (x.balanceBase ?? x.delta));
+    // Active first, archived grouped below; within each group sort by real
+    // balance when we have it, otherwise by the flow delta.
+    rows.sort((x, y) => {
+      if (x.archive !== y.archive) return x.archive ? 1 : -1;
+      return (y.balanceBase ?? y.delta) - (x.balanceBase ?? x.delta);
+    });
     return rows;
   }, [accounts, liveAccounts, base, rates, includeOffBalance]);
 
   // True when at least one account carries a real (API) balance — drives the
   // headline ("Баланс" vs "Изменение") and the table's column labels.
   const hasRealBalances = accountRows.some((r) => r.balanceBase !== null);
+  // Optional «hide archived» toggle (only useful when some account is archived).
+  const hasArchived = accountRows.some((r) => r.archive);
+  const visibleRows = hideArchived
+    ? accountRows.filter((r) => !r.archive)
+    : accountRows;
+  // Real current balance per account (base currency) — only in API mode. Lets
+  // the stacked chart show actual balances instead of cumulative-flow-from-zero.
+  const realBalancesByAccount = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of accountRows) {
+      if (r.balanceBase != null) m[r.account] = r.balanceBase;
+    }
+    return m;
+  }, [accountRows]);
   const series = useMemo(
     () => dailyBalanceSeries(filtered, selectedAccount ?? undefined),
     [filtered, selectedAccount]
   );
-  const stacked = useMemo(() => stackedBalanceByAccount(baseTxs, 8), [baseTxs]);
-  const netWorth = useMemo(() => netWorthSeries(baseTxs, calibration), [baseTxs, calibration]);
+  const stacked = useMemo(
+    () =>
+      stackedBalanceByAccount(
+        baseTxs,
+        8,
+        hasRealBalances ? realBalancesByAccount : null
+      ),
+    [baseTxs, hasRealBalances, realBalancesByAccount]
+  );
+  const netWorth = useNetWorthSeries(baseTxs);
 
   function applyCalibration() {
     const amt = Number(calibAmount);
@@ -236,8 +266,13 @@ export function AccountsPage() {
   if (transactions.length === 0) return <EmptyState />;
 
   const totalNet = accounts.reduce((s, a) => s + a.balance, 0);
-  const totalIncome = accounts.reduce((s, a) => s + a.income, 0);
-  const totalExpense = accounts.reduce((s, a) => s + a.expense, 0);
+  // Headline доход/расход = real income/expense, EXCLUDING internal transfers
+  // (computeKPI skips kind="transfer"). Summing per-account flows instead would
+  // double-count every transfer between own accounts (both legs), inflating the
+  // figures to near-equal turnover that has no match in the operations list.
+  const kpi = computeKPI(filtered);
+  const totalIncome = kpi.income;
+  const totalExpense = kpi.expense;
 
   const totalAllAccounts = accountsAll.reduce((s, a) => s + a.balance, 0);
   const peakNetWorth = netWorth.reduce((m, p) => Math.max(m, p.net), 0);
@@ -247,14 +282,8 @@ export function AccountsPage() {
     <div className="space-y-6">
       <PageHeader
         icon={Wallet}
-        title="Совокупный баланс"
-        hint={
-          zenToken
-            ? "Баланс подтянут из Дзен-мани и обновляется при синхронизации."
-            : calibration
-              ? `Откалибровано: на ${calibration.date} баланс ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
-              : "Стартовая точка — 0. Калибровка привяжет график к реальной сумме."
-        }
+        title="Счета"
+        hint="Данные по всем счетам, их балансы и другая аналитика."
         right={
           <div className="flex flex-wrap gap-2">
             <div className="flex bg-panel2 rounded-lg p-1 border border-border">
@@ -420,16 +449,18 @@ export function AccountsPage() {
           <div className="text-xs text-muted mt-1">Максимум за период графика</div>
         </div>
         <div className="card card-pad">
-          <div className="label mb-1">Поступления (фильтр)</div>
+          <div className="label mb-1">Доходы (фильтр)</div>
           <div className="stat-num text-income">
             {formatMoney(totalIncome, base)}
           </div>
+          <div className="text-xs text-muted mt-1">Без переводов между счетами</div>
         </div>
         <div className="card card-pad">
-          <div className="label mb-1">Списания (фильтр)</div>
+          <div className="label mb-1">Расходы (фильтр)</div>
           <div className="stat-num text-expense">
             {formatMoney(totalExpense, base)}
           </div>
+          <div className="text-xs text-muted mt-1">Без переводов между счетами</div>
         </div>
       </div>
 
@@ -438,11 +469,19 @@ export function AccountsPage() {
           <div>
             <div className="font-semibold">
               {view === "stacked"
-                ? "Баланс по счетам (стопкой)"
+                ? hasRealBalances
+                  ? "Баланс по счетам (стопкой)"
+                  : "Накопленный поток по счетам (стопкой)"
                 : "Совокупный баланс (одной линией)"}
             </div>
             <div className="text-xs text-muted">
-              {scope === "all" ? "Все транзакции, без учёта фильтров" : "С учётом фильтров"}
+              {view === "stacked"
+                ? hasRealBalances
+                  ? "Реальные остатки по счетам · вся история, без фильтров"
+                  : "Накопление с нуля, без стартовых остатков · без фильтров"
+                : scope === "all"
+                  ? "Все транзакции, без учёта фильтров"
+                  : "С учётом фильтров"}
               {view === "stacked" && ` · топ-${stacked.accounts.length} счетов`}
             </div>
           </div>
@@ -613,23 +652,29 @@ export function AccountsPage() {
         <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
             <Wallet className="w-4 h-4" />
-            Счета ({accountRows.length})
+            Счета ({visibleRows.length})
           </div>
+          <div className="flex items-center gap-2 flex-wrap">
+          {hasArchived && (
+            <button
+              onClick={() => setHideArchived((v) => !v)}
+              aria-pressed={hideArchived}
+              className={`px-3 py-1.5 text-xs rounded-lg border flex items-center gap-1 ${
+                hideArchived
+                  ? "bg-accent/10 border-accent/40 text-accent"
+                  : "bg-panel2 border-border text-muted hover:text-text"
+              }`}
+              title="Скрыть/показать архивные (закрытые) счета"
+            >
+              <Archive className="w-3.5 h-3.5" />
+              {hideArchived ? "Архивные скрыты" : "Скрыть архивные"}
+            </button>
+          )}
           <div
             role="group"
             aria-label="Вид списка счетов"
             className="flex bg-panel2 rounded-lg p-1 border border-border"
           >
-            <button
-              onClick={() => setAccountsView("cards")}
-              aria-pressed={accountsView === "cards"}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
-                accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
-              }`}
-            >
-              <LayoutGrid className="w-3 h-3" />
-              Карточки
-            </button>
             <button
               onClick={() => setAccountsView("table")}
               aria-pressed={accountsView === "table"}
@@ -640,6 +685,17 @@ export function AccountsPage() {
               <TableIcon className="w-3 h-3" />
               Таблица
             </button>
+            <button
+              onClick={() => setAccountsView("cards")}
+              aria-pressed={accountsView === "cards"}
+              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
+                accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
+              }`}
+            >
+              <LayoutGrid className="w-3 h-3" />
+              Карточки
+            </button>
+          </div>
           </div>
         </div>
         <div className="text-xs text-muted mb-3">
@@ -651,7 +707,7 @@ export function AccountsPage() {
 
         {accountsView === "cards" ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {accountRows.map((a) => {
+            {visibleRows.map((a) => {
               const isSel = selectedAccount === a.account;
               const hasReal = a.balanceBase !== null;
               // Headline = real balance when known, else the flow delta.
@@ -674,7 +730,7 @@ export function AccountsPage() {
                     isSel
                       ? "bg-accent/10 border-accent"
                       : "bg-panel2 border-border hover:border-accent/50"
-                  }`}
+                  } ${a.archive ? "opacity-60" : ""}`}
                 >
                   <div className="flex items-start justify-between mb-2 gap-2">
                     <button
@@ -692,6 +748,9 @@ export function AccountsPage() {
                             {accountTypeLabel(a.type)}
                             {a.offBalance && (
                               <span className="ml-1 text-accent2">· вне баланса</span>
+                            )}
+                            {a.archive && (
+                              <span className="ml-1 text-muted">· архив</span>
                             )}
                           </span>
                         )}
@@ -765,7 +824,20 @@ export function AccountsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/* table-fixed + colgroup keep column widths stable, so changing
+                the filter (different rows/content) never reflows the columns.
+                Numeric columns are sized to fit million-ruble values so nothing
+                overflows its cell (which would force a horizontal scrollbar). */}
+            <table className="w-full min-w-[960px] text-sm table-fixed">
+              <colgroup>
+                <col />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 132 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 64 }} />
+                <col style={{ width: 140 }} />
+              </colgroup>
               <thead>
                 <tr className="text-xs text-muted text-left">
                   <th className="font-normal py-2 pr-2">Счёт</th>
@@ -780,7 +852,7 @@ export function AccountsPage() {
                 </tr>
               </thead>
               <tbody>
-                {accountRows.map((a) => {
+                {visibleRows.map((a) => {
                   const isSel = selectedAccount === a.account;
                   const hasReal = a.balanceBase !== null;
                   const headline = hasReal ? a.balanceBase! : a.delta;
@@ -813,6 +885,9 @@ export function AccountsPage() {
                                 {accountTypeLabel(a.type)}
                                 {a.offBalance && (
                                   <span className="ml-1 text-accent2">· вне баланса</span>
+                                )}
+                                {a.archive && (
+                                  <span className="ml-1 text-muted">· архив</span>
                                 )}
                               </div>
                             )}

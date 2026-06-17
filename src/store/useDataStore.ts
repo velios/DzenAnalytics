@@ -10,7 +10,7 @@ import { useDeletedStore, loadDeletedSet } from "./useDeletedStore";
 import { useDeletedPayloadsStore } from "./useDeletedPayloadsStore";
 import { loadZenCache } from "../lib/zenmoneyCache";
 import type { ZenTransaction } from "../lib/zenmoney";
-import { loadDrafts } from "./useDraftsStore";
+import { loadDrafts, useDraftsStore } from "./useDraftsStore";
 import { draftsToTransactions } from "../lib/draftsMap";
 import { aliasesToMap, type PayeeAlias } from "./usePayeeAliasStore";
 
@@ -429,8 +429,16 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   deleteTransaction: async (id) => {
-    await snapshotForCloudRestore([id]);
-    await useDeletedStore.getState().remove(id);
+    // A not-yet-pushed draft is local-only: discard it outright. Marking it
+    // "deleted" wouldn't help — `loadDraftRows` re-appends every draft
+    // regardless of the deleted set, and there's no cloud row to hide, so the
+    // draft would survive (and still get pushed). See issue #13.
+    if (useDraftsStore.getState().drafts[id]) {
+      await useDraftsStore.getState().remove(id);
+    } else {
+      await snapshotForCloudRestore([id]);
+      await useDeletedStore.getState().remove(id);
+    }
     // Recompute visible list from the unchanged raw set — the row is
     // still in `transactionsRaw` (and IDB) so a restore brings it back.
     const { transactionsRaw: raw, rates } = get();
@@ -440,8 +448,15 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   deleteTransactionMany: async (ids) => {
     if (ids.length === 0) return;
-    await snapshotForCloudRestore(ids);
-    await useDeletedStore.getState().removeMany(ids);
+    // Split drafts (discarded outright) from synced rows (hidden + restorable).
+    const draftMap = useDraftsStore.getState().drafts;
+    const draftIds = ids.filter((id) => draftMap[id]);
+    const syncedIds = ids.filter((id) => !draftMap[id]);
+    for (const id of draftIds) await useDraftsStore.getState().remove(id);
+    if (syncedIds.length > 0) {
+      await snapshotForCloudRestore(syncedIds);
+      await useDeletedStore.getState().removeMany(syncedIds);
+    }
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);
     set({ transactions: final });
