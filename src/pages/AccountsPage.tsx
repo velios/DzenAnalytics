@@ -275,14 +275,8 @@ export function AccountsPage() {
     <div className="space-y-6">
       <PageHeader
         icon={Wallet}
-        title="Совокупный баланс"
-        hint={
-          zenToken
-            ? "Баланс подтянут из Дзен-мани и обновляется при синхронизации."
-            : calibration
-              ? `Откалибровано: на ${calibration.date} баланс ${calibration.amount.toLocaleString("ru-RU")} ${base}.`
-              : "Стартовая точка — 0. Калибровка привяжет график к реальной сумме."
-        }
+        title="Счета"
+        hint="Данные по всем счетам, их балансы и другая аналитика."
         right={
           <div className="flex flex-wrap gap-2">
             <div className="flex bg-panel2 rounded-lg p-1 border border-border">
