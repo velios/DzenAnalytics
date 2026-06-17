@@ -84,7 +84,7 @@ export function ConfirmDialog() {
       // full-viewport blur over the chart page intermittently flashed
       // the white root background on open). Click dismisses as cancel.
       // `role="dialog"` + `aria-modal` for accessibility.
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-fade"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 animate-fade"
       onClick={() => close(false)}
       role="dialog"
       aria-modal="true"

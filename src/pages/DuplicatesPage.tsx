@@ -47,6 +47,7 @@ export function DuplicatesPage() {
       amount: first.amount,
       currency: first.currency,
       kind: first.kind,
+      category: first.categoryFull,
       createdAt: new Date().toISOString(),
     });
   }
