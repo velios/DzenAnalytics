@@ -59,8 +59,11 @@ export function formatMoney(
   currency: Currency = "RUB",
   opts?: { compact?: boolean; signed?: boolean; decimals?: number }
 ): string {
-  const sign = opts?.signed && amount > 0 ? "+" : "";
   const abs = Math.abs(amount);
+  // Render the sign ourselves so a negative always uses the typographic
+  // minus «−» (U+2212), matching the kind glyphs in lists, instead of the
+  // ASCII hyphen «-» that Intl emits for ru-RU. «+» only when `signed`.
+  const sign = amount < 0 ? "−" : opts?.signed && amount > 0 ? "+" : "";
   // Explicit `decimals` wins; otherwise compact caps at 1 and standard
   // follows the global kopecks toggle.
   const dec =
@@ -76,7 +79,7 @@ export function formatMoney(
     maximumFractionDigits: dec,
   });
   const symbol = symbolByCurrency[currency] || currency;
-  const value = fmt.format(amount < 0 ? -abs : abs);
+  const value = fmt.format(abs);
   return `${sign}${value} ${symbol}`;
 }
 
