@@ -911,7 +911,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
               strings. Hidden for transfers (counterparty there is the
               income account, surfaced above in its own field). */}
           {kind !== "transfer" && (
-            <Field label="Получатель">
+            <Field label={kind === "income" ? "Плательщик" : "Место платежа"}>
               <Combobox
                 value={payee}
                 options={payeeOptions}

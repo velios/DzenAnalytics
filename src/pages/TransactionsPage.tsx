@@ -609,7 +609,7 @@ function HeaderRow({
       />
       {!grouped && <div>Дата</div>}
       <div>Категория</div>
-      <div>Получатель</div>
+      <div>Контрагент</div>
       <div>Комментарий</div>
       <div>Счёт</div>
       <div className="text-right">Сумма</div>
