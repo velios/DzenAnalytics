@@ -824,7 +824,18 @@ export function AccountsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/* table-fixed + colgroup keep column widths stable, so changing
+                the filter (different rows/content) never reflows the columns. */}
+            <table className="w-full min-w-[760px] text-sm table-fixed">
+              <colgroup>
+                <col />
+                <col style={{ width: 116 }} />
+                <col style={{ width: 104 }} />
+                <col style={{ width: 116 }} />
+                <col style={{ width: 104 }} />
+                <col style={{ width: 60 }} />
+                <col style={{ width: 96 }} />
+              </colgroup>
               <thead>
                 <tr className="text-xs text-muted text-left">
                   <th className="font-normal py-2 pr-2">Счёт</th>

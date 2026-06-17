@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -25,6 +26,7 @@ import { AccountLogo } from "./AccountLogo";
 import { CategoryFilterPicker } from "./CategoryFilterPicker";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
+import { getLiveAccountsFromCache } from "../store/useZenmoneyStore";
 import { useFiltersStore, FILTER_NONE, type DatePreset } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { confirm } from "../store/useConfirmStore";
@@ -49,6 +51,7 @@ function MultiSelect({
   renderIcon,
   unitForms,
   searchPlaceholder,
+  archivedSet,
 }: {
   label: string;
   options: string[];
@@ -60,6 +63,9 @@ function MultiSelect({
   unitForms?: [string, string, string];
   /** Override the search placeholder. */
   searchPlaceholder?: string;
+  /** Options in this set are «archived» — rendered below an «Архивные»
+   *  divider (the caller must place them last in `options`). */
+  archivedSet?: Set<string>;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -234,23 +240,33 @@ function MultiSelect({
               {filteredOptions.length === 0 ? (
                 <div className="px-2 py-2 text-xs text-muted">Ничего не найдено</div>
               ) : (
-                filteredOptions.map((opt) => (
-                  <label
-                    key={opt}
-                    className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked(opt)}
-                      onChange={() => toggle(opt)}
-                      className="accent-accent shrink-0"
-                    />
-                    {renderIcon && (
-                      <span className="shrink-0">{renderIcon(opt)}</span>
-                    )}
-                    <span className="truncate">{opt}</span>
-                  </label>
-                ))
+                filteredOptions.map((opt, i) => {
+                  // First archived option → render an «Архивные» divider above it.
+                  const showArchivedHeader =
+                    !!archivedSet?.has(opt) &&
+                    (i === 0 || !archivedSet.has(filteredOptions[i - 1]));
+                  return (
+                    <Fragment key={opt}>
+                      {showArchivedHeader && (
+                        <div className="mt-1 pt-1 border-t border-border px-2 pb-0.5 text-[11px] uppercase tracking-wide text-muted">
+                          Архивные
+                        </div>
+                      )}
+                      <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 rounded cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          checked={isChecked(opt)}
+                          onChange={() => toggle(opt)}
+                          className="accent-accent shrink-0"
+                        />
+                        {renderIcon && (
+                          <span className="shrink-0">{renderIcon(opt)}</span>
+                        )}
+                        <span className="truncate">{opt}</span>
+                      </label>
+                    </Fragment>
+                  );
+                })
               )}
             </div>
           </>,
@@ -314,11 +330,31 @@ export function GlobalFilters({
     setSaveOpen(false);
   }
 
+  // Archived (closed) account titles from the Zenmoney cache — used to sort the
+  // archived accounts to the bottom of the filter and group them under a divider.
+  const [archivedAccounts, setArchivedAccounts] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    getLiveAccountsFromCache().then((live) => {
+      if (cancelled || !live) return;
+      setArchivedAccounts(new Set(live.filter((a) => a.archive).map((a) => a.title)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
+
   const accounts = useMemo(() => {
     const set = new Set<string>();
     for (const t of transactions) if (t.account) set.add(t.account);
-    return Array.from(set).sort();
-  }, [transactions]);
+    // Active accounts first (alpha), archived grouped at the bottom (alpha).
+    return Array.from(set).sort((a, b) => {
+      const aa = archivedAccounts.has(a);
+      const ba = archivedAccounts.has(b);
+      if (aa !== ba) return aa ? 1 : -1;
+      return a.localeCompare(b, "ru");
+    });
+  }, [transactions, archivedAccounts]);
 
   // Parent categories each with their observed sub-categories — for the cascade
   // category filter (parent on the left, subs on the right).
@@ -562,6 +598,7 @@ export function GlobalFilters({
           renderIcon={(name) => <AccountLogo title={name} size={18} />}
           unitForms={["счёт", "счёта", "счетов"]}
           searchPlaceholder="Поиск счёта"
+          archivedSet={archivedAccounts}
         />
 
         <CategoryFilterPicker
