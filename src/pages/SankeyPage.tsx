@@ -16,6 +16,8 @@ const COLORS = {
   income: "#10B981",
   account: "#22D3EE",
   category: "#EF4444",
+  savings: "#A78BFA",
+  funding: "#F59E0B",
 };
 
 export function SankeyPage() {
@@ -41,7 +43,7 @@ export function SankeyPage() {
         <PageHeader
           icon={GitFork}
           title="Потоки денег"
-          hint="Слева — источники доходов, справа — категории расходов."
+          hint="Слева — источники доходов, справа — категории расходов, сбережения и привлечённые средства."
         />
         <GlobalFilters />
         <div className="card card-pad text-center py-12 text-muted">
@@ -56,7 +58,7 @@ export function SankeyPage() {
       <PageHeader
         icon={GitFork}
         title="Потоки денег"
-        hint="Слева — источники доходов, справа — категории расходов."
+        hint="Слева — источники доходов, справа — категории расходов, сбережения и привлечённые средства."
       />
       <GlobalFilters />
 
@@ -72,7 +74,11 @@ export function SankeyPage() {
               link={{ stroke: "rgb(var(--c-muted))", strokeOpacity: 0.15 }}
               node={({ x, y, width, height, index, payload }: {
                 x?: number; y?: number; width?: number; height?: number; index?: number;
-                payload?: { name?: string; kind?: "income" | "account" | "category"; value?: number };
+                payload?: {
+                  name?: string;
+                  kind?: "income" | "account" | "category" | "savings" | "funding";
+                  value?: number;
+                };
               }) => {
                 const xv = x ?? 0;
                 const yv = y ?? 0;
@@ -129,6 +135,18 @@ export function SankeyPage() {
             <span className="w-3 h-3 rounded" style={{ background: COLORS.category }} />
             Категории расходов
           </span>
+          {data.nodes.some((n) => n.kind === "savings") && (
+            <span className="flex items-center gap-1">
+              <span className="w-3 h-3 rounded" style={{ background: COLORS.savings }} />
+              Сбережения (доход больше трат)
+            </span>
+          )}
+          {data.nodes.some((n) => n.kind === "funding") && (
+            <span className="flex items-center gap-1">
+              <span className="w-3 h-3 rounded" style={{ background: COLORS.funding }} />
+              Привлечено со счетов (траты больше дохода)
+            </span>
+          )}
         </div>
       </div>
     </div>

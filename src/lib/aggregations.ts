@@ -885,7 +885,10 @@ export function yearOverYearMonthly(
 }
 
 export interface SankeyData {
-  nodes: { name: string; kind?: "income" | "account" | "category" }[];
+  nodes: {
+    name: string;
+    kind?: "income" | "account" | "category" | "savings" | "funding";
+  }[];
   links: { source: number; target: number; value: number }[];
 }
 
@@ -930,23 +933,48 @@ export function buildSankey(txs: Transaction[]): SankeyData {
   const finalExpense = [...expenseArr];
   if (expenseOther > 0) finalExpense.push(["Прочие траты", expenseOther]);
 
-  const nodes: { name: string; kind?: "income" | "account" | "category" }[] = [];
+  // Period balance: did income cover spending? The Sankey only tracks
+  // income/expense category flows (transfers are ignored), so the surplus
+  // (income − expense) is what was effectively SAVED this period, and a
+  // deficit is what had to be PULLED from existing balances / savings to
+  // cover the spending. Round against the same per-link rounding so the
+  // budget node stays visually balanced (in == out).
+  const inSum = finalIncome.reduce((s, e) => s + Math.round(e[1] as number), 0);
+  const outSum = finalExpense.reduce((s, e) => s + Math.round(e[1] as number), 0);
+  const net = inSum - outSum;
+
+  const nodes: SankeyData["nodes"] = [];
   const links: { source: number; target: number; value: number }[] = [];
   const POOL_NAME = "Бюджет";
 
   finalIncome.forEach(([name]) => nodes.push({ name: name as string, kind: "income" }));
+  // Deficit funding sits on the LEFT as an extra source feeding the budget.
+  let fundingIdx = -1;
+  if (net < 0) {
+    fundingIdx = nodes.length;
+    nodes.push({ name: "Из накоплений", kind: "funding" });
+  }
   const poolIdx = nodes.length;
   nodes.push({ name: POOL_NAME, kind: "account" });
+  const expenseStart = nodes.length;
   finalExpense.forEach(([name]) => nodes.push({ name: name as string, kind: "category" }));
+  // Surplus sits on the RIGHT as an extra target drawn from the budget.
+  let savingsIdx = -1;
+  if (net > 0) {
+    savingsIdx = nodes.length;
+    nodes.push({ name: "Сбережения", kind: "savings" });
+  }
 
   finalIncome.forEach((entry, i) => {
     const v = Math.round(entry[1] as number);
     if (v > 0) links.push({ source: i, target: poolIdx, value: v });
   });
+  if (fundingIdx >= 0) links.push({ source: fundingIdx, target: poolIdx, value: -net });
   finalExpense.forEach((entry, i) => {
     const v = Math.round(entry[1] as number);
-    if (v > 0) links.push({ source: poolIdx, target: poolIdx + 1 + i, value: v });
+    if (v > 0) links.push({ source: poolIdx, target: expenseStart + i, value: v });
   });
+  if (savingsIdx >= 0) links.push({ source: poolIdx, target: savingsIdx, value: net });
 
   return { nodes, links };
 }

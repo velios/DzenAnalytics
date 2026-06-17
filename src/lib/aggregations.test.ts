@@ -10,6 +10,7 @@ import {
   stackedBalanceByAccount,
   netWorthSeries,
   netWorthBasis,
+  buildSankey,
 } from "./aggregations";
 import { tx } from "../test/fixtures";
 import type { CurrencyRates } from "../types";
@@ -305,5 +306,55 @@ describe("detectDuplicates", () => {
     expect(detectDuplicates(txs, 3, new Set([sig]))).toEqual([]);
     // an unrelated signature in the set doesn't suppress real duplicates
     expect(detectDuplicates(txs, 3, new Set(["other"]))).toHaveLength(1);
+  });
+});
+
+describe("buildSankey — savings & deficit funding (issue #8)", () => {
+  const sumLinks = (
+    data: ReturnType<typeof buildSankey>,
+    pred: (n: { name: string }) => boolean,
+    side: "in" | "out"
+  ) => {
+    const idx = data.nodes.findIndex(pred);
+    return data.links
+      .filter((l) => (side === "in" ? l.target : l.source) === idx)
+      .reduce((s, l) => s + l.value, 0);
+  };
+
+  it("adds a Сбережения outflow when income exceeds expenses", () => {
+    const data = buildSankey([
+      tx({ kind: "income", category: "Зарплата", amount: 1000 }),
+      tx({ kind: "expense", category: "Еда", amount: 600 }),
+    ]);
+    const savings = data.nodes.find((n) => n.kind === "savings");
+    expect(savings?.name).toBe("Сбережения");
+    expect(data.nodes.some((n) => n.kind === "funding")).toBe(false);
+    // budget node stays balanced: 1000 in, 600 expense + 400 savings out
+    expect(sumLinks(data, (n) => n.name === "Бюджет", "in")).toBe(1000);
+    expect(sumLinks(data, (n) => n.name === "Бюджет", "out")).toBe(1000);
+    expect(sumLinks(data, (n) => n.name === "Сбережения", "in")).toBe(400);
+  });
+
+  it("adds an Из накоплений inflow when expenses exceed income", () => {
+    const data = buildSankey([
+      tx({ kind: "income", category: "Зарплата", amount: 400 }),
+      tx({ kind: "expense", category: "Еда", amount: 1000 }),
+    ]);
+    const funding = data.nodes.find((n) => n.kind === "funding");
+    expect(funding?.name).toBe("Из накоплений");
+    expect(data.nodes.some((n) => n.kind === "savings")).toBe(false);
+    // budget node stays balanced: 400 income + 600 funding in, 1000 expense out
+    expect(sumLinks(data, (n) => n.name === "Бюджет", "in")).toBe(1000);
+    expect(sumLinks(data, (n) => n.name === "Бюджет", "out")).toBe(1000);
+    expect(sumLinks(data, (n) => n.name === "Из накоплений", "out")).toBe(600);
+  });
+
+  it("adds neither node when income equals expenses", () => {
+    const data = buildSankey([
+      tx({ kind: "income", category: "Зарплата", amount: 500 }),
+      tx({ kind: "expense", category: "Еда", amount: 500 }),
+    ]);
+    expect(data.nodes.some((n) => n.kind === "savings")).toBe(false);
+    expect(data.nodes.some((n) => n.kind === "funding")).toBe(false);
   });
 });

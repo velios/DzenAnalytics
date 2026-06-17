@@ -298,6 +298,59 @@ export function CategoriesPage() {
 
   const totalAll = tree.reduce((s, n) => s + n.total, 0);
 
+  // Two-ring donut (issue #7): inner ring = categories, outer ring =
+  // their subcategories (same parent colour, stepped opacity so siblings
+  // stay distinguishable). A category's "без подкатегории" remainder gets
+  // a faint slice so the outer ring lines up angularly with the inner one.
+  const DONUT_CATS = 12;
+  const { innerRing, outerRing, hasSubs: donutHasSubs } = useMemo(() => {
+    const cats = tree.filter((n) => n.total > 0).slice(0, DONUT_CATS);
+    const inner = cats.map((n) => ({
+      name: n.name,
+      value: n.total,
+      color: resolvedCategoryColors[n.name] || COLORS[0],
+    }));
+    const outer: {
+      name: string;
+      fullName?: string;
+      parent: string;
+      value: number;
+      color: string;
+      opacity: number;
+      remainder: boolean;
+    }[] = [];
+    let anySubs = false;
+    for (const n of cats) {
+      const color = resolvedCategoryColors[n.name] || COLORS[0];
+      const posSubs = n.subs.filter((s) => s.total > 0);
+      if (posSubs.length) anySubs = true;
+      const subSum = posSubs.reduce((s, x) => s + x.total, 0);
+      posSubs.forEach((sub, idx) => {
+        outer.push({
+          name: sub.name,
+          fullName: sub.fullName,
+          parent: n.name,
+          value: sub.total,
+          color,
+          opacity: Math.max(0.5, 1 - idx * 0.14),
+          remainder: false,
+        });
+      });
+      const remainder = n.total - subSum;
+      if (remainder > 0.0001) {
+        outer.push({
+          name: posSubs.length ? `${n.name}: без подкатегории` : n.name,
+          parent: n.name,
+          value: remainder,
+          color,
+          opacity: posSubs.length ? 0.3 : 0.85,
+          remainder: true,
+        });
+      }
+    }
+    return { innerRing: inner, outerRing: outer, hasSubs: anySubs };
+  }, [tree, resolvedCategoryColors]);
+
   const flatTopGroups = useMemo(
     () => groupByCategory(filtered, "top").filter((g) => (kind === "expense" ? g.expense : g.income) > 0),
     [filtered, kind]
@@ -389,42 +442,71 @@ export function CategoriesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card card-pad lg:col-span-2">
-          <div className="font-semibold mb-3">
-            {view === "donut" ? "Доля категорий" : "Карта категорий"}
+          <div className="mb-3">
+            <div className="font-semibold">
+              {view === "donut" ? "Доля категорий" : "Карта категорий"}
+            </div>
+            {view === "donut" && donutHasSubs && (
+              <div className="text-[11px] text-muted mt-0.5">
+                Внутреннее кольцо — категории, внешнее — подкатегории. Клик по сектору — список операций.
+              </div>
+            )}
           </div>
           <div className="h-[450px]">
             {view === "donut" ? (
               <ResponsiveContainer>
                 <PieChart>
+                  {/* Inner ring — categories. */}
                   <Pie
-                    data={data.slice(0, 15)}
+                    data={innerRing}
                     dataKey="value"
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    innerRadius={80}
-                    outerRadius={160}
+                    innerRadius={50}
+                    outerRadius={96}
                     paddingAngle={1}
                     onClick={(d: { name?: string }) => d?.name && openCategory(d.name)}
                     cursor="pointer"
-                    label={({ name, percent }) =>
-                      percent && percent > 0.04 ? `${name} ${(percent * 100).toFixed(0)}%` : ""
-                    }
-                    labelLine={false}
                     // Same rationale as Treemap: Recharts' default
                     // sector-grow animation creates a momentary double-
                     // paint when filters change. Static render is plenty
                     // fast and looks calmer.
                     isAnimationActive={false}
                   >
-                    {data.slice(0, 15).map((d, i) => (
-                      <Cell
-                        key={i}
-                        fill={
-                          resolvedCategoryColors[d.name] ||
-                          COLORS[i % COLORS.length]
-                        }
-                      />
+                    {innerRing.map((d, i) => (
+                      <Cell key={i} fill={d.color} />
+                    ))}
+                  </Pie>
+                  {/* Outer ring — subcategories (+ «без подкатегории»
+                      remainder), coloured as a stepped-opacity shade of
+                      their parent category so the two rings read as one. */}
+                  <Pie
+                    data={outerRing}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={100}
+                    outerRadius={160}
+                    paddingAngle={0.5}
+                    cursor="pointer"
+                    isAnimationActive={false}
+                    onClick={(d: { name?: string }) => {
+                      const p = d as {
+                        fullName?: string;
+                        parent?: string;
+                        remainder?: boolean;
+                      };
+                      if (p?.remainder || !p?.fullName) {
+                        if (p?.parent) openCategory(p.parent);
+                      } else {
+                        openSubcategory(p.fullName);
+                      }
+                    }}
+                  >
+                    {outerRing.map((d, i) => (
+                      <Cell key={i} fill={d.color} fillOpacity={d.opacity} />
                     ))}
                   </Pie>
                   <Tooltip
