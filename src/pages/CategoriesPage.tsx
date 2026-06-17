@@ -658,8 +658,8 @@ export function CategoriesPage() {
     <div className="space-y-6">
       <PageHeader
         icon={PieChartIcon}
-        title="Разбивка по категориям"
-        hint={`${tree.length} категорий · всего ${formatMoney(totalAll, base)}. Клик по элементу — список операций.`}
+        title="Категории"
+        hint="Данные и аналитика с разбивкой по категориям и подкатегориям. Клик по элементу — список операций."
         right={
           <div className="flex flex-wrap gap-2">
             <div className="flex bg-panel2 rounded-lg p-1 border border-border">
