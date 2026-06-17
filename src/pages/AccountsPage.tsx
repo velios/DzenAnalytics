@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   LayoutGrid,
   Table as TableIcon,
+  Archive,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
@@ -80,6 +81,7 @@ export function AccountsPage() {
   const [view, setView] = useState<View>("stacked");
   const [scope, setScope] = useState<Scope>("all");
   const [accountsView, setAccountsView] = useState<AccountsView>("table");
+  const [hideArchived, setHideArchived] = useState(false);
   // Off-balance accounts (Zenmoney inBalance:false — savings/brokerage) are
   // shown only when the global setting (Настройки → Обработка) is on.
   const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
@@ -198,6 +200,11 @@ export function AccountsPage() {
   // True when at least one account carries a real (API) balance — drives the
   // headline ("Баланс" vs "Изменение") and the table's column labels.
   const hasRealBalances = accountRows.some((r) => r.balanceBase !== null);
+  // Optional «hide archived» toggle (only useful when some account is archived).
+  const hasArchived = accountRows.some((r) => r.archive);
+  const visibleRows = hideArchived
+    ? accountRows.filter((r) => !r.archive)
+    : accountRows;
   // Real current balance per account (base currency) — only in API mode. Lets
   // the stacked chart show actual balances instead of cumulative-flow-from-zero.
   const realBalancesByAccount = useMemo(() => {
@@ -645,8 +652,24 @@ export function AccountsPage() {
         <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
             <Wallet className="w-4 h-4" />
-            Счета ({accountRows.length})
+            Счета ({visibleRows.length})
           </div>
+          <div className="flex items-center gap-2 flex-wrap">
+          {hasArchived && (
+            <button
+              onClick={() => setHideArchived((v) => !v)}
+              aria-pressed={hideArchived}
+              className={`px-3 py-1.5 text-xs rounded-lg border flex items-center gap-1 ${
+                hideArchived
+                  ? "bg-accent/10 border-accent/40 text-accent"
+                  : "bg-panel2 border-border text-muted hover:text-text"
+              }`}
+              title="Скрыть/показать архивные (закрытые) счета"
+            >
+              <Archive className="w-3.5 h-3.5" />
+              {hideArchived ? "Архивные скрыты" : "Скрыть архивные"}
+            </button>
+          )}
           <div
             role="group"
             aria-label="Вид списка счетов"
@@ -673,6 +696,7 @@ export function AccountsPage() {
               Карточки
             </button>
           </div>
+          </div>
         </div>
         <div className="text-xs text-muted mb-3">
           {hasRealBalances
@@ -683,7 +707,7 @@ export function AccountsPage() {
 
         {accountsView === "cards" ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {accountRows.map((a) => {
+            {visibleRows.map((a) => {
               const isSel = selectedAccount === a.account;
               const hasReal = a.balanceBase !== null;
               // Headline = real balance when known, else the flow delta.
@@ -815,7 +839,7 @@ export function AccountsPage() {
                 </tr>
               </thead>
               <tbody>
-                {accountRows.map((a) => {
+                {visibleRows.map((a) => {
                   const isSel = selectedAccount === a.account;
                   const hasReal = a.balanceBase !== null;
                   const headline = hasReal ? a.balanceBase! : a.delta;
