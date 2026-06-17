@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer,
   PieChart,
@@ -426,6 +426,100 @@ export function CategoriesPage() {
     );
   }
 
+  // ── Outside donut labels with leader lines ────────────────────────────
+  // Recharts' own outside labels don't de-overlap, so for the crowded right
+  // side we draw our own: anchor on the ring → elbow → horizontal line out to
+  // a label, with the per-side column spread vertically so nothing collides.
+  // Needs the live pixel size, so we measure the chart box.
+  const DONUT_OUTER = 145;
+  const DONUT_INNER = 80;
+  const donutBoxRef = useRef<HTMLDivElement>(null);
+  const [donutBox, setDonutBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = donutBoxRef.current;
+    if (!el) return;
+    const measure = () => setDonutBox({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const donutLabels = useMemo(() => {
+    const { w, h } = donutBox;
+    if (!w || !h) return [];
+    const total = donutData.reduce((s, d) => s + d.value, 0);
+    if (total <= 0) return [];
+    const cx = w / 2;
+    const cy = h / 2;
+    const RAD = Math.PI / 180;
+    const MIN_PCT = 0.012; // skip slivers — a leader line to a 1% sliver is noise
+    const GAP = 16; // min vertical spacing between labels on one side
+
+    // Cumulative value BEFORE each slice (array writes — no binding reassign).
+    const starts: number[] = [];
+    donutData.forEach((_, i) => {
+      starts[i] = i === 0 ? 0 : starts[i - 1] + donutData[i - 1].value;
+    });
+    const raw = donutData
+      .map((d, i) => {
+        const frac = d.value / total;
+        const ang = ((starts[i] + d.value / 2) / total) * 360; // CCW from 3 o'clock
+        const cos = Math.cos(ang * RAD);
+        const sin = Math.sin(ang * RAD);
+        return { d, frac, cos, sin };
+      })
+      .filter((r) => r.frac >= MIN_PCT);
+
+    const sides: Record<"r" | "l", typeof raw> = { r: [], l: [] };
+    for (const r of raw) (r.cos >= 0 ? sides.r : sides.l).push(r);
+
+    const out: {
+      key: string;
+      color: string;
+      text: string;
+      ax: number;
+      ay: number;
+      mx: number;
+      labelX: number;
+      labelY: number;
+      anchor: "start" | "end";
+    }[] = [];
+
+    (["r", "l"] as const).forEach((side) => {
+      const col = sides[side]
+        .map((r) => ({
+          r,
+          ax: cx + DONUT_OUTER * r.cos,
+          ay: cy - DONUT_OUTER * r.sin,
+          y: cy - DONUT_OUTER * r.sin, // natural label y, then spread
+        }))
+        .sort((a, b) => a.y - b.y);
+      // push down overlaps, then shift the whole column up if it overflows
+      for (let i = 1; i < col.length; i++) {
+        if (col[i].y - col[i - 1].y < GAP) col[i].y = col[i - 1].y + GAP;
+      }
+      const overflow = col.length ? col[col.length - 1].y - (h - 10) : 0;
+      if (overflow > 0) col.forEach((c) => (c.y -= overflow));
+      const mx = side === "r" ? cx + DONUT_OUTER + 16 : cx - DONUT_OUTER - 16;
+      const labelX = side === "r" ? mx + 4 : mx - 4;
+      for (const c of col) {
+        out.push({
+          key: c.r.d.name,
+          color: c.r.d.color,
+          text: `${c.r.d.name} ${Math.round(c.r.frac * 100)}%`,
+          ax: c.ax,
+          ay: c.ay,
+          mx,
+          labelX,
+          labelY: c.y,
+          anchor: side === "r" ? "start" : "end",
+        });
+      }
+    });
+    return out;
+  }, [donutData, donutBox]);
+
   const flatTopGroups = useMemo(
     () => groupByCategory(filtered, "top").filter((g) => (kind === "expense" ? g.expense : g.income) > 0),
     [filtered, kind]
@@ -536,7 +630,7 @@ export function CategoriesPage() {
                 : "Карта категорий"}
             </div>
           </div>
-          <div className="h-[450px] relative">
+          <div className="h-[450px] relative" ref={donutBoxRef}>
             {view === "donut" ? (
               <>
                 {/* Centre label — category/total, sits over the ring's hole. */}
@@ -561,14 +655,11 @@ export function CategoriesPage() {
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      innerRadius={80}
-                      outerRadius={160}
+                      innerRadius={DONUT_INNER}
+                      outerRadius={DONUT_OUTER}
                       paddingAngle={1}
                       cursor="pointer"
                       onClick={(d: { name?: string }) => onDonutClick(d?.name)}
-                      label={({ name, percent }) =>
-                        percent && percent > 0.04 ? `${name} ${(percent * 100).toFixed(0)}%` : ""
-                      }
                       labelLine={false}
                       // Same rationale as Treemap: Recharts' default
                       // sector-grow animation creates a momentary double-
@@ -590,6 +681,36 @@ export function CategoriesPage() {
                     />
                   </PieChart>
                 </ResponsiveContainer>
+                {/* Leader-line labels overlay (de-overlapped per side). */}
+                {donutBox.w > 0 && (
+                  <svg
+                    className="absolute inset-0 pointer-events-none"
+                    width={donutBox.w}
+                    height={donutBox.h}
+                  >
+                    {donutLabels.map((L) => (
+                      <g key={L.key}>
+                        <polyline
+                          points={`${L.ax},${L.ay} ${L.mx},${L.labelY} ${L.labelX},${L.labelY}`}
+                          fill="none"
+                          stroke="rgb(var(--c-muted))"
+                          strokeOpacity={0.35}
+                          strokeWidth={1}
+                        />
+                        <text
+                          x={L.labelX}
+                          y={L.labelY}
+                          textAnchor={L.anchor}
+                          dominantBaseline="central"
+                          fontSize={12}
+                          fill={L.color}
+                        >
+                          {L.text}
+                        </text>
+                      </g>
+                    ))}
+                  </svg>
+                )}
               </>
             ) : (
               <ResponsiveContainer>
