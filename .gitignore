@@ -58,3 +58,8 @@ dev-logs/
 # env files
 .env
 .*.env
+
+# Internal roadmap — developer-local, not shipped in the repo.
+ROADMAP.md
+# Detailed README backup — kept locally, not part of the published repo.
+README.full.md
