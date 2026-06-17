@@ -580,7 +580,14 @@ export function CategoriesPage() {
                         <Cell key={i} fill={d.color} fillOpacity={d.opacity} />
                       ))}
                     </Pie>
-                    <Tooltip content={renderDonutTooltip} />
+                    <Tooltip
+                      content={renderDonutTooltip}
+                      // Without this the wrapper animates its position from
+                      // the chart origin (top-left) on every hover — looks
+                      // like the tooltip "flies in" from the corner.
+                      isAnimationActive={false}
+                      cursor={false}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </>
