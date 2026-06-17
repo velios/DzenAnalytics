@@ -356,13 +356,15 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([name]) => name);
-    const active = accountOptions.filter((a) => !archivedAccounts.has(a));
-    const archived = accountOptions.filter((a) => archivedAccounts.has(a));
     const groups: ComboboxGroup[] = [];
-    // Only worth a separate «frequent» shortcut when the full list is long.
-    if (accountOptions.length > 10 && top.length > 0) {
-      groups.push({ label: "Часто используемые", items: top });
-    }
+    // Only worth a separate «frequent» shortcut when the full list is long;
+    // its accounts are then excluded from «Активные»/«Архивные» so nothing
+    // is shown twice.
+    const showTop = accountOptions.length > 10 && top.length > 0;
+    const topSet = showTop ? new Set(top) : new Set<string>();
+    if (showTop) groups.push({ label: "Часто используемые", items: top });
+    const active = accountOptions.filter((a) => !archivedAccounts.has(a) && !topSet.has(a));
+    const archived = accountOptions.filter((a) => archivedAccounts.has(a) && !topSet.has(a));
     if (active.length) groups.push({ label: "Активные", items: active });
     if (archived.length) groups.push({ label: "Архивные", items: archived });
     return groups;
