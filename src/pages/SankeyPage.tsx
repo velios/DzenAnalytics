@@ -132,7 +132,16 @@ export function SankeyPage() {
             Бюджет
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded" style={{ background: COLORS.category }} />
+            {/* Category nodes are each coloured individually (Zenmoney tag /
+                deterministic), so the legend chip is multi-colour, not a single
+                red. */}
+            <span
+              className="w-3 h-3 rounded"
+              style={{
+                background:
+                  "conic-gradient(#22D3EE 0 90deg, #A78BFA 90deg 180deg, #F59E0B 180deg 270deg, #10B981 270deg 360deg)",
+              }}
+            />
             Категории расходов
           </span>
           {data.nodes.some((n) => n.kind === "savings") && (
