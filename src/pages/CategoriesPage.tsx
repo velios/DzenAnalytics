@@ -29,8 +29,6 @@ import {
   formatMoney,
   formatNum,
   formatPct,
-  toNum,
-  chartTooltipProps,
   chartGridStroke,
   chartAxisStroke,
 } from "../lib/format";
@@ -387,22 +385,17 @@ export function CategoriesPage() {
     }
   }
 
-  // Custom tooltip: category total + its subcategory breakdown (top level),
-  // or the single subcategory's share (drilled in).
-  function renderDonutTooltip(props: {
-    active?: boolean;
-    payload?: readonly { payload?: DonutDatum }[];
-  }) {
-    if (!props.active || !props.payload?.length) return null;
-    const d = props.payload[0]?.payload;
-    if (!d) return null;
-    const node = !drillCat ? catByName.get(d.name) : null;
+  // Shared tooltip box: a category's total + its subcategory breakdown.
+  // Used by the donut (top level) and the «Все категории» bar chart so both
+  // read identically.
+  function categoryBreakdownBox(name: string, value: number) {
+    const node = catByName.get(name);
     const subs = node ? node.subs.filter((s) => s.total > 0) : [];
     return (
       <div className="rounded-lg border border-border bg-panel shadow-lg px-3 py-2 text-sm max-w-[260px]">
-        <div className="font-medium">{d.name}</div>
+        <div className="font-medium">{name}</div>
         <div className="text-muted">
-          {formatMoney(d.value, base)} ({formatPct(d.value / totalAll, 1)})
+          {formatMoney(value, base)} ({formatPct(value / totalAll, 1)})
         </div>
         {subs.length > 0 && (
           <div className="mt-1.5 pt-1.5 border-t border-border space-y-0.5">
@@ -424,6 +417,40 @@ export function CategoriesPage() {
         )}
       </div>
     );
+  }
+
+  // Donut tooltip: category breakdown at the top level, or the single
+  // subcategory's share when drilled in.
+  function renderDonutTooltip(props: {
+    active?: boolean;
+    payload?: readonly { payload?: DonutDatum }[];
+  }) {
+    if (!props.active || !props.payload?.length) return null;
+    const d = props.payload[0]?.payload;
+    if (!d) return null;
+    if (drillCat) {
+      return (
+        <div className="rounded-lg border border-border bg-panel shadow-lg px-3 py-2 text-sm max-w-[260px]">
+          <div className="font-medium">{d.name}</div>
+          <div className="text-muted">
+            {formatMoney(d.value, base)} ({formatPct(d.value / totalAll, 1)})
+          </div>
+        </div>
+      );
+    }
+    return categoryBreakdownBox(d.name, d.value);
+  }
+
+  // Bar-chart tooltip — same category breakdown box, keyed off the hovered row.
+  function renderBarTooltip(props: {
+    active?: boolean;
+    payload?: readonly { payload?: { name?: string } }[];
+  }) {
+    if (!props.active || !props.payload?.length) return null;
+    const name = props.payload[0]?.payload?.name;
+    if (!name) return null;
+    const node = catByName.get(name);
+    return categoryBreakdownBox(name, node ? node.total : 0);
   }
 
   // ── Outside donut labels with leader lines ────────────────────────────
@@ -531,6 +558,65 @@ export function CategoriesPage() {
     count: g.count,
   }));
 
+  // «Все категории» stacked bars: each category bar is split into its
+  // subcategory segments (shades of the category colour, like the donut),
+  // plus a «без подкатегории» remainder. Rendered as N stacked series so the
+  // segment count can differ per row.
+  const BAR_CATS = 25;
+  const barRows = useMemo(() => {
+    return tree
+      .filter((n) => n.total > 0)
+      .slice(0, BAR_CATS)
+      .map((n) => {
+        const color = resolvedCategoryColors[n.name] || COLORS[0];
+        const posSubs = n.subs.filter((s) => s.total > 0);
+        const subSum = posSubs.reduce((s, x) => s + x.total, 0);
+        const segs = posSubs.map((sub, idx) => ({
+          name: sub.name,
+          fullName: sub.fullName as string | undefined,
+          value: sub.total,
+          color,
+          opacity: Math.max(0.45, 1 - idx * 0.13),
+        }));
+        const rem = n.total - subSum;
+        if (rem > 0.0001) {
+          segs.push({
+            name: posSubs.length ? "Без подкатегории" : n.name,
+            fullName: undefined,
+            value: rem,
+            color,
+            opacity: posSubs.length ? 0.3 : 1,
+          });
+        }
+        return { name: n.name, total: n.total, segs };
+      });
+  }, [tree, resolvedCategoryColors]);
+
+  const barMaxSegs = useMemo(
+    () => barRows.reduce((m, r) => Math.max(m, r.segs.length), 0),
+    [barRows]
+  );
+
+  const barData = useMemo(
+    () =>
+      barRows.map((r) => {
+        const o: Record<string, string | number> = { name: r.name };
+        r.segs.forEach((s, i) => {
+          o[`seg${i}`] = s.value;
+        });
+        return o;
+      }),
+    [barRows]
+  );
+
+  function openBarSeg(rowIndex: number, segIndex: number) {
+    const row = barRows[rowIndex];
+    if (!row) return;
+    const seg = row.segs[segIndex];
+    if (seg?.fullName) openSubcategory(seg.fullName);
+    else openCategory(row.name);
+  }
+
   function openCategory(name: string) {
     // When drilling into an expense category, also show refunds tagged
     // with that category — they're what shrank the total the user just
@@ -611,18 +697,20 @@ export function CategoriesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card card-pad lg:col-span-2">
-          <div className="mb-3 flex items-center gap-2">
+          {/* Fixed height so drilling in/out (which toggles the «Назад»
+              link) doesn't change the header height and nudge the chart. */}
+          <div className="mb-3 flex items-center gap-2 h-7">
             {view === "donut" && drillCat && (
               <button
                 onClick={() => setDonutCat(null)}
-                className="btn-ghost text-xs"
+                className="inline-flex items-center gap-0.5 text-xs text-accent hover:underline shrink-0"
                 title="Вернуться к категориям"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
                 Назад
               </button>
             )}
-            <div className="font-semibold">
+            <div className="font-semibold truncate">
               {view === "donut"
                 ? drillCat
                   ? `Подкатегории: ${drillCat}`
@@ -883,11 +971,14 @@ export function CategoriesPage() {
       </div>
 
       <div className="card card-pad">
-        <div className="font-semibold mb-3">Все категории</div>
+        <div className="font-semibold mb-1">Все категории</div>
+        <div className="text-[11px] text-muted mb-3">
+          Каждый бар разбит на подкатегории. Наведите — увидите разбивку.
+        </div>
         <div className="h-96">
           <ResponsiveContainer>
             <BarChart
-              data={data.slice(0, 25)}
+              data={barData}
               layout="vertical"
               margin={{ left: 100 }}
               style={{ cursor: "pointer" }}
@@ -910,35 +1001,35 @@ export function CategoriesPage() {
                 interval={0}
               />
               <Tooltip
-                {...chartTooltipProps}
-                // Bars are coloured per-category via <Cell>, so the Bar has no
-                // own fill and Recharts falls back to a dark item colour that's
-                // unreadable in dark theme. Pin the value line to the theme text
-                // colour (single series, so no per-series colour is lost).
-                itemStyle={{ color: "rgb(var(--c-text))" }}
-                formatter={(v: unknown) => formatMoney(toNum(v), base)}
+                content={renderBarTooltip}
+                isAnimationActive={false}
+                cursor={{ fill: "rgb(var(--c-panel2))", fillOpacity: 0.5 }}
+                wrapperStyle={{ zIndex: 50 }}
               />
-              <Bar
-                dataKey="value"
-                name={kind === "expense" ? "Расход" : "Доход"}
-                radius={[0, 4, 4, 0]}
-                activeBar={false}
-                cursor="pointer"
-                onClick={(d: unknown) => {
-                  const p = d as { name?: string; payload?: { name?: string } };
-                  const name = p?.name ?? p?.payload?.name;
-                  if (name) openCategory(name);
-                }}
-              >
-                {data.slice(0, 25).map((d, i) => (
-                  <Cell
-                    key={i}
-                    fill={
-                      resolvedCategoryColors[d.name] || COLORS[i % COLORS.length]
-                    }
-                  />
-                ))}
-              </Bar>
+              {/* One stacked series per subcategory slot; a row only fills the
+                  slots it actually has, so bars carry as many segments as the
+                  category has subcategories (+ remainder). */}
+              {Array.from({ length: Math.max(1, barMaxSegs) }).map((_, i) => (
+                <Bar
+                  key={i}
+                  dataKey={`seg${i}`}
+                  stackId="cat"
+                  isAnimationActive={false}
+                  cursor="pointer"
+                  onClick={(_d: unknown, index: number) => openBarSeg(index, i)}
+                >
+                  {barRows.map((r, ri) => {
+                    const seg = r.segs[i];
+                    return (
+                      <Cell
+                        key={ri}
+                        fill={seg ? seg.color : "transparent"}
+                        fillOpacity={seg ? seg.opacity : 0}
+                      />
+                    );
+                  })}
+                </Bar>
+              ))}
             </BarChart>
           </ResponsiveContainer>
         </div>
