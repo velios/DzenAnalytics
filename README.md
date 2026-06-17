@@ -73,4 +73,4 @@ React 19 · TypeScript · Vite · Tailwind.
 [MIT](LICENSE)
 
 ##
-<p align="left">DzenAnalytics - Сделано с заботой о тех, кто хочет понимать свои финансы.</p>
+**DzenAnalytics** - Сделано с заботой о тех, кто хочет понимать свои финансы.
