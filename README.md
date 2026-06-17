@@ -51,6 +51,16 @@
   npm run build    # сборка в dist/
   ```
 
+- **В Docker** — собственный хостинг одной командой. Соберёт приложение и поднимет его в nginx (по умолчанию на порту `8000`).
+
+  ```bash
+  git clone https://github.com/DEADover/DzenAnalytics
+  cd DzenAnalytics
+  docker compose -f docker/docker-compose.yaml up -d
+  # затем откройте http://localhost:8000
+  # свой порт: LISTEN_PORT=3000 docker compose -f docker/docker-compose.yaml up -d
+  ```
+
 Токен Zenmoney подключается в самом приложении: **Настройки → Данные → Дзен-мани API**.
 Нет токена? Загрузите CSV-выгрузку из Дзен-мани — всё работает офлайн.
 
