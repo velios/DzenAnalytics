@@ -122,6 +122,16 @@ export function TransactionsPage() {
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [creating, setCreating] = useState(false);
 
+  // ── Scroll-to-top FAB: shown once the user has scrolled the window
+  //    well past the first screen of the (often long) list. ─────────────
+  const [showTop, setShowTop] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > 600);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   // ── Bulk selection + edit ──────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -488,6 +498,30 @@ export function TransactionsPage() {
           onClose={() => setBulkOpen(false)}
         />
       )}
+
+      {/* Floating side buttons: scroll-to-top (when scrolled far) + quick add. */}
+      <div className="fixed bottom-6 right-6 z-30 flex flex-col items-center gap-3">
+        {showTop && (
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            className="w-11 h-11 rounded-full border border-border bg-panel shadow-xl flex items-center justify-center text-muted hover:text-accent transition-colors"
+            title="Наверх"
+            aria-label="Вернуться к началу списка"
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+        )}
+        {apiConnected && (
+          <button
+            onClick={() => setCreating(true)}
+            className="w-14 h-14 rounded-full bg-accent text-accent-fg shadow-xl flex items-center justify-center hover:opacity-90 transition-opacity"
+            title="Добавить операцию"
+            aria-label="Добавить операцию"
+          >
+            <Plus className="w-6 h-6" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
