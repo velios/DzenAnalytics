@@ -65,7 +65,7 @@ export function DuplicateExclusionsModal({ onClose }: { onClose: () => void }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="card w-full max-w-lg max-h-[85vh] flex flex-col"
+        className="card w-full max-w-2xl max-h-[85vh] flex flex-col"
         style={{ scrollbarGutter: "stable" }}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -122,11 +122,11 @@ export function DuplicateExclusionsModal({ onClose }: { onClose: () => void }) {
               <tbody>
                 {list.map((r) => (
                   <tr key={r.signature} className="border-t border-border/40">
-                    <td className="py-2 pr-2 max-w-[150px] truncate" title={r.payee || "Без получателя"}>
+                    <td className="py-2 pr-2 max-w-[240px] truncate" title={r.payee || "Без получателя"}>
                       {r.payee || "Без получателя"}
                     </td>
-                    <td className="py-2 px-2 text-muted whitespace-nowrap">{kindLabel(r.kind)}</td>
-                    <td className="py-2 px-2 max-w-[130px] truncate text-muted" title={r.category || ""}>
+                    <td className="py-2 px-2 text-muted whitespace-nowrap capitalize">{kindLabel(r.kind)}</td>
+                    <td className="py-2 px-2 max-w-[200px] truncate text-muted" title={r.category || ""}>
                       {r.category || "—"}
                     </td>
                     <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap">
