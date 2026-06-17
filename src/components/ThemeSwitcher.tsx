@@ -21,14 +21,15 @@ export function ThemeSwitcher() {
       onClick={() => setMode(isDark ? "light" : "dark")}
       title={isDark ? "Тёмная → светлая" : "Светлая → тёмная"}
       aria-label={`Тема: ${isDark ? "тёмная" : "светлая"}`}
-      className="relative inline-flex items-center w-14 h-7 shrink-0 rounded-full bg-panel2 border border-border transition-colors hover:border-accent/50"
+      className="relative inline-flex items-center w-[52px] h-7 shrink-0 rounded-full bg-panel2 border border-border transition-colors hover:border-accent/50"
     >
       {/* Sliding thumb. `top-px` (1px) centres it vertically in the 26px inner
           box (was top-0.5 = 2px, which left it flush with the bottom and
-          looked low). The transform stays pure translateX so the slide works. */}
+          looked low). translateX(22px) lands the thumb centre exactly on each
+          icon (symmetric 3px gaps), so the moon sits centred in dark mode. */}
       <span
         className="absolute top-px left-0.5 w-6 h-6 rounded-full bg-bg shadow border border-border transition-transform duration-200 ease-out"
-        style={{ transform: isDark ? "translateX(28px)" : "translateX(0)" }}
+        style={{ transform: isDark ? "translateX(22px)" : "translateX(0)" }}
       />
       {/* Sun (left) */}
       <Sun
