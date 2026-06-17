@@ -12,7 +12,7 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { ChevronRight, ChevronDown, Lock, Coffee } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronDown, Lock, Coffee } from "lucide-react";
 import clsx from "clsx";
 import { useEffect } from "react";
 import { useDataStore } from "../store/useDataStore";
@@ -298,58 +298,133 @@ export function CategoriesPage() {
 
   const totalAll = tree.reduce((s, n) => s + n.total, 0);
 
-  // Two-ring donut (issue #7): inner ring = categories, outer ring =
-  // their subcategories (same parent colour, stepped opacity so siblings
-  // stay distinguishable). A category's "без подкатегории" remainder gets
-  // a faint slice so the outer ring lines up angularly with the inner one.
-  const DONUT_CATS = 12;
-  const { innerRing, outerRing, hasSubs: donutHasSubs } = useMemo(() => {
-    const cats = tree.filter((n) => n.total > 0).slice(0, DONUT_CATS);
-    const inner = cats.map((n) => ({
-      name: n.name,
-      value: n.total,
-      color: resolvedCategoryColors[n.name] || COLORS[0],
-    }));
-    const outer: {
-      name: string;
-      fullName?: string;
-      parent: string;
-      value: number;
-      color: string;
-      opacity: number;
-      remainder: boolean;
-    }[] = [];
-    let anySubs = false;
-    for (const n of cats) {
-      const color = resolvedCategoryColors[n.name] || COLORS[0];
-      const posSubs = n.subs.filter((s) => s.total > 0);
-      if (posSubs.length) anySubs = true;
-      const subSum = posSubs.reduce((s, x) => s + x.total, 0);
-      posSubs.forEach((sub, idx) => {
-        outer.push({
-          name: sub.name,
-          fullName: sub.fullName,
-          parent: n.name,
-          value: sub.total,
-          color,
-          opacity: Math.max(0.5, 1 - idx * 0.14),
+  // Donut (issue #7): a SINGLE ring, ZenMoney-style. Top level shows
+  // categories; clicking a category that has subcategories drills INTO it —
+  // the ring becomes that category's subcategories (shades of the parent
+  // colour) with a «Назад» button. Hovering a category shows a tooltip with
+  // its total plus a per-subcategory breakdown.
+  interface DonutDatum {
+    name: string;
+    value: number;
+    color: string;
+    opacity: number;
+    fullName?: string;
+    remainder: boolean;
+    hasSubs: boolean;
+  }
+  const [donutCat, setDonutCat] = useState<string | null>(null);
+
+  const catByName = useMemo(() => {
+    const m = new Map<string, CategoryNode>();
+    for (const n of tree) m.set(n.name, n);
+    return m;
+  }, [tree]);
+
+  // The effective drill-in: null at top level, or the drilled category — but
+  // only if it still exists (filters / kind switch can drop it). Derived, so
+  // no effect/setState dance is needed when the underlying data changes.
+  const drillCat = donutCat && catByName.has(donutCat) ? donutCat : null;
+
+  const DONUT_CATS = 15;
+  const donutTop = useMemo<DonutDatum[]>(
+    () =>
+      tree
+        .filter((n) => n.total > 0)
+        .slice(0, DONUT_CATS)
+        .map((n) => ({
+          name: n.name,
+          value: n.total,
+          color: resolvedCategoryColors[n.name] || COLORS[0],
+          opacity: 1,
           remainder: false,
-        });
+          hasSubs: n.subs.some((s) => s.total > 0),
+        })),
+    [tree, resolvedCategoryColors]
+  );
+
+  const donutDrillNode = drillCat ? catByName.get(drillCat) ?? null : null;
+
+  const donutSub = useMemo<DonutDatum[]>(() => {
+    if (!donutDrillNode) return [];
+    const color = resolvedCategoryColors[donutDrillNode.name] || COLORS[0];
+    const posSubs = donutDrillNode.subs.filter((s) => s.total > 0);
+    const subSum = posSubs.reduce((s, x) => s + x.total, 0);
+    const out: DonutDatum[] = posSubs.map((sub, idx) => ({
+      name: sub.name,
+      fullName: sub.fullName,
+      value: sub.total,
+      color,
+      opacity: Math.max(0.45, 1 - idx * 0.13),
+      remainder: false,
+      hasSubs: false,
+    }));
+    const rem = donutDrillNode.total - subSum;
+    if (rem > 0.0001) {
+      out.push({
+        name: "Без подкатегории",
+        value: rem,
+        color,
+        opacity: 0.3,
+        remainder: true,
+        hasSubs: false,
       });
-      const remainder = n.total - subSum;
-      if (remainder > 0.0001) {
-        outer.push({
-          name: posSubs.length ? `${n.name}: без подкатегории` : n.name,
-          parent: n.name,
-          value: remainder,
-          color,
-          opacity: posSubs.length ? 0.3 : 0.85,
-          remainder: true,
-        });
-      }
     }
-    return { innerRing: inner, outerRing: outer, hasSubs: anySubs };
-  }, [tree, resolvedCategoryColors]);
+    return out;
+  }, [donutDrillNode, resolvedCategoryColors]);
+
+  const donutData = drillCat ? donutSub : donutTop;
+
+  function onDonutClick(name?: string) {
+    if (!name) return;
+    if (drillCat) {
+      const item = donutSub.find((s) => s.name === name);
+      if (item && !item.remainder && item.fullName) openSubcategory(item.fullName);
+      else openCategory(drillCat);
+    } else {
+      const item = donutTop.find((c) => c.name === name);
+      if (item?.hasSubs) setDonutCat(name);
+      else openCategory(name);
+    }
+  }
+
+  // Custom tooltip: category total + its subcategory breakdown (top level),
+  // or the single subcategory's share (drilled in).
+  function renderDonutTooltip(props: {
+    active?: boolean;
+    payload?: readonly { payload?: DonutDatum }[];
+  }) {
+    if (!props.active || !props.payload?.length) return null;
+    const d = props.payload[0]?.payload;
+    if (!d) return null;
+    const node = !drillCat ? catByName.get(d.name) : null;
+    const subs = node ? node.subs.filter((s) => s.total > 0) : [];
+    return (
+      <div className="rounded-lg border border-border bg-panel shadow-lg px-3 py-2 text-sm max-w-[260px]">
+        <div className="font-medium">{d.name}</div>
+        <div className="text-muted">
+          {formatMoney(d.value, base)} ({formatPct(d.value / totalAll, 1)})
+        </div>
+        {subs.length > 0 && (
+          <div className="mt-1.5 pt-1.5 border-t border-border space-y-0.5">
+            {subs.slice(0, 8).map((s) => (
+              <div
+                key={s.fullName}
+                className="flex items-center justify-between gap-3 text-xs text-muted"
+              >
+                <span className="truncate">{s.name}</span>
+                <span className="tabular-nums shrink-0">
+                  {formatMoney(s.total, base)} ({formatPct(s.total / node!.total, 0)})
+                </span>
+              </div>
+            ))}
+            {subs.length > 8 && (
+              <div className="text-xs text-muted">…ещё {subs.length - 8}</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const flatTopGroups = useMemo(
     () => groupByCategory(filtered, "top").filter((g) => (kind === "expense" ? g.expense : g.income) > 0),
@@ -442,85 +517,73 @@ export function CategoriesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card card-pad lg:col-span-2">
-          <div className="mb-3">
-            <div className="font-semibold">
-              {view === "donut" ? "Доля категорий" : "Карта категорий"}
-            </div>
-            {view === "donut" && donutHasSubs && (
-              <div className="text-[11px] text-muted mt-0.5">
-                Внутреннее кольцо — категории, внешнее — подкатегории. Клик по сектору — список операций.
-              </div>
+          <div className="mb-3 flex items-center gap-2">
+            {view === "donut" && drillCat && (
+              <button
+                onClick={() => setDonutCat(null)}
+                className="btn-ghost text-xs"
+                title="Вернуться к категориям"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Назад
+              </button>
             )}
+            <div className="font-semibold">
+              {view === "donut"
+                ? drillCat
+                  ? `Подкатегории: ${drillCat}`
+                  : "Доля категорий"
+                : "Карта категорий"}
+            </div>
           </div>
-          <div className="h-[450px]">
+          <div className="h-[450px] relative">
             {view === "donut" ? (
-              <ResponsiveContainer>
-                <PieChart>
-                  {/* Inner ring — categories. */}
-                  <Pie
-                    data={innerRing}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={96}
-                    paddingAngle={1}
-                    onClick={(d: { name?: string }) => d?.name && openCategory(d.name)}
-                    cursor="pointer"
-                    // Same rationale as Treemap: Recharts' default
-                    // sector-grow animation creates a momentary double-
-                    // paint when filters change. Static render is plenty
-                    // fast and looks calmer.
-                    isAnimationActive={false}
-                  >
-                    {innerRing.map((d, i) => (
-                      <Cell key={i} fill={d.color} />
-                    ))}
-                  </Pie>
-                  {/* Outer ring — subcategories (+ «без подкатегории»
-                      remainder), coloured as a stepped-opacity shade of
-                      their parent category so the two rings read as one. */}
-                  <Pie
-                    data={outerRing}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={100}
-                    outerRadius={160}
-                    paddingAngle={0.5}
-                    cursor="pointer"
-                    isAnimationActive={false}
-                    onClick={(d: { name?: string }) => {
-                      const p = d as {
-                        fullName?: string;
-                        parent?: string;
-                        remainder?: boolean;
-                      };
-                      if (p?.remainder || !p?.fullName) {
-                        if (p?.parent) openCategory(p.parent);
-                      } else {
-                        openSubcategory(p.fullName);
+              <>
+                {/* Centre label — category/total, sits over the ring's hole. */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-center px-6">
+                    <div className="text-xs text-muted truncate max-w-[150px]">
+                      {drillCat ?? (kind === "expense" ? "Расходы" : "Доходы")}
+                    </div>
+                    <div className="font-semibold tabular-nums">
+                      {formatMoney(
+                        drillCat ? donutDrillNode?.total ?? 0 : totalAll,
+                        base
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={donutData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={160}
+                      paddingAngle={1}
+                      cursor="pointer"
+                      onClick={(d: { name?: string }) => onDonutClick(d?.name)}
+                      label={({ name, percent }) =>
+                        percent && percent > 0.04 ? `${name} ${(percent * 100).toFixed(0)}%` : ""
                       }
-                    }}
-                  >
-                    {outerRing.map((d, i) => (
-                      <Cell key={i} fill={d.color} fillOpacity={d.opacity} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    {...chartTooltipProps}
-                    formatter={(v: unknown, _n: unknown, p: { payload?: { name?: string } }) => {
-                      const n = toNum(v);
-                      return [
-                        `${formatMoney(n, base)} (${formatPct(n / totalAll, 1)})`,
-                        p.payload?.name ?? "",
-                      ];
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+                      labelLine={false}
+                      // Same rationale as Treemap: Recharts' default
+                      // sector-grow animation creates a momentary double-
+                      // paint when filters change. Static render is plenty
+                      // fast and looks calmer.
+                      isAnimationActive={false}
+                    >
+                      {donutData.map((d, i) => (
+                        <Cell key={i} fill={d.color} fillOpacity={d.opacity} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={renderDonutTooltip} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </>
             ) : (
               <ResponsiveContainer>
                 <Treemap
