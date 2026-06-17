@@ -56,6 +56,20 @@
 
 React 19 · TypeScript · Vite · Tailwind. Подробный разбор возможностей — в разделе **«Справка»** внутри приложения.
 
+## ❤️ Отблагодарить автора
+
+Проект делается с любовью в свободное время и остаётся бесплатным. Если он оказался полезным — можно сказать спасибо чаевыми (отсканируйте QR или нажмите на него):
+
+<p align="center">
+  <a href="https://pay.cloudtips.ru/p/bbde8948">
+    <img src="docs/assets/donate-qr.png" alt="Отблагодарить автора через CloudTips" width="200" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://pay.cloudtips.ru/p/bbde8948"><b>pay.cloudtips.ru/p/bbde8948</b></a>
+</p>
+
 ## Лицензия
 
 [MIT](LICENSE). Сделано с заботой о тех, кто хочет понимать свои финансы.

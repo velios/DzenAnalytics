@@ -308,6 +308,17 @@ function App() {
           >
             Что нового
           </button>
+          <span className="text-border">·</span>
+          <a
+            href="https://pay.cloudtips.ru/p/bbde8948"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 hover:text-accent transition-colors"
+            title="Поддержать автора чаевыми"
+          >
+            <span aria-hidden>❤️</span>
+            Отблагодарить автора
+          </a>
         </div>
       </footer>
       <TransactionsDrawer />
