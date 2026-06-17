@@ -12,9 +12,10 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { ChevronRight, ChevronLeft, ChevronDown, Lock, Coffee } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronDown, Lock, Coffee, Maximize2, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useDataStore } from "../store/useDataStore";
 import { useThemeStore } from "../store/useThemeStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
@@ -22,7 +23,6 @@ import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
-import { groupByCategory } from "../lib/aggregations";
 import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
 import { colorForCategory } from "../lib/categoryColor";
 import {
@@ -66,38 +66,117 @@ function truncateToWidth(text: string, maxChars: number): string {
   return text.slice(0, Math.max(1, maxChars - 1)) + "…";
 }
 
-interface TreemapCellProps {
+/** Mix a hex colour toward `target` by `t` (0..1). Used to derive opaque
+ *  subcategory shades from the parent category colour (so white labels stay
+ *  readable, unlike a low fill-opacity). */
+function mixHex(hex: string, target: string, t: number): string {
+  const parse = (h: string) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(h);
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const a = parse(hex);
+  const b = parse(target);
+  if (!a || !b) return hex;
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `#${((1 << 24) + (c[0] << 16) + (c[1] << 8) + c[2]).toString(16).slice(1)}`;
+}
+
+const TREEMAP_CATS = 24;
+
+interface TreemapLeaf {
+  name: string;
+  cat: string;
+  fullName?: string;
+  value: number;
+  color: string;
+  // Recharts' TreemapDataType requires an index signature.
+  [key: string]: unknown;
+}
+interface TreemapDatum extends TreemapLeaf {
+  children?: TreemapLeaf[];
+}
+
+/** Build one nested Treemap node from a category: a leaf when it has no
+ *  subcategories, otherwise a container whose children are its subcategory
+ *  cells (opaque shades of the parent colour) plus a «без подкатегории»
+ *  remainder. Module-level so the data memo stays trivially preservable. */
+function buildTreemapNode(n: CategoryNode, color: string): TreemapDatum {
+  const posSubs = n.subs.filter((s) => s.total > 0);
+  if (!posSubs.length) return { name: n.name, cat: n.name, value: n.total, color };
+  const subSum = posSubs.reduce((s, x) => s + x.total, 0);
+  const children: TreemapLeaf[] = posSubs.map((sub, idx) => ({
+    name: sub.name,
+    cat: n.name,
+    fullName: sub.fullName,
+    value: sub.total,
+    color: mixHex(color, "#111827", Math.min(0.5, idx * 0.12)),
+  }));
+  const rem = n.total - subSum;
+  if (rem > 0.0001) {
+    children.push({
+      name: "Без подкатегории",
+      cat: n.name,
+      value: rem,
+      color: mixHex(color, "#9ca3af", 0.55),
+    });
+  }
+  return { name: n.name, cat: n.name, value: n.total, color, children };
+}
+
+/** A computed Treemap node (Recharts spreads the data fields onto it). */
+interface TreemapNodeView {
   x?: number;
   y?: number;
   width?: number;
   height?: number;
+  depth?: number;
   index?: number;
   name?: string;
   value?: number;
-  base: string;
-  colors: string[];
-  categoryColors?: Record<string, string | null>;
-  theme: "light" | "dark";
+  color?: string;
+  cat?: string;
+  fullName?: string;
+  children?: unknown;
 }
 
-function TreemapCell(props: TreemapCellProps) {
-  const {
-    x = 0,
-    y = 0,
-    width = 0,
-    height = 0,
-    index = 0,
-    name = "",
-    value = 0,
-    base,
-    colors,
-    categoryColors,
-    theme,
-  } = props;
+function TreemapCell({
+  node,
+  base,
+  theme,
+}: {
+  node: TreemapNodeView;
+  base: string;
+  theme: "light" | "dark";
+}) {
+  const x = node.x ?? 0;
+  const y = node.y ?? 0;
+  const width = node.width ?? 0;
+  const height = node.height ?? 0;
+  const name = node.name ?? "";
+  const value = node.value ?? 0;
   if (width < 1 || height < 1) return <g />;
-  // Prefer the category's own colour from Zenmoney; fall back to the palette.
-  const fill =
-    (categoryColors && categoryColors[name]) || colors[index % colors.length];
+
+  // A node with children is a CATEGORY container: its subcategory cells tile
+  // it completely, so we only draw a thicker frame to group them visually.
+  const kids = node.children;
+  if (Array.isArray(kids) && kids.length > 0) {
+    return (
+      <rect
+        x={Math.round(x)}
+        y={Math.round(y)}
+        width={Math.round(width)}
+        height={Math.round(height)}
+        fill="none"
+        stroke="rgb(var(--c-bg))"
+        strokeWidth={3.5}
+      />
+    );
+  }
+
+  // Leaf cell — a subcategory, or a category without subcategories.
+  const fill = node.color || "#22D3EE";
   const textColor = readableTextOn(fill, theme);
   const subColor =
     textColor === "#FFFFFF" ? "rgba(255,255,255,0.78)" : "rgba(11,17,32,0.72)";
@@ -453,6 +532,62 @@ export function CategoriesPage() {
     return categoryBreakdownBox(name, node ? node.total : 0);
   }
 
+  // Treemap tooltip — resolves the hovered cell to its CATEGORY and shows the
+  // same breakdown box as the donut/bars (a subcategory cell carries `cat`).
+  function renderTreemapTooltip(props: {
+    active?: boolean;
+    payload?: readonly { payload?: { cat?: string; name?: string } }[];
+  }) {
+    if (!props.active || !props.payload?.length) return null;
+    const p = props.payload[0]?.payload;
+    const cat = p?.cat || p?.name;
+    if (!cat) return null;
+    const node = catByName.get(cat);
+    return categoryBreakdownBox(cat, node ? node.total : 0);
+  }
+
+  // Fullscreen treemap (the «Карта категорий» can be cramped in the card).
+  const [treemapFull, setTreemapFull] = useState(false);
+  useEffect(() => {
+    if (!treemapFull) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTreemapFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [treemapFull]);
+
+  function onTreemapClick(node: { fullName?: string; cat?: string; name?: string } | undefined) {
+    if (node?.fullName) openSubcategory(node.fullName);
+    else if (node?.cat) openCategory(node.cat);
+    else if (node?.name) openCategory(node.name);
+  }
+
+  function renderTreemap() {
+    return (
+      <ResponsiveContainer>
+        <Treemap
+          data={treemapData}
+          dataKey="value"
+          stroke="rgb(var(--c-bg))"
+          isAnimationActive={false}
+          onClick={(node: { fullName?: string; cat?: string; name?: string }) =>
+            onTreemapClick(node)
+          }
+          content={(node: TreemapNodeView) => (
+            <TreemapCell node={node} base={base} theme={theme} />
+          )}
+        >
+          <Tooltip
+            content={renderTreemapTooltip}
+            isAnimationActive={false}
+            wrapperStyle={{ zIndex: 50 }}
+          />
+        </Treemap>
+      </ResponsiveContainer>
+    );
+  }
+
   // ── Outside donut labels with leader lines ────────────────────────────
   // Recharts' own outside labels don't de-overlap, so for the crowded right
   // side we draw our own: anchor on the ring → elbow → horizontal line out to
@@ -547,16 +682,15 @@ export function CategoriesPage() {
     return out;
   }, [donutData, donutBox]);
 
-  const flatTopGroups = useMemo(
-    () => groupByCategory(filtered, "top").filter((g) => (kind === "expense" ? g.expense : g.income) > 0),
-    [filtered, kind]
-  );
-
-  const data = flatTopGroups.map((g) => ({
-    name: g.category,
-    value: kind === "expense" ? g.expense : g.income,
-    count: g.count,
-  }));
+  // Treemap «Карта категорий»: nested — categories subdivided into their
+  // subcategory cells (opaque shades of the parent colour) + a «без
+  // подкатегории» remainder. Categories without subs stay single cells.
+  // Plain computation (no useMemo) — the React Compiler auto-memoizes it, and
+  // a manual memo around the helper call can't be statically preserved.
+  const treemapData = tree
+    .filter((n) => n.total > 0)
+    .slice(0, TREEMAP_CATS)
+    .map((n) => buildTreemapNode(n, resolvedCategoryColors[n.name] || COLORS[0]));
 
   // «Все категории» stacked bars: each category bar is split into its
   // subcategory segments (shades of the category colour, like the donut),
@@ -717,6 +851,16 @@ export function CategoriesPage() {
                   : "Доля категорий"
                 : "Карта категорий"}
             </div>
+            {view === "treemap" && (
+              <button
+                onClick={() => setTreemapFull(true)}
+                className="ml-auto inline-flex items-center gap-1 text-xs text-muted hover:text-accent shrink-0"
+                title="Открыть на весь экран"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                На весь экран
+              </button>
+            )}
           </div>
           <div className="h-[450px] relative" ref={donutBoxRef}>
             {view === "donut" ? (
@@ -805,37 +949,7 @@ export function CategoriesPage() {
                 )}
               </>
             ) : (
-              <ResponsiveContainer>
-                <Treemap
-                  data={data.slice(0, 30)}
-                  dataKey="value"
-                  stroke="rgb(var(--c-bg))"
-                  fill="#22D3EE"
-                  // Recharts' default cell animation re-paints SVG between
-                  // frames; when intermediate paints overlap a freshly-
-                  // rendered cell at the same place, glyphs can briefly
-                  // double-stamp. Static layout is plenty fast here.
-                  isAnimationActive={false}
-                  onClick={(d: { name?: string }) => d?.name && openCategory(d.name)}
-                  content={(props: {
-                    x?: number;
-                    y?: number;
-                    width?: number;
-                    height?: number;
-                    index?: number;
-                    name?: string;
-                    value?: number;
-                  }) => (
-                    <TreemapCell
-                      {...props}
-                      base={base}
-                      colors={COLORS}
-                      categoryColors={resolvedCategoryColors}
-                      theme={theme}
-                    />
-                  )}
-                />
-              </ResponsiveContainer>
+              renderTreemap()
             )}
           </div>
         </div>
@@ -1036,6 +1150,30 @@ export function CategoriesPage() {
       </div>
 
       <CategoryRequiredEditor />
+
+      {treemapFull &&
+        createPortal(
+          <div className="fixed inset-0 z-[90] bg-panel flex flex-col p-4">
+            <div className="flex items-center justify-between mb-3 shrink-0">
+              <div className="font-semibold">
+                Карта категорий
+                <span className="text-muted font-normal text-sm ml-2">
+                  {kind === "expense" ? "расходы" : "доходы"} · {formatMoney(totalAll, base)}
+                </span>
+              </div>
+              <button
+                onClick={() => setTreemapFull(false)}
+                className="btn-ghost text-sm"
+                title="Закрыть (Esc)"
+              >
+                <X className="w-4 h-4" />
+                Закрыть
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">{renderTreemap()}</div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
