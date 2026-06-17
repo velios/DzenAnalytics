@@ -825,16 +825,18 @@ export function AccountsPage() {
         ) : (
           <div className="overflow-x-auto">
             {/* table-fixed + colgroup keep column widths stable, so changing
-                the filter (different rows/content) never reflows the columns. */}
-            <table className="w-full min-w-[760px] text-sm table-fixed">
+                the filter (different rows/content) never reflows the columns.
+                Numeric columns are sized to fit million-ruble values so nothing
+                overflows its cell (which would force a horizontal scrollbar). */}
+            <table className="w-full min-w-[960px] text-sm table-fixed">
               <colgroup>
                 <col />
-                <col style={{ width: 116 }} />
-                <col style={{ width: 104 }} />
-                <col style={{ width: 116 }} />
-                <col style={{ width: 104 }} />
-                <col style={{ width: 60 }} />
-                <col style={{ width: 96 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 132 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 64 }} />
+                <col style={{ width: 140 }} />
               </colgroup>
               <thead>
                 <tr className="text-xs text-muted text-left">
