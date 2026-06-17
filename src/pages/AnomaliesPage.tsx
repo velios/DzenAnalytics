@@ -2,8 +2,11 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Zap, TrendingUp } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
+import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { detectAnomalies, detectMonthSpikes, type Anomaly, type MonthSpike } from "../lib/aggregations";
 import { SortableTable, type Column } from "../components/SortableTable";
+import { GlobalFilters } from "../components/GlobalFilters";
 import { formatMoney, formatDate, monthLabel } from "../lib/format";
 import { affectsExpense } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
@@ -12,12 +15,42 @@ export function AnomaliesPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
   const showDrill = useDrillStore((s) => s.show);
+  const filters = useFiltersStore();
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
   const [tab, setTab] = useState<"transactions" | "spikes">("transactions");
   const [threshold, setThreshold] = useState(2.5);
 
-  const anomalies = useMemo(() => detectAnomalies(transactions, threshold), [transactions, threshold]);
-  const spikes = useMemo(() => detectMonthSpikes(transactions), [transactions]);
+  // Honour the global filters (account / currency / category / dates / search).
+  // Outliers run on the fully-filtered set.
+  const filtered = useMemo(
+    () => applyFilters(transactions, filters, monthStartDay),
+    [transactions, filters, monthStartDay]
+  );
+  // Month-spikes need trailing months to form a baseline, so the date filter
+  // must NOT shrink their input — apply only the non-date filters, then scope
+  // the SHOWN spikes to the selected window below.
+  const spikesInput = useMemo(
+    () => applyFilters(transactions, { ...filters, preset: "all", from: null, to: null }, monthStartDay),
+    [transactions, filters, monthStartDay]
+  );
+
+  const anomalies = useMemo(() => detectAnomalies(filtered, threshold), [filtered, threshold]);
+
+  const allSpikes = useMemo(() => detectMonthSpikes(spikesInput), [spikesInput]);
+  const spikes = useMemo(() => {
+    const dateActive = filters.preset !== "all" || !!filters.from || !!filters.to;
+    if (!dateActive) return allSpikes;
+    if (filtered.length === 0) return [];
+    let minYM = "9999-99";
+    let maxYM = "0000-00";
+    for (const t of filtered) {
+      const ym = t.date.slice(0, 7);
+      if (ym < minYM) minYM = ym;
+      if (ym > maxYM) maxYM = ym;
+    }
+    return allSpikes.filter((s) => s.ym >= minYM && s.ym <= maxYM);
+  }, [allSpikes, filtered, filters.preset, filters.from, filters.to]);
 
   if (transactions.length === 0) return <EmptyState />;
 
@@ -30,7 +63,7 @@ export function AnomaliesPage() {
   function openCategoryMonth(cat: string, ym: string) {
     // Include refunds for the same category — they offset the spike
     // total shown in the row, so they belong in the drilldown list.
-    const txs = transactions.filter(
+    const txs = spikesInput.filter(
       (t) => affectsExpense(t.kind) && t.category === cat && t.date.startsWith(ym)
     );
     showDrill(`${cat} · ${monthLabel(ym)}`, txs, "Всплеск трат");
@@ -48,8 +81,9 @@ export function AnomaliesPage() {
             Аномалии
           </h1>
           <p className="text-muted text-sm mt-1">
-            Авто-детект необычных операций и резких всплесков по категориям. Без учёта глобальных
-            фильтров.
+            Авто-детект необычных операций и резких всплесков по категориям. Учитывает фильтры по
+            счетам, валютам, категориям и датам. Всплески считают базу по всей истории (с учётом
+            фильтров, кроме дат).
           </p>
         </div>
         {tab === "transactions" && (
@@ -68,6 +102,8 @@ export function AnomaliesPage() {
           </div>
         )}
       </div>
+
+      <GlobalFilters />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="card card-pad">
