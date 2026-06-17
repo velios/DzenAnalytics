@@ -91,6 +91,9 @@ interface TreemapLeaf {
   fullName?: string;
   value: number;
   color: string;
+  /** "sub" = a subcategory, "rem" = the category's «без подкатегории» part,
+   *  "cat" = a category that has no subcategories at all. Drives the tooltip. */
+  level: "sub" | "rem" | "cat";
   // Recharts' TreemapDataType requires an index signature.
   [key: string]: unknown;
 }
@@ -104,7 +107,9 @@ interface TreemapDatum extends TreemapLeaf {
  *  remainder. Module-level so the data memo stays trivially preservable. */
 function buildTreemapNode(n: CategoryNode, color: string): TreemapDatum {
   const posSubs = n.subs.filter((s) => s.total > 0);
-  if (!posSubs.length) return { name: n.name, cat: n.name, value: n.total, color };
+  if (!posSubs.length) {
+    return { name: n.name, cat: n.name, value: n.total, color, level: "cat" };
+  }
   const subSum = posSubs.reduce((s, x) => s + x.total, 0);
   const children: TreemapLeaf[] = posSubs.map((sub, idx) => ({
     name: sub.name,
@@ -112,17 +117,21 @@ function buildTreemapNode(n: CategoryNode, color: string): TreemapDatum {
     fullName: sub.fullName,
     value: sub.total,
     color: mixHex(color, "#111827", Math.min(0.5, idx * 0.12)),
+    level: "sub",
   }));
   const rem = n.total - subSum;
   if (rem > 0.0001) {
+    // The «no subcategory» slice is spending tagged to the category itself —
+    // label it with the CATEGORY name (not «без подкатегории»).
     children.push({
-      name: "Без подкатегории",
+      name: n.name,
       cat: n.name,
       value: rem,
       color: mixHex(color, "#9ca3af", 0.55),
+      level: "rem",
     });
   }
-  return { name: n.name, cat: n.name, value: n.total, color, children };
+  return { name: n.name, cat: n.name, value: n.total, color, level: "cat", children };
 }
 
 /** A computed Treemap node (Recharts spreads the data fields onto it). */
@@ -240,7 +249,6 @@ function TreemapCell({
 
   return (
     <g style={{ cursor: "pointer" }}>
-      <title>{`${name} · ${amountText}`}</title>
       <rect
         x={rx}
         y={ry}
@@ -532,18 +540,30 @@ export function CategoriesPage() {
     return categoryBreakdownBox(name, node ? node.total : 0);
   }
 
-  // Treemap tooltip — resolves the hovered cell to its CATEGORY and shows the
-  // same breakdown box as the donut/bars (a subcategory cell carries `cat`).
+  // Treemap tooltip — info about the HOVERED cell itself: a subcategory shows
+  // its share of the category; a category-level cell its share of the total.
   function renderTreemapTooltip(props: {
     active?: boolean;
-    payload?: readonly { payload?: { cat?: string; name?: string } }[];
+    payload?: readonly {
+      payload?: { name?: string; cat?: string; value?: number; level?: string };
+    }[];
   }) {
     if (!props.active || !props.payload?.length) return null;
     const p = props.payload[0]?.payload;
-    const cat = p?.cat || p?.name;
-    if (!cat) return null;
-    const node = catByName.get(cat);
-    return categoryBreakdownBox(cat, node ? node.total : 0);
+    if (!p?.name) return null;
+    const value = p.value ?? 0;
+    const ofCategory = p.level === "sub" || p.level === "rem";
+    const denom = ofCategory ? catByName.get(p.cat ?? "")?.total ?? 0 : totalAll;
+    const share = denom ? value / denom : 0;
+    return (
+      <div className="rounded-lg border border-border bg-panel shadow-lg px-3 py-2 text-sm max-w-[260px]">
+        <div className="font-medium">{p.name}</div>
+        <div className="text-muted">
+          {formatMoney(value, base)} ({formatPct(share, 1)}
+          {ofCategory && p.level === "sub" ? ` от «${p.cat}»` : ""})
+        </div>
+      </div>
+    );
   }
 
   // Fullscreen treemap (the «Карта категорий» can be cramped in the card).
