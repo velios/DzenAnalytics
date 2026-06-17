@@ -18,7 +18,7 @@ import {
   newDraftId,
   type DraftFields,
 } from "../lib/zenmoneyPush";
-import { Combobox } from "./Combobox";
+import { Combobox, type ComboboxGroup } from "./Combobox";
 import { CategoryCascadePicker, type CategoryNode } from "./CategoryCascadePicker";
 import { DateField } from "./DateField";
 import type { ZenTag } from "../lib/zenmoney";
@@ -273,11 +273,13 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
     new Map()
   );
   const [defaultAccount, setDefaultAccount] = useState<string | null>(null);
+  const [archivedAccounts, setArchivedAccounts] = useState<Set<string>>(new Set());
   useEffect(() => {
     let cancelled = false;
     getLiveAccountsFromCache().then((list) => {
       if (cancelled || !list) return;
       setAccountCurrency(new Map(list.map((a) => [a.title, a.currency])));
+      setArchivedAccounts(new Set(list.filter((a) => a.archive).map((a) => a.title)));
       // Remember the first non-archived account so create mode can seed
       // the account fields (applied in a dedicated effect below).
       const firstActive = list.find((a) => !a.archive) ?? list[0];
@@ -337,6 +339,34 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
     for (const title of accountCurrency.keys()) set.add(title);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
   }, [allTransactions, accountCurrency]);
+
+  // Grouped account list for the pickers: «Часто используемые» (top-10 by how
+  // many transactions touch the account), then «Активные» / «Архивные» (archive
+  // flag from the Zenmoney cache). Falls back to the flat list for short lists.
+  const accountGroups = useMemo<ComboboxGroup[]>(() => {
+    const counts = new Map<string, number>();
+    for (const t of allTransactions) {
+      const accs = new Set(
+        [t.account, t.outcomeAccount, t.incomeAccount].filter(Boolean)
+      );
+      for (const a of accs) counts.set(a, (counts.get(a) ?? 0) + 1);
+    }
+    const top = [...counts.entries()]
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name]) => name);
+    const active = accountOptions.filter((a) => !archivedAccounts.has(a));
+    const archived = accountOptions.filter((a) => archivedAccounts.has(a));
+    const groups: ComboboxGroup[] = [];
+    // Only worth a separate «frequent» shortcut when the full list is long.
+    if (accountOptions.length > 10 && top.length > 0) {
+      groups.push({ label: "Часто используемые", items: top });
+    }
+    if (active.length) groups.push({ label: "Активные", items: active });
+    if (archived.length) groups.push({ label: "Архивные", items: archived });
+    return groups;
+  }, [allTransactions, accountOptions, archivedAccounts]);
 
   const [date, setDate] = useState(tx.date);
   // Operation time-of-day. New draft → seed with the current local time;
@@ -775,6 +805,7 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
                 <Combobox
                   value={outAcc}
                   options={accountOptions}
+                  groups={accountGroups}
                   onChange={setOutAcc}
                   placeholder="Источник"
                   maxHeight={DROPDOWN_MAX}
@@ -784,6 +815,7 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
                 <Combobox
                   value={inAcc}
                   options={accountOptions}
+                  groups={accountGroups}
                   onChange={setInAcc}
                   placeholder="Получатель"
                   maxHeight={DROPDOWN_MAX}
@@ -795,6 +827,7 @@ export function EditTransactionModal({ tx: txProp, onClose }: Props) {
               <Combobox
                 value={account}
                 options={accountOptions}
+                groups={accountGroups}
                 onChange={setAccount}
                 placeholder="Введите или выберите из списка"
                 maxHeight={DROPDOWN_MAX}
