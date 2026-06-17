@@ -20,11 +20,12 @@ interface Props {
 
 /**
  * Single full-width category field with a two-column dropdown: parent
- * categories on the left, the hovered/selected parent's sub-categories on the
- * right. Picking a leaf category (no subs) commits immediately; a category with
- * subs opens them to the right, where «Без подкатегории» picks the parent
- * alone. This keeps the first level to real top-level categories only and makes
- * a category + sub-category an unambiguous single choice (see issue #12).
+ * categories on the left, the active parent's sub-categories on the right.
+ * Picking a leaf category (no subs) commits immediately; clicking a category
+ * that HAS sub-categories toggles them open/closed on the right (explicit
+ * click, no hover), where «Без подкатегории» picks the parent alone. This keeps
+ * the first level to real top-level categories only and makes a category +
+ * sub-category an unambiguous single choice (see issue #12).
  */
 export function CategoryCascadePicker({
   category,
@@ -136,36 +137,32 @@ export function CategoryCascadePicker({
                 filtered.map((c) => {
                   const isSel = c.name === category;
                   const isActive = c.name === activeParent;
+                  const hasSubs = c.subs.length > 0;
                   return (
-                    <div
+                    <button
                       key={c.name}
-                      onMouseEnter={() => c.subs.length > 0 && setActiveParent(c.name)}
-                      className={`flex items-center ${isActive ? "bg-panel2" : ""}`}
+                      type="button"
+                      // A category WITH sub-categories toggles them open/closed
+                      // on click (explicit — no hover); a leaf category commits.
+                      onClick={() =>
+                        hasSubs
+                          ? setActiveParent(isActive ? null : c.name)
+                          : commit(c.name, "")
+                      }
+                      aria-expanded={hasSubs ? isActive : undefined}
+                      className={`w-full text-left px-2.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 ${
+                        isActive ? "bg-panel2" : ""
+                      } ${isSel ? "text-accent" : ""}`}
                     >
-                      {/* Click the category itself to pick it (no sub-category). */}
-                      <button
-                        type="button"
-                        onClick={() => commit(c.name, "")}
-                        className={`flex-1 min-w-0 text-left px-2.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 ${
-                          isSel ? "text-accent" : ""
-                        }`}
-                      >
-                        <CategoryDot category={c.name} size="w-4 h-4" />
-                        <span className="truncate">{c.name}</span>
-                      </button>
-                      {/* Separate target opens sub-categories without committing
-                          (so touch users, who can't hover, can still reach them). */}
-                      {c.subs.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setActiveParent(c.name)}
-                          aria-label={`Подкатегории: ${c.name}`}
-                          className="px-1.5 py-1.5 shrink-0 text-muted hover:text-text hover:bg-panel2"
-                        >
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+                      <CategoryDot category={c.name} size="w-4 h-4" />
+                      <span className="truncate flex-1">{c.name}</span>
+                      {hasSubs &&
+                        (isActive ? (
+                          <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted" />
+                        ))}
+                    </button>
                   );
                 })
               )}
@@ -174,6 +171,17 @@ export function CategoryCascadePicker({
             <div className="w-1/2 overflow-y-auto">
               {active && active.subs.length > 0 ? (
                 <>
+                  {/* Pick the parent category itself (no sub-category). */}
+                  <button
+                    type="button"
+                    onClick={() => commit(active.name, "")}
+                    className={`w-full text-left px-2.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 ${
+                      category === active.name && !subcategory ? "text-accent" : "text-muted"
+                    }`}
+                  >
+                    <CategoryDot category={active.name} size="w-4 h-4" />
+                    <span className="truncate">Без подкатегории</span>
+                  </button>
                   {activeSubs.map((s) => {
                     const isSel = category === active.name && subcategory === s;
                     return (
