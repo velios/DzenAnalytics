@@ -11,9 +11,55 @@ import {
   netWorthSeries,
   netWorthBasis,
   buildSankey,
+  buildObligatorySet,
+  splitByObligation,
 } from "./aggregations";
 import { tx } from "../test/fixtures";
 import type { CurrencyRates } from "../types";
+
+describe("buildObligatorySet / splitByObligation — default obligatory", () => {
+  const txs = [
+    tx({ kind: "expense", category: "Аренда", amount: 100, amountBase: 100 }),
+    tx({ kind: "expense", category: "Кафе", amount: 40, amountBase: 40 }),
+    tx({ kind: "expense", category: "Развлечения", amount: 10, amountBase: 10 }),
+    tx({ kind: "income", category: "Зарплата", amount: 500, amountBase: 500 }),
+  ];
+
+  it("treats every expense category as obligatory unless required === false", () => {
+    const meta = {
+      Кафе: { required: false },
+      Развлечения: { required: false },
+      // «Аренда» has no meta row → defaults to obligatory.
+    };
+    const set = buildObligatorySet(txs, meta);
+    expect(set.has("Аренда")).toBe(true);
+    expect(set.has("Кафе")).toBe(false);
+    expect(set.has("Развлечения")).toBe(false);
+    // Income categories never enter the set.
+    expect(set.has("Зарплата")).toBe(false);
+  });
+
+  it("required null/true both count as obligatory", () => {
+    const meta = { Аренда: { required: null }, Кафе: { required: true } };
+    const set = buildObligatorySet(txs, meta);
+    expect(set.has("Аренда")).toBe(true);
+    expect(set.has("Кафе")).toBe(true);
+  });
+
+  it("splits expense into obligatory vs optional buckets", () => {
+    const set = new Set(["Аренда"]);
+    const { obligatory, optional } = splitByObligation(txs, set);
+    expect(obligatory).toBe(100);
+    expect(optional).toBe(50); // Кафе 40 + Развлечения 10; income excluded
+  });
+
+  it("empty meta → all expenses obligatory", () => {
+    const set = buildObligatorySet(txs, {});
+    const { obligatory, optional } = splitByObligation(txs, set);
+    expect(obligatory).toBe(150);
+    expect(optional).toBe(0);
+  });
+});
 
 describe("stackedBalanceByAccount — real-balance anchoring", () => {
   const txs = [

@@ -979,31 +979,45 @@ export function buildSankey(txs: Transaction[]): SankeyData {
   return { nodes, links };
 }
 
-export interface CategoryFlagsData {
-  fixed: number;
-  discretionary: number;
-  unflagged: number;
-}
-
-export function applyCategoryFlags(
+/** Categories that count as «обязательная» (mandatory). Default is obligatory —
+ *  only an explicit `required === false` (set in the «Обязательность расходов в
+ *  категориях» editor / pulled from Zenmoney) makes a category optional. Built
+ *  from the categories present in `txs`. Single source of the rule, shared by
+ *  the Dashboard «Свободные деньги», Health «доля обязательных» and 50/30/20. */
+export function buildObligatorySet(
   txs: Transaction[],
-  fixedCategories: Set<string>,
-  discretionaryCategories: Set<string>
-): CategoryFlagsData {
-  let fixed = 0;
-  let discretionary = 0;
-  let unflagged = 0;
+  categoryMeta: Record<string, { required?: boolean | null }>
+): Set<string> {
+  const set = new Set<string>();
   for (const t of txs) {
     if (!affectsExpense(t.kind)) continue;
-    // Refunds for a fixed/discretionary category subtract from that
-    // category's bucket — `expenseDelta` already returns a negative
-    // amount in that case, so we just add it through.
-    const delta = expenseDelta(t);
-    if (fixedCategories.has(t.category)) fixed += delta;
-    else if (discretionaryCategories.has(t.category)) discretionary += delta;
-    else unflagged += delta;
+    const m = categoryMeta[t.category];
+    if (m ? m.required !== false : true) set.add(t.category);
   }
-  return { fixed, discretionary, unflagged };
+  return set;
+}
+
+export interface ObligationData {
+  obligatory: number;
+  optional: number;
+}
+
+/** Split expense into obligatory vs optional buckets by category membership.
+ *  Refunds subtract from their bucket — `expenseDelta` already returns a
+ *  negative amount in that case, so we just add it through. */
+export function splitByObligation(
+  txs: Transaction[],
+  obligatoryCategories: Set<string>
+): ObligationData {
+  let obligatory = 0;
+  let optional = 0;
+  for (const t of txs) {
+    if (!affectsExpense(t.kind)) continue;
+    const delta = expenseDelta(t);
+    if (obligatoryCategories.has(t.category)) obligatory += delta;
+    else optional += delta;
+  }
+  return { obligatory, optional };
 }
 
 const ANCHOR_PATTERNS = [

@@ -12,7 +12,7 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { ChevronRight, ChevronLeft, ChevronDown, Lock, Coffee, Maximize2, X } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronDown, Maximize2, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
@@ -22,7 +22,6 @@ import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
-import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
 import { colorForCategory } from "../lib/categoryColor";
 import {
@@ -353,20 +352,6 @@ export function CategoriesPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const showDrill = useDrillStore((s) => s.show);
-  const flags = useCategoryFlagsStore((s) => s.flags);
-  const setFlag = useCategoryFlagsStore((s) => s.setFlag);
-  const flagsHydrate = useCategoryFlagsStore((s) => s.hydrate);
-  const flagsLoaded = useCategoryFlagsStore((s) => s.loaded);
-  useEffect(() => {
-    if (!flagsLoaded) flagsHydrate();
-  }, [flagsLoaded, flagsHydrate]);
-
-  function cycleFlag(category: string) {
-    const cur = flags[category];
-    if (!cur) setFlag(category, "fixed");
-    else if (cur === "fixed") setFlag(category, "discretionary");
-    else setFlag(category, null);
-  }
 
   const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const tree = useMemo(() => buildHierarchy(filtered, kind), [filtered, kind]);
@@ -1012,28 +997,6 @@ export function CategoriesPage() {
                       )}
                     </button>
                     <span className="w-2.5 h-2.5 rounded shrink-0" style={{ background: color }} />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        cycleFlag(node.name);
-                      }}
-                      className="shrink-0 text-muted hover:text-accent"
-                      title={
-                        flags[node.name] === "fixed"
-                          ? "Фиксированная — клик: сделать дискретной"
-                          : flags[node.name] === "discretionary"
-                            ? "Дискретная — клик: убрать флаг"
-                            : "Без флага — клик: сделать фиксированной"
-                      }
-                    >
-                      {flags[node.name] === "fixed" ? (
-                        <Lock className="w-3 h-3 text-warn" />
-                      ) : flags[node.name] === "discretionary" ? (
-                        <Coffee className="w-3 h-3 text-accent2" />
-                      ) : (
-                        <Lock className="w-3 h-3 opacity-25" />
-                      )}
-                    </button>
                     <button
                       onClick={() => openCategory(node.name)}
                       className="flex-1 text-left min-w-0 text-sm hover:text-accent"

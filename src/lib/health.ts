@@ -2,7 +2,7 @@ import type { Transaction } from "../types";
 import {
   groupByMonth,
   netWorthSeries,
-  applyCategoryFlags,
+  splitByObligation,
   detectUncategorized,
   type CalibrationInput,
 } from "./aggregations";
@@ -31,8 +31,10 @@ interface ComputeOptions {
   transactions: Transaction[];
   baseCurrency: string;
   calibration: CalibrationInput | null;
-  fixedCategories: Set<string>;
-  discretionaryCategories: Set<string>;
+  /** Categories that count as obligatory (mandatory). Built via
+   *  `buildObligatorySet` — default obligatory, only explicit `required:false`
+   *  is optional. Mirrors the 50/30/20 needs set. */
+  obligatoryCategories: Set<string>;
   /** Off-balance accounts' total (base currency) to add to the emergency fund —
    *  savings kept off-balance ARE the cushion. Pass the sum NOT already counted
    *  by the net-worth calibration (i.e. when «include off-balance» is off). */
@@ -222,50 +224,31 @@ function computeFixedLoad(opts: ComputeOptions): HealthComponent {
   const recent = months.slice(-6);
   const avgIncome = mean(recent.map((m) => m.income));
 
-  // Берём расходы последних 6 месяцев и считаем долю фиксированных.
+  // Берём расходы последних 6 месяцев и считаем долю обязательных.
   const recentSet = new Set(recent.map((r) => r.ym));
   const recentTxs = opts.transactions.filter((t) =>
     recentSet.has(t.date.slice(0, 7))
   );
-  const flags = applyCategoryFlags(
-    recentTxs,
-    opts.fixedCategories,
-    opts.discretionaryCategories
-  );
-  const monthlyFixed = recent.length > 0 ? flags.fixed / recent.length : 0;
-  const share = avgIncome > 0 ? monthlyFixed / avgIncome : 0;
-
-  // Если флагов не проставлено вовсе — N/A.
-  if (opts.fixedCategories.size === 0) {
-    return {
-      id: "fixed_load",
-      label: "Доля фиксированных в доходе",
-      weight: 15,
-      score: 0,
-      value: null,
-      status: "na",
-      detail:
-        "Какую часть дохода съедают обязательные траты (квартира, машина, продукты, и т.п.).",
-      hint:
-        "Чтобы посчитать — отметьте категории как 🔒 «Фиксированные» на странице «Категории».",
-    };
-  }
+  const split = splitByObligation(recentTxs, opts.obligatoryCategories);
+  const monthlyObligatory =
+    recent.length > 0 ? split.obligatory / recent.length : 0;
+  const share = avgIncome > 0 ? monthlyObligatory / avgIncome : 0;
 
   // Target ≤ 50%. Score: 30% → 100, 80% → 0.
   const score = clamp(100 - (share - 0.3) * 200);
 
   return {
     id: "fixed_load",
-    label: "Доля фиксированных в доходе",
+    label: "Доля обязательных в доходе",
     weight: 15,
     score,
     value: share,
     status: avgIncome <= 0 ? "na" : classify(score),
     detail:
-      "Какую часть дохода съедают обязательные траты (квартира, машина, продукты, и т.п.). Чем меньше — тем больше «свободных денег» остаётся на цели и резервы.",
+      "Какую часть дохода съедают обязательные траты (квартира, машина, продукты, и т.п.). Чем меньше — тем больше «свободных денег» остаётся на цели и резервы. Категории помечаются как обязательные/необязательные в редакторе «Обязательность расходов» на странице «Категории».",
     hint:
       share > 0.8
-        ? "Фиксированные траты съедают почти весь доход — почти нет манёвра. Если возможно, пересмотрите крупные обязательства (рефинансирование, переезд, отказ от подписок)."
+        ? "Обязательные траты съедают почти весь доход — почти нет манёвра. Если возможно, пересмотрите крупные обязательства (рефинансирование, переезд, отказ от подписок)."
         : share > 0.5
           ? "Половина дохода уходит на обязательное. Не критично, но любая нештатная ситуация может ударить."
           : "",
