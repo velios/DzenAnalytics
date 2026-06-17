@@ -23,20 +23,22 @@ export function ThemeSwitcher() {
       aria-label={`Тема: ${isDark ? "тёмная" : "светлая"}`}
       className="relative inline-flex items-center w-14 h-7 shrink-0 rounded-full bg-panel2 border border-border transition-colors hover:border-accent/50"
     >
-      {/* Sliding thumb */}
+      {/* Sliding thumb. `top-px` (1px) centres it vertically in the 26px inner
+          box (was top-0.5 = 2px, which left it flush with the bottom and
+          looked low). The transform stays pure translateX so the slide works. */}
       <span
-        className="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-bg shadow border border-border transition-transform duration-200 ease-out"
+        className="absolute top-px left-0.5 w-6 h-6 rounded-full bg-bg shadow border border-border transition-transform duration-200 ease-out"
         style={{ transform: isDark ? "translateX(28px)" : "translateX(0)" }}
       />
       {/* Sun (left) */}
       <Sun
-        className={`absolute left-1.5 w-4 h-4 transition-opacity ${
+        className={`absolute left-1.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-opacity ${
           isDark ? "opacity-40 text-muted" : "opacity-100 text-warn"
         }`}
       />
       {/* Moon (right) */}
       <Moon
-        className={`absolute right-1.5 w-4 h-4 transition-opacity ${
+        className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-opacity ${
           isDark ? "opacity-100 text-accent" : "opacity-40 text-muted"
         }`}
       />
