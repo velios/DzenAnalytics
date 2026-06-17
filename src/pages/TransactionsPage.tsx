@@ -700,7 +700,7 @@ function DayGroup({
             </span>
           )}
           <span
-            className={`px-2 py-0.5 rounded-md font-bold tabular-nums whitespace-nowrap ${totals.net >= 0 ? "bg-income/15 text-income" : "bg-expense/15 text-expense"}`}
+            className={`px-2 py-0.5 rounded-md font-medium tabular-nums whitespace-nowrap ${totals.net >= 0 ? "bg-income/15 text-income" : "bg-expense/15 text-expense"}`}
             title="Итог за день"
           >
             {formatMoney(totals.net, base, { signed: true })}
