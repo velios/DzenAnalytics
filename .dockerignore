@@ -10,6 +10,7 @@ node_modules/
 .*.env
 
 docker/
+!docker/nginx.conf
 .dockerignore
 
 docs/
