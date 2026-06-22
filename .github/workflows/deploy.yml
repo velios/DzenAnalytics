@@ -25,6 +25,7 @@ jobs:
             --build-arg VITE_TOKEN_PROVIDER_URL=/api/me/zenmoney-token \
             --build-arg VITE_LOGIN_URL=https://auth.zentable.ru/ \
             --build-arg VITE_LOGOUT_URL=/api/auth/logout \
+            -f docker/Dockerfile \
             -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
