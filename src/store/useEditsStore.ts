@@ -52,6 +52,10 @@ interface EditsState {
    *  + one store update (so the pipeline re-runs / auto-push fires once,
    *  not N times). */
   setEditMany: (ids: string[], patch: TransactionEdit) => Promise<void>;
+  /** Apply a DIFFERENT patch per transaction — one IDB write + one store
+   *  update. Used by bulk «Дополнить комментарий», where each row gets its
+   *  own merged comment. Atomic, so no sequential-write race. */
+  setEditEach: (patches: Record<string, TransactionEdit>) => Promise<void>;
   clearEdit: (id: string) => Promise<void>;
   /** Drop many edits at once (one IDB write). Used to prune orphaned edits —
    *  overrides whose transaction no longer exists in the dataset (e.g. after
@@ -83,6 +87,18 @@ export const useEditsStore = create<EditsState>((set, get) => ({
     const next = { ...prev };
     for (const id of ids) {
       next[id] = { ...prev[id], ...patch };
+    }
+    await db.saveJSON(KEY, next);
+    set({ edits: next });
+  },
+
+  setEditEach: async (patches) => {
+    const ids = Object.keys(patches);
+    if (ids.length === 0) return;
+    const prev = get().edits;
+    const next = { ...prev };
+    for (const id of ids) {
+      next[id] = { ...prev[id], ...patches[id] };
     }
     await db.saveJSON(KEY, next);
     set({ edits: next });

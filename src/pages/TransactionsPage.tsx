@@ -120,7 +120,7 @@ export function TransactionsPage() {
   const editsLoaded = useEditsStore((s) => s.loaded);
   const hydrateEdits = useEditsStore((s) => s.hydrate);
   const setEditMany = useEditsStore((s) => s.setEditMany);
-  const setEdit = useEditsStore((s) => s.setEdit);
+  const setEditEach = useEditsStore((s) => s.setEditEach);
   const reapplyRules = useDataStore((s) => s.reapplyRules);
   useEffect(() => {
     if (!editsLoaded) hydrateEdits();
@@ -185,13 +185,16 @@ export function TransactionsPage() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
     if (commentAppend) {
-      // «Дополнить»: append to each row's *current* comment individually.
+      // «Дополнить»: append to each row's *current* comment individually, in a
+      // single atomic store write (build all patches, then one setEditEach).
       const byId = new Map(transactions.map((t) => [t.id, t]));
+      const patches: Record<string, TransactionEdit> = {};
       for (const id of ids) {
         const cur = (byId.get(id)?.comment || "").trim();
         const merged = cur ? `${cur} ${commentAppend}` : commentAppend;
-        await setEdit(id, { ...patch, comment: merged });
+        patches[id] = { ...patch, comment: merged };
       }
+      await setEditEach(patches);
     } else {
       await setEditMany(ids, patch);
     }
