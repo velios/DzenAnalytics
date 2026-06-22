@@ -177,9 +177,9 @@ export function CategoryCascadePicker({
                       }`}
                     >
                       <CategoryDot category={it.sub} parent={it.cat} size="w-4 h-4" />
-                      <span className="truncate flex-1">{it.sub}</span>
-                      <span className="text-[11px] text-muted truncate shrink-0 max-w-[45%]">
-                        {it.cat}
+                      <span className="truncate">
+                        <span className="text-muted">{it.cat} / </span>
+                        {it.sub}
                       </span>
                     </button>
                   )
