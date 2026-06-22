@@ -152,7 +152,7 @@ function computeUncategorized(opts: ComputeOptions): HealthComponent {
     score,
     value: pct,
     status: total === 0 ? "na" : classify(score),
-    detail: "Процент операций без категории или с категорией «Прочие».",
+    detail: "Процент операций без категории.",
     hint:
       pct > 0.1
         ? "Много операций без категории — аналитика искажена. Загляните на страницу «Без категории» — там есть smart suggestions, которые создают правила одним кликом."

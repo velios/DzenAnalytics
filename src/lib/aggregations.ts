@@ -603,7 +603,7 @@ export function suggestCategoriesForUncategorized(
       const cat = t.categoryFull || "";
       if (!cat) return false;
       if (/^\s*$/.test(cat)) return false;
-      if (/^прочи|без катего|other|misc/i.test(cat)) return false;
+      if (/^без катего/i.test(cat)) return false;
       return true;
     })
     .map((t) => ({
@@ -727,12 +727,15 @@ export function detectDuplicates(
 }
 
 export function detectUncategorized(txs: Transaction[]): Transaction[] {
+  // Only truly category-less operations count: an empty category or the
+  // explicit «Без категории». Zenmoney has no «Прочие» concept — that label
+  // only ever appears as a synthesized chart bucket, never as a real tag — so
+  // we don't treat it as uncategorised.
   const empty = /^\s*$/;
-  const generic = /^(прочи|без катего|other|misc)/i;
+  const noCategory = /^без катего/i;
   return txs.filter((t) => {
     if (t.kind === "transfer") return false;
-    if (empty.test(t.category) || generic.test(t.category)) return true;
-    return false;
+    return empty.test(t.category) || noCategory.test(t.category);
   });
 }
 
