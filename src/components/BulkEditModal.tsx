@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Layers, X } from "lucide-react";
 import { Combobox } from "./Combobox";
+import { HashtagTextarea } from "./HashtagTextarea";
 import { pluralOps } from "../lib/plural";
+import { extractHashtags } from "../lib/aggregations";
 import type { Transaction } from "../types";
 import type { TransactionEdit } from "../store/useEditsStore";
 
@@ -23,7 +25,13 @@ import type { TransactionEdit } from "../store/useEditsStore";
 interface Props {
   count: number;
   allTransactions: Transaction[];
-  onApply: (patch: TransactionEdit) => void | Promise<void>;
+  /** Apply the patch to all selected. `commentAppend`, when set, means the
+   *  comment must be *appended* to each row's existing comment (the caller
+   *  computes it per-transaction) rather than replaced via `patch.comment`. */
+  onApply: (
+    patch: TransactionEdit,
+    commentAppend?: string
+  ) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -34,6 +42,8 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
   const [subcategory, setSubcategory] = useState("");
   const [payee, setPayee] = useState("");
   const [comment, setComment] = useState("");
+  // «Заменить» overwrites the comment; «Дополнить» appends to the existing one.
+  const [commentMode, setCommentMode] = useState<"replace" | "append">("replace");
 
   const [saving, setSaving] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -59,10 +69,11 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
   }, []);
 
   // Option lists from the current dataset.
-  const { categoryOptions, subcatByCategory, payeeOptions } = useMemo(() => {
+  const { categoryOptions, subcatByCategory, payeeOptions, tagOptions } = useMemo(() => {
     const cats = new Set<string>();
     const subByCat = new Map<string, Set<string>>();
     const payees = new Set<string>();
+    const tags = new Set<string>();
     for (const t of allTransactions) {
       if (t.category) cats.add(t.category);
       if (t.category && t.subcategory) {
@@ -75,12 +86,14 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
       }
       const p = (t.brand || t.payee || "").trim();
       if (p) payees.add(p);
+      for (const h of extractHashtags(t.comment)) tags.add(h);
     }
     const cmp = (a: string, b: string) => a.localeCompare(b, "ru");
     return {
       categoryOptions: Array.from(cats).sort(cmp),
       subcatByCategory: subByCat,
       payeeOptions: Array.from(payees).sort(cmp),
+      tagOptions: Array.from(tags).sort(cmp),
     };
   }, [allTransactions]);
 
@@ -97,13 +110,17 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
     if (payee.trim()) {
       patch.brand = payee.trim();
     }
-    if (comment.trim()) {
+    // In «Заменить» the comment rides in the patch. In «Дополнить» it doesn't —
+    // it's handed to the caller as `commentAppend` so each row keeps its own
+    // existing comment and the new text is added on.
+    const append = commentMode === "append" ? comment.trim() : "";
+    if (comment.trim() && commentMode === "replace") {
       patch.comment = comment.trim();
     }
-    if (Object.keys(patch).length === 0) return;
+    if (Object.keys(patch).length === 0 && !append) return;
     setSaving(true);
     try {
-      await onApply(patch);
+      await onApply(patch, append || undefined);
     } finally {
       setSaving(false);
     }
@@ -197,12 +214,35 @@ export function BulkEditModal({ count, allTransactions, onApply, onClose }: Prop
 
           {/* Comment */}
           <div>
-            <label className="label block mb-1">Комментарий</label>
-            <textarea
+            <div className="flex items-center justify-between mb-1 gap-2">
+              <label className="label">Комментарий</label>
+              <div className="inline-flex rounded-md border border-border overflow-hidden text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCommentMode("replace")}
+                  className={`px-2.5 py-1 ${commentMode === "replace" ? "bg-accent text-accent-fg" : "text-muted hover:text-text"}`}
+                >
+                  Заменить
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCommentMode("append")}
+                  className={`px-2.5 py-1 ${commentMode === "append" ? "bg-accent text-accent-fg" : "text-muted hover:text-text"}`}
+                >
+                  Дополнить
+                </button>
+              </div>
+            </div>
+            <HashtagTextarea
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
+              onChange={setComment}
+              tags={tagOptions}
               rows={2}
-              placeholder="Комментарий без изменений"
+              placeholder={
+                commentMode === "append"
+                  ? "Текст добавится к текущему комментарию"
+                  : "Комментарий без изменений"
+              }
               className="input text-sm w-full resize-y min-h-[2.5rem]"
             />
           </div>

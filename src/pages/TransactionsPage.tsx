@@ -120,6 +120,7 @@ export function TransactionsPage() {
   const editsLoaded = useEditsStore((s) => s.loaded);
   const hydrateEdits = useEditsStore((s) => s.hydrate);
   const setEditMany = useEditsStore((s) => s.setEditMany);
+  const setEdit = useEditsStore((s) => s.setEdit);
   const reapplyRules = useDataStore((s) => s.reapplyRules);
   useEffect(() => {
     if (!editsLoaded) hydrateEdits();
@@ -180,10 +181,20 @@ export function TransactionsPage() {
     });
   }
 
-  async function applyBulk(patch: TransactionEdit) {
+  async function applyBulk(patch: TransactionEdit, commentAppend?: string) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    await setEditMany(ids, patch);
+    if (commentAppend) {
+      // «Дополнить»: append to each row's *current* comment individually.
+      const byId = new Map(transactions.map((t) => [t.id, t]));
+      for (const id of ids) {
+        const cur = (byId.get(id)?.comment || "").trim();
+        const merged = cur ? `${cur} ${commentAppend}` : commentAppend;
+        await setEdit(id, { ...patch, comment: merged });
+      }
+    } else {
+      await setEditMany(ids, patch);
+    }
     await reapplyRules();
     setSelected(new Set());
     setBulkOpen(false);

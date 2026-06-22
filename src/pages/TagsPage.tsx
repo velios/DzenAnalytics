@@ -8,9 +8,11 @@ import {
   groupByHashtag,
   extractHashtags,
   hashtagCategoryTrees,
+  computeKPI,
   type TagBucket,
 } from "../lib/aggregations";
-import { formatMoney, formatPct } from "../lib/format";
+import { formatMoney, formatNum, formatPct } from "../lib/format";
+import { pluralOps } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
@@ -36,13 +38,24 @@ export function TagsPage() {
       return next;
     });
 
+  // Tagged-only expense sum — shown as «всего» in the header.
   const totalExpense = tags.reduce((s, t) => s + t.expense, 0);
+  // Whole-period expense (across ALL operations, not just tagged) — the honest
+  // denominator for «Доля от расходов» (issue #20).
+  const periodExpense = useMemo(() => computeKPI(filtered).expense, [filtered]);
   const taggedCount = useMemo(
     () => filtered.filter((t) => extractHashtags(t.comment).length > 0).length,
     [filtered]
   );
 
   const maxTotal = tags[0] ? tags[0].expense + tags[0].income : 1;
+
+  // Tag cloud ordering: by total flow (default) or alphabetically (issue #20).
+  const [cloudAlpha, setCloudAlpha] = useState(false);
+  const cloudTags = useMemo(() => {
+    if (!cloudAlpha) return tags; // already total-desc from groupByHashtag
+    return [...tags].sort((a, b) => a.tag.localeCompare(b.tag, "ru"));
+  }, [tags, cloudAlpha]);
 
   function openTag(tag: string) {
     const txs = filtered.filter((t) => extractHashtags(t.comment).includes(tag));
@@ -86,9 +99,25 @@ export function TagsPage() {
       <GlobalFilters />
 
       <div className="card card-pad">
-        <div className="font-semibold mb-4">Облако тегов</div>
+        <div className="flex items-center justify-between mb-4 gap-3">
+          <div className="font-semibold">Облако тегов</div>
+          <div className="inline-flex rounded-md border border-border overflow-hidden text-xs">
+            <button
+              onClick={() => setCloudAlpha(false)}
+              className={`px-2.5 py-1 ${!cloudAlpha ? "bg-accent text-accent-fg" : "text-muted hover:text-text"}`}
+            >
+              По сумме
+            </button>
+            <button
+              onClick={() => setCloudAlpha(true)}
+              className={`px-2.5 py-1 ${cloudAlpha ? "bg-accent text-accent-fg" : "text-muted hover:text-text"}`}
+            >
+              А–Я
+            </button>
+          </div>
+        </div>
         <div className="flex flex-wrap gap-2">
-          {tags.map((t) => {
+          {cloudTags.map((t) => {
             const score = (t.expense + t.income) / maxTotal;
             const fontSize = 12 + Math.round(score * 16);
             return (
@@ -97,11 +126,12 @@ export function TagsPage() {
                 onClick={() => openTag(t.tag)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-panel2 hover:border-accent hover:bg-accent/10 transition-colors"
                 style={{ fontSize }}
+                title={`Чистый: ${formatMoney(t.income - t.expense, base, { signed: true })}`}
               >
                 <Hash className="w-3 h-3 text-accent shrink-0" />
                 <span className="font-medium">{t.tag}</span>
                 <span className="text-muted text-xs tabular-nums">
-                  {formatMoney(t.expense + t.income, base)}
+                  {formatNum(t.count)} {pluralOps(t.count)}
                 </span>
               </button>
             );
@@ -163,10 +193,10 @@ export function TagsPage() {
                 key: "total",
                 label: "Доля от расходов",
                 align: "right",
-                sortValue: (t) => (totalExpense > 0 ? t.expense / totalExpense : 0),
+                sortValue: (t) => (periodExpense > 0 ? t.expense / periodExpense : 0),
                 render: (t) => (
                   <span className="tabular-nums text-muted">
-                    {totalExpense > 0 ? formatPct(t.expense / totalExpense, 1) : "—"}
+                    {periodExpense > 0 ? formatPct(t.expense / periodExpense, 1) : "—"}
                   </span>
                 ),
               },
@@ -198,8 +228,8 @@ export function TagsPage() {
                 </td>
                 <td className="table-td text-right text-muted">{n.count}</td>
                 <td className="table-td text-right tabular-nums text-muted">
-                  {totalExpense > 0 && n.expense > 0
-                    ? formatPct(n.expense / totalExpense, 1)
+                  {periodExpense > 0 && n.expense > 0
+                    ? formatPct(n.expense / periodExpense, 1)
                     : "—"}
                 </td>
               </tr>,
@@ -218,8 +248,8 @@ export function TagsPage() {
                   </td>
                   <td className="table-td text-right">{s.count}</td>
                   <td className="table-td text-right tabular-nums">
-                    {totalExpense > 0 && s.expense > 0
-                      ? formatPct(s.expense / totalExpense, 1)
+                    {periodExpense > 0 && s.expense > 0
+                      ? formatPct(s.expense / periodExpense, 1)
                       : "—"}
                   </td>
                 </tr>
