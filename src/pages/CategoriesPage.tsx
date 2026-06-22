@@ -23,7 +23,7 @@ import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
-import { colorForCategory } from "../lib/categoryColor";
+import { colorForCategory, subcategoryColor } from "../lib/categoryColor";
 import {
   formatMoney,
   formatNum,
@@ -104,7 +104,11 @@ interface TreemapDatum extends TreemapLeaf {
  *  subcategories, otherwise a container whose children are its subcategory
  *  cells (opaque shades of the parent colour) plus a «без подкатегории»
  *  remainder. Module-level so the data memo stays trivially preservable. */
-function buildTreemapNode(n: CategoryNode, color: string): TreemapDatum {
+function buildTreemapNode(
+  n: CategoryNode,
+  color: string,
+  meta: Record<string, { color?: string | null } | undefined>
+): TreemapDatum {
   const posSubs = n.subs.filter((s) => s.total > 0);
   if (!posSubs.length) {
     return { name: n.name, cat: n.name, value: n.total, color, level: "cat" };
@@ -115,7 +119,9 @@ function buildTreemapNode(n: CategoryNode, color: string): TreemapDatum {
     cat: n.name,
     fullName: sub.fullName,
     value: sub.total,
-    color: mixHex(color, "#111827", Math.min(0.5, idx * 0.12)),
+    // Subcategory's own Zenmoney colour when set; otherwise a shade of the
+    // parent so unstyled subs still tile cleanly (issue #17).
+    color: subcategoryColor(sub.fullName, meta) || mixHex(color, "#111827", Math.min(0.5, idx * 0.12)),
     level: "sub",
   }));
   const rem = n.total - subSum;
@@ -419,15 +425,20 @@ export function CategoriesPage() {
     const color = resolvedCategoryColors[donutDrillNode.name] || COLORS[0];
     const posSubs = donutDrillNode.subs.filter((s) => s.total > 0);
     const subSum = posSubs.reduce((s, x) => s + x.total, 0);
-    const out: DonutDatum[] = posSubs.map((sub, idx) => ({
-      name: sub.name,
-      fullName: sub.fullName,
-      value: sub.total,
-      color,
-      opacity: Math.max(0.45, 1 - idx * 0.13),
-      remainder: false,
-      hasSubs: false,
-    }));
+    const out: DonutDatum[] = posSubs.map((sub, idx) => {
+      // Sub's own Zenmoney colour (full opacity) if set; else a fading shade of
+      // the parent colour (issue #17).
+      const own = subcategoryColor(sub.fullName, categoryMeta);
+      return {
+        name: sub.name,
+        fullName: sub.fullName,
+        value: sub.total,
+        color: own || color,
+        opacity: own ? 1 : Math.max(0.45, 1 - idx * 0.13),
+        remainder: false,
+        hasSubs: false,
+      };
+    });
     const rem = donutDrillNode.total - subSum;
     if (rem > 0.0001) {
       out.push({
@@ -440,7 +451,7 @@ export function CategoriesPage() {
       });
     }
     return out;
-  }, [donutDrillNode, resolvedCategoryColors]);
+  }, [donutDrillNode, resolvedCategoryColors, categoryMeta]);
 
   const donutData = drillCat ? donutSub : donutTop;
 
@@ -695,7 +706,7 @@ export function CategoriesPage() {
   const treemapData = tree
     .filter((n) => n.total > 0)
     .slice(0, TREEMAP_CATS)
-    .map((n) => buildTreemapNode(n, resolvedCategoryColors[n.name] || COLORS[0]));
+    .map((n) => buildTreemapNode(n, resolvedCategoryColors[n.name] || COLORS[0], categoryMeta));
 
   // «Все категории» stacked bars: each category bar is split into its
   // subcategory segments (shades of the category colour, like the donut),
@@ -710,13 +721,16 @@ export function CategoriesPage() {
         const color = resolvedCategoryColors[n.name] || COLORS[0];
         const posSubs = n.subs.filter((s) => s.total > 0);
         const subSum = posSubs.reduce((s, x) => s + x.total, 0);
-        const segs = posSubs.map((sub, idx) => ({
-          name: sub.name,
-          fullName: sub.fullName as string | undefined,
-          value: sub.total,
-          color,
-          opacity: Math.max(0.45, 1 - idx * 0.13),
-        }));
+        const segs = posSubs.map((sub, idx) => {
+          const own = subcategoryColor(sub.fullName, categoryMeta);
+          return {
+            name: sub.name,
+            fullName: sub.fullName as string | undefined,
+            value: sub.total,
+            color: own || color,
+            opacity: own ? 1 : Math.max(0.45, 1 - idx * 0.13),
+          };
+        });
         const rem = n.total - subSum;
         if (rem > 0.0001) {
           segs.push({
@@ -729,7 +743,7 @@ export function CategoriesPage() {
         }
         return { name: n.name, total: n.total, segs };
       });
-  }, [tree, resolvedCategoryColors]);
+  }, [tree, resolvedCategoryColors, categoryMeta]);
 
   const barMaxSegs = useMemo(
     () => barRows.reduce((m, r) => Math.max(m, r.segs.length), 0),
@@ -1052,7 +1066,7 @@ export function CategoriesPage() {
                               className="h-full rounded-full opacity-60"
                               style={{
                                 width: `${(sub.total / node.total) * 100}%`,
-                                background: color,
+                                background: subcategoryColor(sub.fullName, categoryMeta) || color,
                               }}
                             />
                           </div>

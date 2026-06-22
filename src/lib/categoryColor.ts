@@ -45,3 +45,16 @@ export function colorForCategory(
 ): string {
   return meta[name]?.color || fallbackColorForName(name);
 }
+
+/** A subcategory's OWN Zenmoney colour, looked up by its full path
+ *  «Родитель / Подкатегория» — or `null` when the sub has no explicit colour.
+ *  Charts use this so a subcategory with its own colour in Дзен-мани shows it,
+ *  and only sub-categories WITHOUT one fall back to a tint of the parent
+ *  (issue #17 — don't flatten everything to the parent colour, but also don't
+ *  invent a rainbow for subs that never got a colour). */
+export function subcategoryColor(
+  fullName: string | undefined,
+  meta: Record<string, { color?: string | null } | undefined>
+): string | null {
+  return (fullName && meta[fullName]?.color) || null;
+}
