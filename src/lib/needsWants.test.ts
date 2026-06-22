@@ -10,8 +10,12 @@ describe("buildNeedsWants", () => {
     tx({ kind: "expense", amount: 10000, category: "Прочее", date: "2026-03-08" }),
   ];
 
-  it("splits needs (the needs-set) / wants (rest) / savings (income − expense)", () => {
-    const r = buildNeedsWants(base(), new Set(["Аренда"]));
+  it("splits needs (obligatory) / wants (optional) / savings (income − expense)", () => {
+    // Кафе + Прочее marked optional → wants; Аренда defaults obligatory → need.
+    const r = buildNeedsWants(base(), {
+      "Кафе": { required: false },
+      "Прочее": { required: false },
+    });
     expect(r).toMatchObject({
       income: 100000,
       needs: 30000, // Аренда
@@ -23,8 +27,12 @@ describe("buildNeedsWants", () => {
     expect(r.savingsPct).toBeCloseTo(0.4);
   });
 
-  it("collapses to wants-only when the needs-set is empty", () => {
-    const r = buildNeedsWants(base(), new Set());
+  it("collapses to wants-only when every category is marked optional", () => {
+    const r = buildNeedsWants(base(), {
+      "Аренда": { required: false },
+      "Кафе": { required: false },
+      "Прочее": { required: false },
+    });
     expect(r.needs).toBe(0);
     expect(r.wants).toBe(60000);
     expect(r.savings).toBe(40000);
@@ -36,14 +44,14 @@ describe("buildNeedsWants", () => {
       tx({ kind: "expense", amount: 5000, category: "Кафе" }),
       tx({ kind: "refund", amount: 2000, category: "Кафе" }),
     ];
-    const r = buildNeedsWants(txs, new Set(["Аренда"]));
+    const r = buildNeedsWants(txs, { "Кафе": { required: false } });
     expect(r.wants).toBe(3000); // 5000 spent − 2000 refunded
   });
 
   it("zero income → zero percentages, no divide-by-zero", () => {
     const r = buildNeedsWants(
       [tx({ kind: "expense", amount: 5000, category: "Кафе" })],
-      new Set()
+      {}
     );
     expect(r.income).toBe(0);
     expect(r.needsPct).toBe(0);

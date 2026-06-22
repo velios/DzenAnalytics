@@ -97,18 +97,27 @@ export function CategoryRequiredEditor() {
   // an explicit true/false only when it crosses the bucket boundary of the
   // cached value; landing back on the cached bucket clears the overlay (so no
   // no-op push, and `null` stays `null` instead of churning to `true`). The
-  // optimistic categoryMeta write is for TOP-LEVEL tags only — sub-tags don't
-  // feed the 50/30/20 split.
+  // optimistic categoryMeta write keys by TITLE for roots and by the FULL PATH
+  // «Родитель / Подкатегория» for sub-tags — both feed the per-transaction
+  // obligatory split (#5), so the analytics update instantly.
   async function setObligatory(tag: CategoryTag, obligatory: boolean) {
     const cacheVal = tag.required ?? null;
     const isRoot = !tag.parent;
+    const parentTitle = isRoot
+      ? undefined
+      : (Array.isArray(tags) ? tags.find((t) => t.id === tag.parent)?.title : undefined);
+    const metaKey = isRoot
+      ? tag.title
+      : parentTitle
+        ? `${parentTitle} / ${tag.title}`
+        : null;
     if (obligatory === isObligatory(cacheVal)) {
       await useTagEditsStore.getState().clearMany([tag.id]);
-      if (isRoot) await useCategoryMetaStore.getState().setRequired(tag.title, cacheVal);
+      if (metaKey) await useCategoryMetaStore.getState().setRequired(metaKey, cacheVal);
     } else {
       const next = obligatory ? true : false;
       await useTagEditsStore.getState().setRequired(tag.id, next);
-      if (isRoot) await useCategoryMetaStore.getState().setRequired(tag.title, next);
+      if (metaKey) await useCategoryMetaStore.getState().setRequired(metaKey, next);
     }
   }
 

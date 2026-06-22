@@ -5,6 +5,7 @@ import {
   splitByObligation,
   detectUncategorized,
   type CalibrationInput,
+  type ObligationMeta,
 } from "./aggregations";
 
 export type HealthStatus = "good" | "fair" | "poor" | "na";
@@ -31,10 +32,9 @@ interface ComputeOptions {
   transactions: Transaction[];
   baseCurrency: string;
   calibration: CalibrationInput | null;
-  /** Categories that count as obligatory (mandatory). Built via
-   *  `buildObligatorySet` — default obligatory, only explicit `required:false`
-   *  is optional. Mirrors the 50/30/20 needs set. */
-  obligatoryCategories: Set<string>;
+  /** Category meta (title / full-path → { required }) — drives the
+   *  obligatory/optional split per transaction, subcategory-aware (#5). */
+  categoryMeta: ObligationMeta;
   /** Off-balance accounts' total (base currency) to add to the emergency fund —
    *  savings kept off-balance ARE the cushion. Pass the sum NOT already counted
    *  by the net-worth calibration (i.e. when «include off-balance» is off). */
@@ -229,7 +229,7 @@ function computeFixedLoad(opts: ComputeOptions): HealthComponent {
   const recentTxs = opts.transactions.filter((t) =>
     recentSet.has(t.date.slice(0, 7))
   );
-  const split = splitByObligation(recentTxs, opts.obligatoryCategories);
+  const split = splitByObligation(recentTxs, opts.categoryMeta);
   const monthlyObligatory =
     recent.length > 0 ? split.obligatory / recent.length : 0;
   const share = avgIncome > 0 ? monthlyObligatory / avgIncome : 0;

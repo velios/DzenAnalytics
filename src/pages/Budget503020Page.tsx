@@ -20,7 +20,6 @@ import {
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { buildNeedsWants, savingsRateSeries } from "../lib/needsWants";
-import { buildObligatorySet } from "../lib/aggregations";
 import { PeriodPills } from "../components/PeriodPills";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
@@ -68,18 +67,13 @@ export function Budget503020Page() {
     [transactions, effectiveFilters, monthStartDay]
   );
 
-  // The «needs» set, derived per expense category in the period. Default is
-  // OBLIGATORY: an expense category is a need unless Zenmoney's «обязательная»
-  // flag is explicitly `false` (null/true → mandatory). The flag is edited in
-  // the «Обязательность расходов в категориях» block on the Categories page.
-  const needsCategories = useMemo(
-    () => buildObligatorySet(filtered, categoryMeta),
-    [filtered, categoryMeta]
-  );
-
+  // «Нужды» = обязательные траты. По умолчанию обязательно: трата — нужда,
+  // если «обязательная» не выставлена в `false`. Учитывается обязательность на
+  // уровне подкатегории, затем категории (#5). Флаг редактируется в блоке
+  // «Обязательность расходов в категориях» на странице «Категории».
   const split = useMemo(
-    () => buildNeedsWants(filtered, needsCategories),
-    [filtered, needsCategories]
+    () => buildNeedsWants(filtered, categoryMeta),
+    [filtered, categoryMeta]
   );
 
   // Trend is always the last 12 months (independent of the snapshot period),

@@ -46,7 +46,6 @@ import {
   detectRecurring,
   dailyExpenseMap,
   buildForecast,
-  buildObligatorySet,
   splitByObligation,
   balancesByAccount,
 } from "../lib/aggregations";
@@ -289,8 +288,7 @@ export function DashboardPage() {
           (t) => periodKey(t.date, monthStartDay) === lastMonthYM
         )
       : transactions;
-    const obligatorySet = buildObligatorySet(lastTxs, categoryMeta);
-    return splitByObligation(lastTxs, obligatorySet);
+    return splitByObligation(lastTxs, categoryMeta);
   }, [categoryMeta, months, transactions, monthStartDay]);
   const dayMap = useMemo(() => dailyExpenseMap(transactions), [transactions]);
 
