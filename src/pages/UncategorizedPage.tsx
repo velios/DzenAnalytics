@@ -68,7 +68,7 @@ export function UncategorizedPage() {
     if (confident.length === 0) return;
     const ok = await confirm({
       title: "Создать правила автоматически?",
-      message: `Будет создано ${confident.length} правил на основе высокоуверенных подсказок.`,
+      message: `Будет создано ${confident.length} правил на основе надёжных подсказок (совпадение ≥ 70%).`,
       confirmLabel: "Создать",
     });
     if (!ok) return;
@@ -146,9 +146,10 @@ export function UncategorizedPage() {
                   suggestions.filter((s) => s.confidence >= 0.7 && !appliedIds.has(s.txId)).length === 0
                 }
                 className="btn-primary text-xs"
+                title="Создаст правила по получателю для подсказок с высокой надёжностью (совпадение ≥ 70%) и применит их сразу"
               >
                 <Wand2 className="w-3.5 h-3.5" />
-                Применить уверенные (
+                Применить надёжные (
                 {suggestions.filter((s) => s.confidence >= 0.7 && !appliedIds.has(s.txId)).length}
                 )
               </button>
