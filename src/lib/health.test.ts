@@ -12,8 +12,7 @@ describe("computeHealthScore — emergency fund counts off-balance (issue #4)", 
     transactions: txs,
     baseCurrency: "RUB",
     calibration: { date: "2026-06-30", amount: 0 },
-    fixedCategories: new Set<string>(),
-    discretionaryCategories: new Set<string>(),
+    obligatoryCategories: new Set<string>(),
   };
   const coverage = (opts: Parameters<typeof computeHealthScore>[0]) =>
     computeHealthScore(opts).components.find((c) => c.id === "emergency_fund")!.value;

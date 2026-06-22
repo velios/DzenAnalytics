@@ -10,6 +10,7 @@ import {
   type CategorySuggestion,
 } from "../lib/aggregations";
 import { formatMoney, formatDate, formatNum, formatPct } from "../lib/format";
+import { pluralRu } from "../lib/plural";
 import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -38,12 +39,37 @@ export function UncategorizedPage() {
 
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
   const suggestions = useMemo<CategorySuggestion[]>(
     () => (showSuggestions ? suggestCategoriesForUncategorized(transactions, list, 7) : []),
     [transactions, list, showSuggestions]
   );
+
+  // Suggestions that can actually be applied (have a payee to key a rule on,
+  // not already applied). Selection / «выбрать все» operate on these.
+  const selectable = useMemo(
+    () => suggestions.filter((s) => s.payee && !appliedIds.has(s.txId)),
+    [suggestions, appliedIds]
+  );
+  const selectedCount = selectable.filter((s) => selected.has(s.txId)).length;
+  const allSelected = selectable.length > 0 && selectedCount === selectable.length;
+
+  function toggleSelect(txId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(txId)) next.delete(txId);
+      else next.add(txId);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(selectable.map((s) => s.txId)));
+  }
+  function selectConfident() {
+    setSelected(new Set(selectable.filter((s) => s.confidence >= 0.7).map((s) => s.txId)));
+  }
 
   async function applyOne(s: CategorySuggestion) {
     if (!s.payee) return;
@@ -57,24 +83,27 @@ export function UncategorizedPage() {
       category: s.suggested,
     });
     setAppliedIds((prev) => new Set(prev).add(s.txId));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(s.txId);
+      return next;
+    });
     await reapplyRules();
     setBusy(false);
   }
 
-  async function applyAllConfident() {
-    const confident = suggestions.filter(
-      (s) => s.confidence >= 0.7 && s.payee && !appliedIds.has(s.txId)
-    );
-    if (confident.length === 0) return;
+  async function applySelected() {
+    const toApply = selectable.filter((s) => selected.has(s.txId));
+    if (toApply.length === 0) return;
     const ok = await confirm({
-      title: "Создать правила автоматически?",
-      message: `Будет создано ${confident.length} правил на основе высокоуверенных подсказок.`,
-      confirmLabel: "Создать",
+      title: "Применить выбранные подсказки?",
+      message: `Будет создано ${toApply.length} ${pluralRu(toApply.length, ["правило", "правила", "правил"])} по получателю — выбранные операции категоризируются.`,
+      confirmLabel: "Применить",
     });
     if (!ok) return;
     setBusy(true);
     await addManyRules(
-      confident.map((s) => ({
+      toApply.map((s) => ({
         enabled: true,
         field: "payee",
         op: "contains",
@@ -85,9 +114,10 @@ export function UncategorizedPage() {
     );
     setAppliedIds((prev) => {
       const next = new Set(prev);
-      for (const s of confident) next.add(s.txId);
+      for (const s of toApply) next.add(s.txId);
       return next;
     });
+    setSelected(new Set());
     await reapplyRules();
     setBusy(false);
   }
@@ -99,10 +129,10 @@ export function UncategorizedPage() {
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Tag className="w-6 h-6 text-accent" />
-          Незакатегоризованные
+          Без категории
         </h1>
         <p className="text-muted text-sm mt-1">
-          Операции с категориями «Прочие» / «Без категории» / пустыми. Подсветить пробелы для чистки в Дзен-мани.
+          Операции без категории — собраны в одном месте. Подсказки ниже помогут быстро их разнести, а правила — категоризировать похожие автоматически.
         </p>
       </div>
 
@@ -140,17 +170,13 @@ export function UncategorizedPage() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={applyAllConfident}
-                disabled={
-                  busy ||
-                  suggestions.filter((s) => s.confidence >= 0.7 && !appliedIds.has(s.txId)).length === 0
-                }
+                onClick={applySelected}
+                disabled={busy || selectedCount === 0}
                 className="btn-primary text-xs"
+                title="Создаст правила по получателю для выбранных подсказок и применит их"
               >
                 <Wand2 className="w-3.5 h-3.5" />
-                Применить уверенные (
-                {suggestions.filter((s) => s.confidence >= 0.7 && !appliedIds.has(s.txId)).length}
-                )
+                Применить подсказки ({selectedCount})
               </button>
               <button
                 onClick={() => setShowSuggestions(false)}
@@ -161,6 +187,27 @@ export function UncategorizedPage() {
               </button>
             </div>
           </div>
+          {/* Select-all + quick presets. */}
+          {selectable.length > 0 && (
+            <div className="flex items-center gap-3 px-2 py-1.5 mb-1 text-xs border-b border-border/50">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = selectedCount > 0 && !allSelected;
+                  }}
+                  onChange={toggleSelectAll}
+                  className="accent-accent"
+                />
+                <span className="text-muted">Выбрать все ({selectable.length})</span>
+              </label>
+              <button onClick={selectConfident} className="text-accent hover:underline">
+                только надёжные (≥70%)
+              </button>
+              <span className="ml-auto text-muted">Выбрано: {selectedCount}</span>
+            </div>
+          )}
           <div className="max-h-96 overflow-y-auto space-y-1">
             {suggestions.slice(0, 50).map((s) => {
               const applied = appliedIds.has(s.txId);
@@ -171,6 +218,20 @@ export function UncategorizedPage() {
                     applied ? "bg-income/10" : "bg-panel2/40 hover:bg-panel2/70"
                   }`}
                 >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(s.txId)}
+                    disabled={applied || !s.payee}
+                    onChange={() => toggleSelect(s.txId)}
+                    className="accent-accent shrink-0"
+                    title={
+                      !s.payee
+                        ? "Нет получателя — правило не создать"
+                        : applied
+                          ? "Уже применено"
+                          : "Выбрать для применения"
+                    }
+                  />
                   <div className="text-xs text-muted whitespace-nowrap tabular-nums w-20">
                     {formatDate(s.date, "short")}
                   </div>
@@ -226,13 +287,13 @@ export function UncategorizedPage() {
           <AlertCircle className="w-10 h-10 text-income mx-auto mb-3" />
           <div className="font-medium mb-1">Все операции категоризированы — отлично!</div>
           <div className="text-sm text-muted">
-            Не найдено операций с пустыми или «прочими» категориями
+            Не найдено операций без категории
           </div>
         </div>
       ) : (
         <div className="card card-pad">
           <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold">Все незакатегоризованные ({list.length})</div>
+            <div className="font-semibold">Все без категории ({list.length})</div>
             <button
               onClick={() => showDrill("Незакатегоризованные", list, "Чистка категорий")}
               className="btn-ghost text-xs"

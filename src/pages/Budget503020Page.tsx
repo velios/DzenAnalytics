@@ -20,7 +20,7 @@ import {
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { buildNeedsWants, savingsRateSeries } from "../lib/needsWants";
-import { affectsExpense } from "../lib/txKindStyle";
+import { buildObligatorySet } from "../lib/aggregations";
 import { PeriodPills } from "../components/PeriodPills";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
@@ -72,16 +72,10 @@ export function Budget503020Page() {
   // OBLIGATORY: an expense category is a need unless Zenmoney's «обязательная»
   // flag is explicitly `false` (null/true → mandatory). The flag is edited in
   // the «Обязательность расходов в категориях» block on the Categories page.
-  const needsCategories = useMemo(() => {
-    const needs = new Set<string>();
-    for (const t of filtered) {
-      if (!affectsExpense(t.kind)) continue;
-      const cat = t.category;
-      const m = categoryMeta[cat];
-      if (m ? m.required !== false : true) needs.add(cat); // default obligatory
-    }
-    return needs;
-  }, [filtered, categoryMeta]);
+  const needsCategories = useMemo(
+    () => buildObligatorySet(filtered, categoryMeta),
+    [filtered, categoryMeta]
+  );
 
   const split = useMemo(
     () => buildNeedsWants(filtered, needsCategories),

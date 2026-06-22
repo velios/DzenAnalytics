@@ -46,7 +46,6 @@ import { useBudgetsStore } from "../store/useBudgetsStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
-import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
 import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore, recalcBalanceCalibration } from "../store/useZenmoneyStore";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
@@ -552,7 +551,6 @@ export function ImportPage() {
   const calibHydrate = useCalibrationStore((s) => s.hydrate);
   const viewsHydrate = useSavedViewsStore((s) => s.hydrate);
   const annHydrate = useAnnotationsStore((s) => s.hydrate);
-  const flagsHydrate = useCategoryFlagsStore((s) => s.hydrate);
   const dataHydrate = useDataStore((s) => s.hydrate);
   const backupRef = useRef<HTMLInputElement>(null);
   const [backupBusy, setBackupBusy] = useState(false);
@@ -627,7 +625,6 @@ export function ImportPage() {
         calibHydrate(),
         viewsHydrate(),
         annHydrate(),
-        flagsHydrate(),
         hydrateInflation(),
         aliasesHydrate(),
         reportPeriodHydrate(),

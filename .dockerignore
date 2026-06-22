@@ -9,11 +9,10 @@ node_modules/
 .env
 .*.env
 
-Dockerfile
-docker-compose.yaml
+docker/
 .dockerignore
 
 docs/
 LICENSE
 README.md
-samples/
+sample/

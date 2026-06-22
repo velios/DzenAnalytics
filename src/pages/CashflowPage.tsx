@@ -18,7 +18,7 @@ import {
   TrendingDown,
   TrendingUp,
   Wallet,
-  Hash,
+  List,
   Calendar,
   ChevronLeft,
   ChevronRight,
@@ -238,7 +238,7 @@ export function CashflowPage() {
           <Stat
             label="Операций (клик)"
             value={formatNum(kpi.count)}
-            icon={<Hash className="w-4 h-4" />}
+            icon={<List className="w-4 h-4" />}
             hint={
               <span className="flex items-center gap-1">
                 <Calendar className="w-3 h-3" />

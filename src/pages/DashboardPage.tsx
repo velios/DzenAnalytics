@@ -33,7 +33,7 @@ import { useEffect } from "react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
-import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
+import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { AnnotationMarker } from "../components/AnnotationMarker";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -46,7 +46,8 @@ import {
   detectRecurring,
   dailyExpenseMap,
   buildForecast,
-  applyCategoryFlags,
+  buildObligatorySet,
+  splitByObligation,
   balancesByAccount,
 } from "../lib/aggregations";
 import { useNetWorthSeries } from "../hooks/useNetWorthSeries";
@@ -251,17 +252,17 @@ export function DashboardPage() {
     if (!zenLoaded) zenHydrate();
   }, [zenLoaded, zenHydrate]);
   const apiConnected = !!zenToken;
-  const flags = useCategoryFlagsStore((s) => s.flags);
-  const flagsHydrate = useCategoryFlagsStore((s) => s.hydrate);
-  const flagsLoaded = useCategoryFlagsStore((s) => s.loaded);
+  const categoryMeta = useCategoryMetaStore((s) => s.meta);
+  const metaHydrate = useCategoryMetaStore((s) => s.hydrate);
+  const metaLoaded = useCategoryMetaStore((s) => s.loaded);
   const annotations = useAnnotationsStore((s) => s.annotations);
   const annHydrate = useAnnotationsStore((s) => s.hydrate);
   const annLoaded = useAnnotationsStore((s) => s.loaded);
   useEffect(() => {
     if (!calibLoaded) hydrateCalibration();
-    if (!flagsLoaded) flagsHydrate();
+    if (!metaLoaded) metaHydrate();
     if (!annLoaded) annHydrate();
-  }, [calibLoaded, hydrateCalibration, flagsLoaded, flagsHydrate, annLoaded, annHydrate]);
+  }, [calibLoaded, hydrateCalibration, metaLoaded, metaHydrate, annLoaded, annHydrate]);
 
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const months = useMemo(
@@ -281,21 +282,16 @@ export function DashboardPage() {
     return buildInsights(thisYear);
   }, [transactions]);
   const recurring = useMemo(() => detectRecurring(transactions), [transactions]);
-  const flagsBreakdown = useMemo(() => {
-    const fixed = new Set<string>();
-    const disc = new Set<string>();
-    for (const [cat, flag] of Object.entries(flags)) {
-      if (flag === "fixed") fixed.add(cat);
-      else if (flag === "discretionary") disc.add(cat);
-    }
+  const obligationBreakdown = useMemo(() => {
     const lastMonthYM = months[months.length - 1]?.ym;
     const lastTxs = lastMonthYM
       ? transactions.filter(
           (t) => periodKey(t.date, monthStartDay) === lastMonthYM
         )
       : transactions;
-    return applyCategoryFlags(lastTxs, fixed, disc);
-  }, [flags, months, transactions, monthStartDay]);
+    const obligatorySet = buildObligatorySet(lastTxs, categoryMeta);
+    return splitByObligation(lastTxs, obligatorySet);
+  }, [categoryMeta, months, transactions, monthStartDay]);
   const dayMap = useMemo(() => dailyExpenseMap(transactions), [transactions]);
 
   // Account balances. If the Zenmoney cache is present, prefer real
@@ -425,7 +421,14 @@ export function DashboardPage() {
 
   const netWorthChart = netWorth.map((p) => ({ date: p.date, net: Math.round(p.net) }));
 
-  const totalRecurringMonthly = recurring.reduce(
+  // Only ACTIVE subscriptions (not stale ones — those whose schedule lapsed
+  // by >~2 cycles). Used for both the monthly estimate and the count badge so
+  // a cancelled-months-ago plan neither inflates the figure nor the count.
+  const activeRecurring = recurring.filter((c) => !c.stale);
+  // Active subscriptions on a monthly cadence — the headline count for the
+  // «Ближайшие регулярные» widget (its estimate below is a per-month figure).
+  const activeMonthly = activeRecurring.filter((c) => c.cadence === "monthly");
+  const totalRecurringMonthly = activeRecurring.reduce(
     (s, c) => s + (c.avgIntervalDays > 0 ? (c.avgAmount * 30) / c.avgIntervalDays : 0),
     0
   );
@@ -667,64 +670,49 @@ export function DashboardPage() {
 
       {insights.length > 0 && <InsightsPanel insights={insights.slice(0, 6)} base={base} />}
 
-      {(flagsBreakdown.fixed > 0 || flagsBreakdown.discretionary > 0) && (
+      {(obligationBreakdown.obligatory > 0 || obligationBreakdown.optional > 0) && (
         <div className="card card-pad">
           <div className="font-semibold mb-2">Структура расходов последнего месяца</div>
           <div className="text-xs text-muted mb-3">
-            На основе флагов категорий (страница «Категории»). «Свободные деньги» = доход − фиксированные расходы.
+            На основе обязательности категорий (редактор «Обязательность расходов» на странице «Категории»). «Свободные деньги» = доход − обязательные расходы.
           </div>
           {(() => {
-            const totalSpend = flagsBreakdown.fixed + flagsBreakdown.discretionary + flagsBreakdown.unflagged;
+            const totalSpend = obligationBreakdown.obligatory + obligationBreakdown.optional;
             const lastIncome = months[months.length - 1]?.income || 0;
-            const freedom = lastIncome - flagsBreakdown.fixed;
+            const freedom = lastIncome - obligationBreakdown.obligatory;
             return (
               <>
                 <div className="h-6 flex rounded-md overflow-hidden bg-panel2 mb-2">
-                  {flagsBreakdown.fixed > 0 && (
+                  {obligationBreakdown.obligatory > 0 && (
                     <div
                       className="bg-warn"
-                      style={{ width: `${(flagsBreakdown.fixed / totalSpend) * 100}%` }}
-                      title={`Фиксированные: ${formatMoney(flagsBreakdown.fixed, base)}`}
+                      style={{ width: `${(obligationBreakdown.obligatory / totalSpend) * 100}%` }}
+                      title={`Обязательные: ${formatMoney(obligationBreakdown.obligatory, base)}`}
                     />
                   )}
-                  {flagsBreakdown.discretionary > 0 && (
+                  {obligationBreakdown.optional > 0 && (
                     <div
                       className="bg-accent2"
-                      style={{ width: `${(flagsBreakdown.discretionary / totalSpend) * 100}%` }}
-                      title={`Дискретные: ${formatMoney(flagsBreakdown.discretionary, base)}`}
-                    />
-                  )}
-                  {flagsBreakdown.unflagged > 0 && (
-                    <div
-                      className="bg-border"
-                      style={{ width: `${(flagsBreakdown.unflagged / totalSpend) * 100}%` }}
-                      title={`Без флага: ${formatMoney(flagsBreakdown.unflagged, base)}`}
+                      style={{ width: `${(obligationBreakdown.optional / totalSpend) * 100}%` }}
+                      title={`Необязательные: ${formatMoney(obligationBreakdown.optional, base)}`}
                     />
                   )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
                   <div>
                     <div className="label flex items-center gap-1">
-                      <span className="w-2 h-2 rounded bg-warn" /> Фиксированные
+                      <span className="w-2 h-2 rounded bg-warn" /> Обязательные
                     </div>
                     <div className="font-semibold tabular-nums">
-                      {formatMoney(flagsBreakdown.fixed, base)}
+                      {formatMoney(obligationBreakdown.obligatory, base)}
                     </div>
                   </div>
                   <div>
                     <div className="label flex items-center gap-1">
-                      <span className="w-2 h-2 rounded bg-accent2" /> Дискретные
+                      <span className="w-2 h-2 rounded bg-accent2" /> Необязательные
                     </div>
                     <div className="font-semibold tabular-nums">
-                      {formatMoney(flagsBreakdown.discretionary, base)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="label flex items-center gap-1">
-                      <span className="w-2 h-2 rounded bg-border" /> Без флага
-                    </div>
-                    <div className="font-semibold tabular-nums text-muted">
-                      {formatMoney(flagsBreakdown.unflagged, base)}
+                      {formatMoney(obligationBreakdown.optional, base)}
                     </div>
                   </div>
                   <div>
@@ -935,7 +923,7 @@ export function DashboardPage() {
               Ближайшие регулярные
             </div>
             <Link to="/recurring" className="text-xs text-accent hover:underline flex items-center gap-1">
-              Все ({recurring.length}) <ArrowRight className="w-3 h-3" />
+              Ежемесячные ({activeMonthly.length}) <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           {upcoming.length === 0 ? (
@@ -964,7 +952,7 @@ export function DashboardPage() {
                 );
               })}
               <div className="mt-3 pt-3 border-t border-border text-xs text-muted">
-                ≈ {formatMoney(totalRecurringMonthly, base)} / мес всего на регулярные
+                ≈ {formatMoney(totalRecurringMonthly, base)} / мес на активные регулярные
               </div>
             </div>
           )}
@@ -1013,7 +1001,7 @@ export function DashboardPage() {
           <Repeat className="w-5 h-5 text-accent" />
           <div>
             <div className="font-medium text-sm">Регулярные</div>
-            <div className="text-xs text-muted">{recurring.length} найдено</div>
+            <div className="text-xs text-muted">{activeRecurring.length} активных</div>
           </div>
         </Link>
       </div>

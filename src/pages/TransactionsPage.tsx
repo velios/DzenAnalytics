@@ -8,10 +8,14 @@ import {
   TrendingUp,
   TrendingDown,
   Wallet,
-  Hash,
   ListFilter,
   ListChecks,
   CloudUpload,
+  List,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeftRight,
+  Undo2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -32,9 +36,24 @@ import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
 import { formatMoney, formatNum, displayPayee, secondaryPayee, crossCurrencyReceived } from "../lib/format";
 import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
-import type { Transaction } from "../types";
+import { pluralOps } from "../lib/plural";
+import type { Transaction, TxKind } from "../types";
 
 type SortMode = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
+
+/** The four operation kinds offered by the «Добавить» dropdown, in the order
+ *  the menu shows them. Colours mirror `kindColorClass`. */
+const ADD_OPTIONS: {
+  kind: TxKind;
+  label: string;
+  Icon: typeof ArrowUp;
+  color: string;
+}[] = [
+  { kind: "expense", label: "Расход", Icon: ArrowDown, color: "text-expense" },
+  { kind: "income", label: "Доход", Icon: ArrowUp, color: "text-income" },
+  { kind: "refund", label: "Возврат", Icon: Undo2, color: "text-accent2" },
+  { kind: "transfer", label: "Перевод", Icon: ArrowLeftRight, color: "text-slate-400" },
+];
 
 /**
  * For transfer transactions `payee` is blank. The "Счёт" column already
@@ -101,6 +120,7 @@ export function TransactionsPage() {
   const editsLoaded = useEditsStore((s) => s.loaded);
   const hydrateEdits = useEditsStore((s) => s.hydrate);
   const setEditMany = useEditsStore((s) => s.setEditMany);
+  const setEditEach = useEditsStore((s) => s.setEditEach);
   const reapplyRules = useDataStore((s) => s.reapplyRules);
   useEffect(() => {
     if (!editsLoaded) hydrateEdits();
@@ -115,7 +135,38 @@ export function TransactionsPage() {
   const [pageSearch, setPageSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("date-desc");
   const [editing, setEditing] = useState<Transaction | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<TxKind | null>(null);
+
+  // ── «Добавить» dropdown: pick which kind of operation to create. ─────
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setAddMenuOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAddMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [addMenuOpen]);
+
+  // ── Scroll-to-top FAB: shown once the user has scrolled the window
+  //    well past the first screen of the (often long) list. ─────────────
+  const [showTop, setShowTop] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > 600);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   // ── Bulk selection + edit ──────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -130,10 +181,23 @@ export function TransactionsPage() {
     });
   }
 
-  async function applyBulk(patch: TransactionEdit) {
+  async function applyBulk(patch: TransactionEdit, commentAppend?: string) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    await setEditMany(ids, patch);
+    if (commentAppend) {
+      // «Дополнить»: append to each row's *current* comment individually, in a
+      // single atomic store write (build all patches, then one setEditEach).
+      const byId = new Map(transactions.map((t) => [t.id, t]));
+      const patches: Record<string, TransactionEdit> = {};
+      for (const id of ids) {
+        const cur = (byId.get(id)?.comment || "").trim();
+        const merged = cur ? `${cur} ${commentAppend}` : commentAppend;
+        patches[id] = { ...patch, comment: merged };
+      }
+      await setEditEach(patches);
+    } else {
+      await setEditMany(ids, patch);
+    }
     await reapplyRules();
     setSelected(new Set());
     setBulkOpen(false);
@@ -314,7 +378,7 @@ export function TransactionsPage() {
         <Stat
           label="Операций"
           value={formatNum(totals.count)}
-          icon={<Hash className="w-4 h-4" />}
+          icon={<List className="w-4 h-4" />}
           hint={pageSearch ? `из ${filtered.length} в фильтре` : "под фильтрами"}
         />
       </div>
@@ -344,14 +408,40 @@ export function TransactionsPage() {
             </select>
           </div>
           {apiConnected && (
-            <button
-              onClick={() => setCreating(true)}
-              className="btn-primary text-xs whitespace-nowrap"
-              title="Добавить новую операцию"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Добавить
-            </button>
+            <div className="relative" ref={addMenuRef}>
+              <button
+                onClick={() => setAddMenuOpen((o) => !o)}
+                className="btn-primary text-xs whitespace-nowrap"
+                title="Добавить новую операцию"
+                aria-haspopup="menu"
+                aria-expanded={addMenuOpen}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Добавить
+              </button>
+              {addMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 mt-1 z-30 w-full rounded-lg border border-border bg-panel shadow-xl py-1"
+                >
+                  {ADD_OPTIONS.map((opt, i) => (
+                    <button
+                      key={opt.kind}
+                      role="menuitem"
+                      onClick={() => {
+                        setCreating(opt.kind);
+                        setAddMenuOpen(false);
+                      }}
+                      className="animate-menu-item flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left hover:bg-panel2"
+                      style={{ animationDelay: `${i * 45}ms` }}
+                    >
+                      <opt.Icon className={`w-4 h-4 ${opt.color}`} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <button onClick={exportCsv} className="btn-ghost text-xs whitespace-nowrap">
             <Download className="w-3.5 h-3.5" />
@@ -394,6 +484,7 @@ export function TransactionsPage() {
                 ymd={ymd}
                 txs={txs}
                 base={base}
+                showTransfers={!filters.excludeTransfers}
                 edits={edits}
                 drafts={drafts}
                 onEdit={setEditing}
@@ -444,7 +535,10 @@ export function TransactionsPage() {
       )}
 
       {creating && (
-        <EditTransactionModal onClose={() => setCreating(false)} />
+        <EditTransactionModal
+          initialKind={creating}
+          onClose={() => setCreating(null)}
+        />
       )}
 
       {/* Floating bulk-action bar — appears when ≥1 row is selected. */}
@@ -482,6 +576,18 @@ export function TransactionsPage() {
           onClose={() => setBulkOpen(false)}
         />
       )}
+
+      {/* Floating scroll-to-top button — appears once scrolled far down. */}
+      {showTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          className="fixed bottom-6 right-6 z-30 w-10 h-10 rounded-full border border-border bg-panel shadow-xl flex items-center justify-center text-muted hover:text-accent transition-colors"
+          title="Наверх"
+          aria-label="Вернуться к началу списка"
+        >
+          <ArrowUp className="w-5 h-5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -517,7 +623,7 @@ function HeaderRow({
       />
       {!grouped && <div>Дата</div>}
       <div>Категория</div>
-      <div>Получатель</div>
+      <div>Контрагент</div>
       <div>Комментарий</div>
       <div>Счёт</div>
       <div className="text-right">Сумма</div>
@@ -530,6 +636,7 @@ function DayGroup({
   ymd,
   txs,
   base,
+  showTransfers,
   edits,
   drafts,
   onEdit,
@@ -540,6 +647,7 @@ function DayGroup({
   ymd: string;
   txs: Transaction[];
   base: string;
+  showTransfers: boolean;
   edits: Record<string, unknown>;
   drafts: Record<string, unknown>;
   onEdit: (t: Transaction) => void;
@@ -551,13 +659,15 @@ function DayGroup({
   const totals = useMemo(() => {
     let inc = 0;
     let exp = 0;
+    let xfer = 0;
     for (const t of txs) {
       if (t.kind === "income") inc += t.amountBase;
       else if (t.kind === "expense") exp += t.amountBase;
       // Refund subtracts from the day header's expense total.
       else if (t.kind === "refund") exp -= t.amountBase;
+      else if (t.kind === "transfer") xfer += t.amountBase;
     }
-    return { inc, exp, net: inc - exp };
+    return { inc, exp, xfer, net: inc - exp };
   }, [txs]);
 
   return (
@@ -567,21 +677,44 @@ function DayGroup({
           <span className="font-semibold truncate">{label}</span>
           {weekday && <span className="text-xs text-muted">{weekday}</span>}
         </div>
-        <div className="ml-auto flex items-center gap-3 text-xs tabular-nums">
-          <span className="text-muted whitespace-nowrap">{txs.length} оп.</span>
+        <div className="ml-auto flex items-center gap-3 sm:gap-4 text-xs tabular-nums">
+          <span
+            className="flex items-center gap-1 text-muted whitespace-nowrap"
+            title={`${txs.length} ${pluralOps(txs.length)}`}
+          >
+            <List className="w-3.5 h-3.5" aria-hidden />
+            {txs.length}
+          </span>
+          {showTransfers && totals.xfer > 0 && (
+            <span
+              className="flex items-center gap-1 text-slate-400 whitespace-nowrap"
+              title="Переводы за день"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" aria-hidden />
+              {formatMoney(totals.xfer, base)}
+            </span>
+          )}
           {totals.inc > 0 && (
-            <span className="text-income whitespace-nowrap">
-              +{formatMoney(totals.inc, base)}
+            <span
+              className="flex items-center gap-1 text-income whitespace-nowrap"
+              title="Поступления за день"
+            >
+              <ArrowUp className="w-3.5 h-3.5" aria-hidden />
+              {formatMoney(totals.inc, base)}
             </span>
           )}
           {totals.exp > 0 && (
-            <span className="text-expense whitespace-nowrap">
-              −{formatMoney(totals.exp, base)}
+            <span
+              className="flex items-center gap-1 text-expense whitespace-nowrap"
+              title="Траты за день"
+            >
+              <ArrowDown className="w-3.5 h-3.5" aria-hidden />
+              {formatMoney(totals.exp, base)}
             </span>
           )}
           <span
-            className={`font-medium whitespace-nowrap ${totals.net >= 0 ? "text-income" : "text-expense"}`}
-            title="Чистый поток за день"
+            className={`px-2 py-0.5 rounded-md font-medium tabular-nums whitespace-nowrap ${totals.net >= 0 ? "bg-income/15 text-income" : "bg-expense/15 text-expense"}`}
+            title="Итог за день"
           >
             {formatMoney(totals.net, base, { signed: true })}
           </span>
@@ -704,7 +837,11 @@ function Row({
       <div
         className={`text-right tabular-nums font-medium whitespace-nowrap ${amountColor}`}
       >
-        <span className={amountSignClass}>{amountSign}</span>
+        {tx.kind === "transfer" ? (
+          <ArrowLeftRight className="inline-block w-3.5 h-3.5 align-[-2px] mr-0.5" aria-hidden />
+        ) : (
+          <span className={amountSignClass}>{amountSign}</span>
+        )}
         {formatMoney(tx.amount, tx.currency)}
         {(() => {
           const received = crossCurrencyReceived(tx);
@@ -743,7 +880,15 @@ function Row({
   );
 }
 
-const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const WEEKDAYS = [
+  "воскресенье",
+  "понедельник",
+  "вторник",
+  "среда",
+  "четверг",
+  "пятница",
+  "суббота",
+];
 const MONTHS_GEN = [
   "января", "февраля", "марта", "апреля", "мая", "июня",
   "июля", "августа", "сентября", "октября", "ноября", "декабря",

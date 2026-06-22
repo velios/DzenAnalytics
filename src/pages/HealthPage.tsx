@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
-import { useCategoryFlagsStore } from "../store/useCategoryFlagsStore";
+import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
+import { buildObligatorySet } from "../lib/aggregations";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import {
   getLiveAccountsFromCache,
@@ -96,26 +97,17 @@ export function HealthPage() {
   }, []);
   const calibLoaded = useCalibrationStore((s) => s.loaded);
   const hydrateCalibration = useCalibrationStore((s) => s.hydrate);
-  const flags = useCategoryFlagsStore((s) => s.flags);
-  const flagsLoaded = useCategoryFlagsStore((s) => s.loaded);
-  const hydrateFlags = useCategoryFlagsStore((s) => s.hydrate);
+  const categoryMeta = useCategoryMetaStore((s) => s.meta);
+  const metaLoaded = useCategoryMetaStore((s) => s.loaded);
+  const hydrateMeta = useCategoryMetaStore((s) => s.hydrate);
 
   useEffect(() => {
     if (!calibLoaded) hydrateCalibration();
-    if (!flagsLoaded) hydrateFlags();
-  }, [calibLoaded, hydrateCalibration, flagsLoaded, hydrateFlags]);
+    if (!metaLoaded) hydrateMeta();
+  }, [calibLoaded, hydrateCalibration, metaLoaded, hydrateMeta]);
 
   const score = useMemo(() => {
-    const fixedCategories = new Set(
-      Object.entries(flags)
-        .filter(([, v]) => v === "fixed")
-        .map(([k]) => k)
-    );
-    const discretionaryCategories = new Set(
-      Object.entries(flags)
-        .filter(([, v]) => v === "discretionary")
-        .map(([k]) => k)
-    );
+    const obligatoryCategories = buildObligatorySet(transactions, categoryMeta);
     // Off-balance accounts' total — added to the emergency fund. When «include
     // off-balance» is on, the net-worth calibration already counts them, so we
     // add nothing extra (avoids double-counting).
@@ -132,11 +124,10 @@ export function HealthPage() {
       transactions,
       baseCurrency,
       calibration,
-      fixedCategories,
-      discretionaryCategories,
+      obligatoryCategories,
       extraLiquid,
     });
-  }, [transactions, rates, baseCurrency, calibration, flags, includeOffBalance, liveAccounts]);
+  }, [transactions, rates, baseCurrency, calibration, categoryMeta, includeOffBalance, liveAccounts]);
 
   if (transactions.length === 0) return <EmptyState />;
 

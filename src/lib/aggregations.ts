@@ -603,7 +603,7 @@ export function suggestCategoriesForUncategorized(
       const cat = t.categoryFull || "";
       if (!cat) return false;
       if (/^\s*$/.test(cat)) return false;
-      if (/^прочи|без катего|other|misc/i.test(cat)) return false;
+      if (/^без катего/i.test(cat)) return false;
       return true;
     })
     .map((t) => ({
@@ -727,12 +727,15 @@ export function detectDuplicates(
 }
 
 export function detectUncategorized(txs: Transaction[]): Transaction[] {
+  // Only truly category-less operations count: an empty category or the
+  // explicit «Без категории». Zenmoney has no «Прочие» concept — that label
+  // only ever appears as a synthesized chart bucket, never as a real tag — so
+  // we don't treat it as uncategorised.
   const empty = /^\s*$/;
-  const generic = /^(прочи|без катего|other|misc)/i;
+  const noCategory = /^без катего/i;
   return txs.filter((t) => {
     if (t.kind === "transfer") return false;
-    if (empty.test(t.category) || generic.test(t.category)) return true;
-    return false;
+    return empty.test(t.category) || noCategory.test(t.category);
   });
 }
 
@@ -979,31 +982,45 @@ export function buildSankey(txs: Transaction[]): SankeyData {
   return { nodes, links };
 }
 
-export interface CategoryFlagsData {
-  fixed: number;
-  discretionary: number;
-  unflagged: number;
-}
-
-export function applyCategoryFlags(
+/** Categories that count as «обязательная» (mandatory). Default is obligatory —
+ *  only an explicit `required === false` (set in the «Обязательность расходов в
+ *  категориях» editor / pulled from Zenmoney) makes a category optional. Built
+ *  from the categories present in `txs`. Single source of the rule, shared by
+ *  the Dashboard «Свободные деньги», Health «доля обязательных» and 50/30/20. */
+export function buildObligatorySet(
   txs: Transaction[],
-  fixedCategories: Set<string>,
-  discretionaryCategories: Set<string>
-): CategoryFlagsData {
-  let fixed = 0;
-  let discretionary = 0;
-  let unflagged = 0;
+  categoryMeta: Record<string, { required?: boolean | null }>
+): Set<string> {
+  const set = new Set<string>();
   for (const t of txs) {
     if (!affectsExpense(t.kind)) continue;
-    // Refunds for a fixed/discretionary category subtract from that
-    // category's bucket — `expenseDelta` already returns a negative
-    // amount in that case, so we just add it through.
-    const delta = expenseDelta(t);
-    if (fixedCategories.has(t.category)) fixed += delta;
-    else if (discretionaryCategories.has(t.category)) discretionary += delta;
-    else unflagged += delta;
+    const m = categoryMeta[t.category];
+    if (m ? m.required !== false : true) set.add(t.category);
   }
-  return { fixed, discretionary, unflagged };
+  return set;
+}
+
+export interface ObligationData {
+  obligatory: number;
+  optional: number;
+}
+
+/** Split expense into obligatory vs optional buckets by category membership.
+ *  Refunds subtract from their bucket — `expenseDelta` already returns a
+ *  negative amount in that case, so we just add it through. */
+export function splitByObligation(
+  txs: Transaction[],
+  obligatoryCategories: Set<string>
+): ObligationData {
+  let obligatory = 0;
+  let optional = 0;
+  for (const t of txs) {
+    if (!affectsExpense(t.kind)) continue;
+    const delta = expenseDelta(t);
+    if (obligatoryCategories.has(t.category)) obligatory += delta;
+    else optional += delta;
+  }
+  return { obligatory, optional };
 }
 
 const ANCHOR_PATTERNS = [

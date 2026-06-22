@@ -79,6 +79,25 @@ export function CategoryCascadePicker({
     return active.subs.filter((s) => s.toLowerCase().includes(q));
   }, [active, q]);
 
+  // While searching, collapse the cascade into ONE flat, directly-selectable
+  // list of matching leaves — both categories and sub-categories — so a
+  // sub-category can be picked in a single click instead of drilling in
+  // (issue #21). Null when not searching (then the two-column cascade shows).
+  type SearchLeaf =
+    | { kind: "cat"; cat: string }
+    | { kind: "sub"; cat: string; sub: string };
+  const searchLeaves = useMemo<SearchLeaf[] | null>(() => {
+    if (!q) return null;
+    const items: SearchLeaf[] = [];
+    for (const c of categories) {
+      if (c.name.toLowerCase().includes(q)) items.push({ kind: "cat", cat: c.name });
+      for (const s of c.subs) {
+        if (s.toLowerCase().includes(q)) items.push({ kind: "sub", cat: c.name, sub: s });
+      }
+    }
+    return items;
+  }, [categories, q]);
+
   function toggle() {
     if (!open) {
       setQuery("");
@@ -128,6 +147,46 @@ export function CategoryCascadePicker({
               className="bg-transparent text-sm w-full outline-none"
             />
           </div>
+          {searchLeaves ? (
+            /* Search mode — one flat list with directly-selectable leaves,
+               sub-categories included (issue #21). */
+            <div className="overflow-y-auto" style={{ maxHeight }}>
+              {searchLeaves.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-muted">Ничего не найдено</div>
+              ) : (
+                searchLeaves.map((it) =>
+                  it.kind === "cat" ? (
+                    <button
+                      key={`c:${it.cat}`}
+                      type="button"
+                      onClick={() => commit(it.cat, "")}
+                      className={`w-full text-left px-2.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 ${
+                        category === it.cat && !subcategory ? "text-accent" : ""
+                      }`}
+                    >
+                      <CategoryDot category={it.cat} size="w-4 h-4" />
+                      <span className="truncate">{it.cat}</span>
+                    </button>
+                  ) : (
+                    <button
+                      key={`s:${it.cat}/${it.sub}`}
+                      type="button"
+                      onClick={() => commit(it.cat, it.sub)}
+                      className={`w-full text-left px-2.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 ${
+                        category === it.cat && subcategory === it.sub ? "text-accent" : ""
+                      }`}
+                    >
+                      <CategoryDot category={it.sub} parent={it.cat} size="w-4 h-4" />
+                      <span className="truncate">
+                        <span className="text-muted">{it.cat} / </span>
+                        {it.sub}
+                      </span>
+                    </button>
+                  )
+                )
+              )}
+            </div>
+          ) : (
           <div className="flex" style={{ maxHeight }}>
             {/* Left — top-level categories */}
             <div className="w-1/2 overflow-y-auto border-r border-border/60">
@@ -206,6 +265,7 @@ export function CategoryCascadePicker({
               )}
             </div>
           </div>
+          )}
         </div>
       )}
     </div>
