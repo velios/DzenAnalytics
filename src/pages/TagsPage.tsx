@@ -40,9 +40,11 @@ export function TagsPage() {
 
   // Tagged-only expense sum — shown as «всего» in the header.
   const totalExpense = tags.reduce((s, t) => s + t.expense, 0);
-  // Whole-period expense (across ALL operations, not just tagged) — the honest
-  // denominator for «Доля от расходов» (issue #20).
-  const periodExpense = useMemo(() => computeKPI(filtered).expense, [filtered]);
+  // Whole-period expense / income (across ALL operations, not just tagged) —
+  // the honest denominators for «Доля от расходов» / «Доля от дохода» (#20).
+  const periodKpi = useMemo(() => computeKPI(filtered), [filtered]);
+  const periodExpense = periodKpi.expense;
+  const periodIncome = periodKpi.income;
   const taggedCount = useMemo(
     () => filtered.filter((t) => extractHashtags(t.comment).length > 0).length,
     [filtered]
@@ -196,7 +198,22 @@ export function TagsPage() {
                 sortValue: (t) => (periodExpense > 0 ? t.expense / periodExpense : 0),
                 render: (t) => (
                   <span className="tabular-nums text-muted">
-                    {periodExpense > 0 ? formatPct(t.expense / periodExpense, 1) : "—"}
+                    {periodExpense > 0 && t.expense > 0
+                      ? formatPct(t.expense / periodExpense, 1)
+                      : "—"}
+                  </span>
+                ),
+              },
+              {
+                key: "incomeShare",
+                label: "Доля от дохода",
+                align: "right",
+                sortValue: (t) => (periodIncome > 0 ? t.income / periodIncome : 0),
+                render: (t) => (
+                  <span className="tabular-nums text-muted">
+                    {periodIncome > 0 && t.income > 0
+                      ? formatPct(t.income / periodIncome, 1)
+                      : "—"}
                   </span>
                 ),
               },
@@ -210,7 +227,7 @@ export function TagsPage() {
               return (
                 <tr className="bg-panel2/20">
                   <td className="table-td" />
-                  <td className="table-td text-xs text-muted" colSpan={5}>
+                  <td className="table-td text-xs text-muted" colSpan={6}>
                     Нет операций по категориям
                   </td>
                 </tr>
@@ -232,6 +249,11 @@ export function TagsPage() {
                     ? formatPct(n.expense / periodExpense, 1)
                     : "—"}
                 </td>
+                <td className="table-td text-right tabular-nums text-muted">
+                  {periodIncome > 0 && n.income > 0
+                    ? formatPct(n.income / periodIncome, 1)
+                    : "—"}
+                </td>
               </tr>,
               ...n.subs.map((s) => (
                 <tr
@@ -250,6 +272,11 @@ export function TagsPage() {
                   <td className="table-td text-right tabular-nums">
                     {periodExpense > 0 && s.expense > 0
                       ? formatPct(s.expense / periodExpense, 1)
+                      : "—"}
+                  </td>
+                  <td className="table-td text-right tabular-nums">
+                    {periodIncome > 0 && s.income > 0
+                      ? formatPct(s.income / periodIncome, 1)
                       : "—"}
                   </td>
                 </tr>
