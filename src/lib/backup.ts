@@ -10,50 +10,79 @@ import * as db from "./db";
 
 export const BACKUP_VERSION = 1;
 
+/**
+ * Every `meta`-store key that's part of a full local snapshot — the SINGLE
+ * source of truth so backup (build) and restore never drift. Each is a
+ * `db.loadJSON`/`db.saveJSON` blob; transactions / rates / importMeta have
+ * their own stores and are handled explicitly.
+ *
+ * Includes the user's UN-PUSHED local changes (edits, drafts, deletions, tag
+ * edits) so a restore brings back work not yet synced to the cloud — the whole
+ * point of "restore if the browser dies". Secrets (Zenmoney token, raw entity
+ * cache) are deliberately excluded — they must never leave the device in a
+ * plain JSON backup.
+ */
+export const BACKUP_META_KEYS = [
+  // settings / analytics config
+  "budgets", // legacy flat budgets (Record<category, number>)
+  "budgetsV2", // plan/fact budget lines (BudgetLine[])
+  "goals",
+  "calibration",
+  "fireExcludedAccounts",
+  "includeOffBalance",
+  "savedViews",
+  "annotations",
+  "categoryFlags", // legacy — kept so old backups round-trip
+  "inflation",
+  "payeeGrouping",
+  "payeeAliases",
+  "reportPeriod",
+  "categoryRules",
+  "duplicateExclusions",
+  // un-pushed local changes
+  "transactionEdits",
+  "pendingTransactions", // drafts (new operations)
+  "deletedTransactions",
+  "deletedPayloads",
+  "tagEdits",
+] as const;
+
 export interface BackupPayload {
   version: number;
   exportedAt: string;
   transactions: unknown;
   rates: unknown;
   importMeta: unknown;
-  /** Legacy flat budgets (Record<category, number>). Kept for old backups. */
-  budgets: unknown;
-  /** New plan/fact budget lines (BudgetLine[]). */
-  budgetsV2: unknown;
-  goals: unknown;
-  calibration: unknown;
-  /** FIRE dashboard: account titles excluded from the capital total. */
-  fireExcludedAccounts: unknown;
-  /** Global "include off-balance accounts" setting. */
-  includeOffBalance: unknown;
-  savedViews: unknown;
-  annotations: unknown;
-  categoryFlags: unknown;
-  inflation: unknown;
-  payeeGrouping: unknown;
-  categoryRules: unknown;
+  /** All `BACKUP_META_KEYS` blobs (budgets, edits, drafts, rules, …). */
+  [key: string]: unknown;
 }
 
 export async function buildBackupPayload(): Promise<BackupPayload> {
-  return {
+  const payload: BackupPayload = {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     transactions: await db.loadTransactions(),
     rates: await db.loadRates(),
     importMeta: await db.loadImportMeta(),
-    budgets: await db.loadJSON("budgets"),
-    budgetsV2: await db.loadJSON("budgetsV2"),
-    goals: await db.loadJSON("goals"),
-    calibration: await db.loadJSON("calibration"),
-    fireExcludedAccounts: await db.loadJSON("fireExcludedAccounts"),
-    includeOffBalance: await db.loadJSON("includeOffBalance"),
-    savedViews: await db.loadJSON("savedViews"),
-    annotations: await db.loadJSON("annotations"),
-    categoryFlags: await db.loadJSON("categoryFlags"),
-    inflation: await db.loadJSON("inflation"),
-    payeeGrouping: await db.loadJSON("payeeGrouping"),
-    categoryRules: await db.loadJSON("categoryRules"),
   };
+  for (const k of BACKUP_META_KEYS) {
+    payload[k] = await db.loadJSON(k);
+  }
+  return payload;
+}
+
+/** Write a (validated) backup payload back into IndexedDB, restoring every
+ *  section. Stores still need re-hydrating afterwards (caller's job) so the
+ *  in-memory state matches the freshly-written disk state. */
+export async function restoreBackupPayload(
+  dump: Record<string, unknown>
+): Promise<void> {
+  if (dump.transactions) await db.saveTransactions(dump.transactions as never);
+  if (dump.rates) await db.saveRates(dump.rates as never);
+  if (dump.importMeta) await db.saveImportMeta(dump.importMeta as never);
+  for (const k of BACKUP_META_KEYS) {
+    if (dump[k] !== undefined) await db.saveJSON(k, dump[k]);
+  }
 }
 
 // ── Import validation ──────────────────────────────────────────────────

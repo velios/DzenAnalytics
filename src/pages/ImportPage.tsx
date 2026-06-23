@@ -60,7 +60,11 @@ import { PageHeader } from "../components/PageHeader";
 import { formatNum, formatDate, formatMoney } from "../lib/format";
 import { useDisplayStore } from "../store/useDisplayStore";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
-import { parseAndValidateBackup } from "../lib/backup";
+import { parseAndValidateBackup, buildBackupPayload, restoreBackupPayload } from "../lib/backup";
+import { useCategoryRulesStore } from "../store/useCategoryRulesStore";
+import { useDeletedPayloadsStore } from "../store/useDeletedPayloadsStore";
+import { useTagEditsStore } from "../store/useTagEditsStore";
+import { useDuplicateExclusionsStore } from "../store/useDuplicateExclusionsStore";
 import * as db from "../lib/db";
 
 type Mode = "replace" | "merge";
@@ -498,26 +502,9 @@ export function ImportPage() {
     setBackupBusy(true);
     setBackupMsg(null);
     try {
-      const dump = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        transactions: await db.loadTransactions(),
-        rates: await db.loadRates(),
-        importMeta: await db.loadImportMeta(),
-        budgets: await db.loadJSON("budgets"),
-        budgetsV2: await db.loadJSON("budgetsV2"),
-        goals: await db.loadJSON("goals"),
-        calibration: await db.loadJSON("calibration"),
-        fireExcludedAccounts: await db.loadJSON("fireExcludedAccounts"),
-        includeOffBalance: await db.loadJSON("includeOffBalance"),
-        savedViews: await db.loadJSON("savedViews"),
-        annotations: await db.loadJSON("annotations"),
-        categoryFlags: await db.loadJSON("categoryFlags"),
-        inflation: await db.loadJSON("inflation"),
-        payeeGrouping: await db.loadJSON("payeeGrouping"),
-        payeeAliases: await db.loadJSON("payeeAliases"),
-        reportPeriod: await db.loadJSON("reportPeriod"),
-      };
+      // Single shared builder (lib/backup) so the manual export and the
+      // scheduled auto-backup always include the exact same sections.
+      const dump = await buildBackupPayload();
       const json = JSON.stringify(dump, null, 2);
       const blob = new Blob([json], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -526,7 +513,8 @@ export function ImportPage() {
       a.download = `dzenanalytics-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      setBackupMsg(`Экспортировано: ${formatNum((dump.transactions || []).length)} операций + настройки`);
+      const txCount = Array.isArray(dump.transactions) ? dump.transactions.length : 0;
+      setBackupMsg(`Экспортировано: ${formatNum(txCount)} операций + настройки`);
     } catch (e) {
       setBackupMsg(e instanceof Error ? `Ошибка: ${e.message}` : "Ошибка экспорта");
     } finally {
@@ -549,13 +537,23 @@ export function ImportPage() {
       // Validate + sanitize (type checks, prototype-pollution stripping,
       // size/depth bounds) before anything touches IndexedDB.
       const dump = parseAndValidateBackup(text) as unknown as Record<string, unknown>;
-      if (dump.transactions) await db.saveTransactions(dump.transactions as never);
-      if (dump.rates) await db.saveRates(dump.rates as never);
-      if (dump.importMeta) await db.saveImportMeta(dump.importMeta as never);
-      const keys = ["budgets", "budgetsV2", "goals", "calibration", "fireExcludedAccounts", "includeOffBalance", "savedViews", "annotations", "categoryFlags", "inflation", "payeeGrouping", "payeeAliases", "reportPeriod"];
-      for (const k of keys) {
-        if (dump[k] !== undefined) await db.saveJSON(k, dump[k]);
-      }
+      // Write every section back to IndexedDB (shared key list with the
+      // builder — incl. local edits/drafts/deletions/rules so un-pushed work
+      // survives a restore).
+      await restoreBackupPayload(dump);
+      // Re-hydrate the OVERLAY stores FIRST so their in-memory state reflects
+      // the freshly-restored disk data, THEN rebuild the data pipeline (which
+      // reads edits/rules/deletions through those stores).
+      await Promise.all([
+        useEditsStore.getState().hydrate(),
+        useCategoryRulesStore.getState().hydrate(),
+        useDraftsStore.getState().hydrate(),
+        useDeletedStore.getState().hydrate(),
+        useDeletedPayloadsStore.getState().hydrate(),
+        useTagEditsStore.getState().hydrate(),
+        useDuplicateExclusionsStore.getState().hydrate(),
+        aliasesHydrate(),
+      ]);
       await Promise.all([
         dataHydrate(),
         goalsHydrate(),
@@ -564,7 +562,6 @@ export function ImportPage() {
         viewsHydrate(),
         annHydrate(),
         hydrateInflation(),
-        aliasesHydrate(),
         reportPeriodHydrate(),
         useOffBalanceStore.getState().hydrate(),
       ]);
