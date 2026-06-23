@@ -12,6 +12,7 @@
 import * as db from "./db";
 import type {
   ZenAccount,
+  ZenBudget,
   ZenDeletion,
   ZenDiffResponse,
   ZenInstrument,
@@ -30,6 +31,26 @@ export interface ZenCache {
   merchants: ZenMerchant[];
   transactions: ZenTransaction[];
   user: ZenDiffResponse["user"];
+  /** Zenmoney «Планы»/budgets. Optional for backward-compat with caches
+   *  written before budget sync existed (default to `[]` on read). */
+  budgets?: ZenBudget[];
+}
+
+/** Composite key for a budget row — it has no surface `id`. */
+function budgetKey(b: ZenBudget): string {
+  return `${b.tag ?? "∅"}|${b.date}`;
+}
+
+/** Merge budgets by their (tag, date) natural key — incoming wins. Budgets
+ *  have no `id`, so the generic id-merge / deletion path doesn't apply; a
+ *  "deleted" budget arrives as a zeroed/unlocked row that simply overwrites. */
+function mergeBudgets(prev: ZenBudget[], incoming: ZenBudget[] | undefined): ZenBudget[] {
+  const inc = incoming || [];
+  if (inc.length === 0) return prev;
+  const map = new Map<string, ZenBudget>();
+  for (const b of prev) map.set(budgetKey(b), b);
+  for (const b of inc) map.set(budgetKey(b), b);
+  return Array.from(map.values());
 }
 
 export async function loadZenCache(): Promise<ZenCache | null> {
@@ -124,6 +145,7 @@ export function applyDiff(
       merchants: diff.merchant || [],
       transactions: diff.transaction || [],
       user: diff.user || [],
+      budgets: diff.budget || [],
     });
   }
   const deletions = diff.deletion || [];
@@ -141,6 +163,7 @@ export function applyDiff(
     ),
     // user record rarely changes; if diff omits it, keep previous.
     user: diff.user && diff.user.length > 0 ? diff.user : prev.user,
+    budgets: mergeBudgets(prev.budgets || [], diff.budget),
   });
 }
 
@@ -156,5 +179,6 @@ export function cacheToDiffResponse(cache: ZenCache): ZenDiffResponse {
     merchant: cache.merchants,
     transaction: cache.transactions,
     user: cache.user,
+    budget: cache.budgets || [],
   };
 }

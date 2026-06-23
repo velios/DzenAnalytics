@@ -104,6 +104,23 @@ export interface ZenDeletion {
   stamp: number;
 }
 
+/**
+ * A Zenmoney «План»/budget row. Natural key = (user, tag, date); there's no
+ * surface `id`. `date` is the first day of the budgeted MONTH. `tag` is a tag
+ * UUID, or `null` for the whole-month aggregate budget. `*Lock` distinguishes a
+ * MANUAL plan (true) from an auto-forecast (false) — we only trust locked ones.
+ */
+export interface ZenBudget {
+  user: number;
+  changed: number;
+  date: string; // "yyyy-MM-dd" (first of month)
+  tag: string | null;
+  income: number;
+  incomeLock: boolean;
+  outcome: number;
+  outcomeLock: boolean;
+}
+
 export interface ZenDiffResponse {
   serverTimestamp: number;
   instrument: ZenInstrument[];
@@ -112,7 +129,7 @@ export interface ZenDiffResponse {
   merchant: ZenMerchant[];
   transaction: ZenTransaction[];
   user: { id: number; currency: number; [k: string]: unknown }[];
-  budget?: unknown[];
+  budget?: ZenBudget[];
   reminder?: unknown[];
   reminderMarker?: unknown[];
   country?: unknown[];
