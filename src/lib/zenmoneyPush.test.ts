@@ -809,3 +809,186 @@ describe("buildDraftTransaction", () => {
     });
   });
 });
+
+// ── Debt / loan / credit operations ──────────────────────────────────────
+// A debt op is a two-leg move where one leg is a debt-type account; Zenmoney
+// requires a non-null `payee`. The generic transfer branch would null it, so
+// the dedicated debt branch must patch in place and keep the counterparty.
+function debtCache(t: ZenTransaction): ZenCache {
+  return {
+    serverTimestamp: 0,
+    instruments: [{ id: 2, shortTitle: "RUB" } as ZenInstrument],
+    accounts: [
+      { id: "acc-card", title: "Карта", instrument: 2, type: "ccard" } as ZenAccount,
+      { id: "acc-debt", title: "Долг", instrument: 2, type: "debt" } as ZenAccount,
+      { id: "acc-card2", title: "Карта2", instrument: 2, type: "ccard" } as ZenAccount,
+    ],
+    tags: [],
+    merchants: [],
+    transactions: [t],
+    user: [],
+  };
+}
+function debtTx(p: Partial<ZenTransaction> = {}): ZenTransaction {
+  return {
+    id: "d1",
+    user: 1,
+    deleted: false,
+    changed: 100,
+    outcome: 1000,
+    income: 1000,
+    outcomeAccount: "acc-card",
+    incomeAccount: "acc-debt",
+    outcomeInstrument: 2,
+    incomeInstrument: 2,
+    opOutcome: 0,
+    opIncome: 0,
+    outcomeBankID: null,
+    incomeBankID: null,
+    tag: null,
+    payee: "Иван",
+    merchant: null,
+    ...p,
+  } as ZenTransaction;
+}
+const pushDebt = (t: ZenTransaction, edit: TransactionEdit) =>
+  buildPushItems({ [t.id]: edit }, debtCache(t));
+
+describe("buildPushItems — debt operations", () => {
+  it("changing the counterparty keeps payee set (no «should have payee» error)", () => {
+    const t = debtTx();
+    // The editor maps «Получатель» to `brand`; the overlay also carries the
+    // unchanged transfer legs.
+    const out = pushDebt(t, {
+      brand: "Пётр",
+      account: "Карта",
+      incomeAccount: "Долг",
+    } as TransactionEdit);
+    expect(out.toPush).toHaveLength(1);
+    const zen = out.toPush[0].zen;
+    expect(zen.payee).toBe("Пётр");
+    // Debt structure preserved.
+    expect(zen.outcomeAccount).toBe("acc-card");
+    expect(zen.incomeAccount).toBe("acc-debt");
+    expect(zen.outcome).toBe(1000);
+    expect(zen.income).toBe(1000);
+  });
+
+  it("swapping one account leg keeps the payee", () => {
+    const t = debtTx();
+    const out = pushDebt(t, {
+      outcomeAccount: "Карта2",
+      incomeAccount: "Долг",
+    } as TransactionEdit);
+    expect(out.toPush).toHaveLength(1);
+    const zen = out.toPush[0].zen;
+    expect(zen.outcomeAccount).toBe("acc-card2");
+    expect(zen.payee).toBe("Иван"); // preserved from original
+  });
+
+  it("refuses to clear the counterparty", () => {
+    const t = debtTx({ payee: "" });
+    const out = pushDebt(t, { brand: "" } as TransactionEdit);
+    expect(out.toPush).toHaveLength(0);
+    expect(out.skipped[0].reason).toMatch(/плательщик/i);
+  });
+
+  it("refuses an amount change on a debt op", () => {
+    const t = debtTx();
+    const out = pushDebt(t, { amount: 2000 } as TransactionEdit);
+    expect(out.toPush).toHaveLength(0);
+    expect(out.skipped[0].reason).toMatch(/сумм/i);
+  });
+
+  it("refuses a type flip on a debt op", () => {
+    const t = debtTx();
+    const out = pushDebt(t, { kind: "expense" } as TransactionEdit);
+    expect(out.toPush).toHaveLength(0);
+    expect(out.skipped[0].reason).toMatch(/тип/i);
+  });
+
+  it("a no-op overlay (unchanged legs) still pushes with payee intact", () => {
+    const t = debtTx();
+    const out = pushDebt(t, { account: "Карта", incomeAccount: "Долг" } as TransactionEdit);
+    expect(out.toPush).toHaveLength(1);
+    expect(out.toPush[0].zen.payee).toBe("Иван");
+  });
+});
+
+describe("buildDraftTransaction — debt", () => {
+  const RUB = 2;
+  const debtDraftCache = (): ZenCache => ({
+    serverTimestamp: 0,
+    instruments: [{ id: RUB, shortTitle: "RUB", rate: 1 }] as unknown as ZenCache["instruments"],
+    accounts: [
+      { id: "acc-card", title: "Карта", instrument: RUB, archive: false, type: "ccard" },
+      { id: "acc-debt", title: "Долги", instrument: RUB, archive: false, type: "debt" },
+    ] as unknown as ZenCache["accounts"],
+    tags: [],
+    merchants: [{ id: "m- renat", title: "Ренат Х." }] as unknown as ZenCache["merchants"],
+    transactions: [],
+    user: [{ id: 99, currency: RUB }] as unknown as ZenCache["user"],
+  });
+
+  it("«дал в долг»: real → Долги, payee set, no tag", () => {
+    const r = buildDraftTransaction(
+      {
+        id: "nd",
+        kind: "transfer",
+        date: "2026-06-14",
+        amount: 100000,
+        account: "Карта",
+        incomeAccount: "Долги",
+        payee: "Ренат Х.",
+      },
+      debtDraftCache(),
+      1000
+    );
+    expect(r.skip).toBeUndefined();
+    expect(r.zen).toMatchObject({
+      outcome: 100000,
+      income: 100000,
+      outcomeAccount: "acc-card",
+      incomeAccount: "acc-debt",
+      payee: "Ренат Х.",
+      tag: null,
+    });
+  });
+
+  it("«вернули»: Долги → real, payee still set", () => {
+    const r = buildDraftTransaction(
+      {
+        id: "nd2",
+        kind: "transfer",
+        date: "2026-06-14",
+        amount: 50000,
+        account: "Долги",
+        incomeAccount: "Карта",
+        payee: "Ренат Х.",
+      },
+      debtDraftCache(),
+      1000
+    );
+    expect(r.zen?.outcomeAccount).toBe("acc-debt");
+    expect(r.zen?.incomeAccount).toBe("acc-card");
+    expect(r.zen?.payee).toBe("Ренат Х.");
+  });
+
+  it("refuses a debt op without a counterparty", () => {
+    const r = buildDraftTransaction(
+      {
+        id: "nd3",
+        kind: "transfer",
+        date: "2026-06-14",
+        amount: 100,
+        account: "Карта",
+        incomeAccount: "Долги",
+        payee: "",
+      },
+      debtDraftCache(),
+      1000
+    );
+    expect(r.zen).toBeUndefined();
+    expect(r.skip).toMatch(/контрагент/i);
+  });
+});
