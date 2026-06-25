@@ -13,7 +13,7 @@
 // `amountBase`).
 
 import type { Transaction } from "../types";
-import { computeKPI, groupByMonth } from "./aggregations";
+import { computeKPI, groupByMonth, isObligatoryTx, type ObligationMeta } from "./aggregations";
 import { affectsExpense, expenseDelta } from "./txKindStyle";
 
 export interface NeedsWantsSplit {
@@ -30,14 +30,14 @@ export interface NeedsWantsSplit {
 
 export function buildNeedsWants(
   txs: Transaction[],
-  needsCategories: Set<string>
+  meta: ObligationMeta
 ): NeedsWantsSplit {
   let needs = 0;
   let wants = 0;
   for (const t of txs) {
     if (!affectsExpense(t.kind)) continue;
     const d = expenseDelta(t);
-    if (needsCategories.has(t.category)) needs += d;
+    if (isObligatoryTx(t, meta)) needs += d;
     else wants += d;
   }
   const income = computeKPI(txs).income;

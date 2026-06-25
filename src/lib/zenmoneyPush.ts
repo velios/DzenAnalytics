@@ -77,6 +77,10 @@ export interface PushBuildResult {
  *  real Zenmoney tag, so pushing them is impossible. */
 const SYNTHETIC_CATEGORIES = new Set(["Долг", "Перевод"]);
 
+/** Zenmoney account types that mark an operation as a debt/loan/credit move.
+ *  Mirrors the forward mapper (`zenmoneyMap.ts`) which labels these «Долг». */
+const DEBT_ACCOUNT_TYPES = new Set(["loan", "credit", "debt"]);
+
 /**
  * Replays the forward-mapper classification for a raw ZenTransaction so
  * we can tell what `kind` / `account` / `outcomeAccount` / `incomeAccount`
@@ -477,6 +481,102 @@ export function buildPushItems(
 
     const origIsTransfer = orig.kind === "transfer";
     const targetIsTransfer = targetKind === "transfer";
+
+    // ── Branch D (FIRST): debt / loan / credit operation ──────────────
+    // An operation touching a loan/credit/debt account. Zenmoney models
+    // these specially and REQUIRES a non-null `payee` (the counterparty).
+    // The generic transfer branch rebuilds both legs and nulls
+    // payee/merchant/tag → the server rejects it with «Debt transaction
+    // should have "payee" field set». So we PATCH IN PLACE: keep the debt
+    // structure (leg roles, amounts, tag, merchant) and only apply the
+    // counterparty, account-id swaps, date and comment. Structural edits we
+    // can't round-trip safely (type flip, amount, currency) are refused.
+    const origIsDebt =
+      DEBT_ACCOUNT_TYPES.has(accountsById.get(original.outcomeAccount)?.type || "") ||
+      DEBT_ACCOUNT_TYPES.has(accountsById.get(original.incomeAccount)?.type || "");
+    if (origIsDebt) {
+      if (targetKind !== orig.kind) {
+        skipped.push({
+          id,
+          reason:
+            "смена типа у долговой операции пока не поддерживается — отредактируйте в приложении Дзена",
+        });
+        continue;
+      }
+      if (
+        edit.amount !== undefined &&
+        edit.amount !== (original.outcome || original.income)
+      ) {
+        skipped.push({
+          id,
+          reason:
+            "смена суммы у долговой операции пока не поддерживается — отредактируйте в приложении Дзена",
+        });
+        continue;
+      }
+      const zen: ZenTransaction = { ...original };
+      // Account-leg swaps (titles → ids). Keep the leg roles and refuse a
+      // change of the account's currency (the debt leg structure stays).
+      const swapLeg = (
+        title: string | undefined,
+        origTitle: string,
+        leg: "outcome" | "income"
+      ): string | null => {
+        if (title === undefined || title === origTitle) return null;
+        const a = accountsByTitle.get(title);
+        if (!a) return `счёт "${title}" не найден в Zenmoney`;
+        const curInstr = leg === "outcome" ? original.outcomeInstrument : original.incomeInstrument;
+        if (a.instrument !== curInstr) {
+          return "смена счёта на счёт в другой валюте у долговой операции пока не поддерживается — отредактируйте в приложении Дзена";
+        }
+        if (leg === "outcome") {
+          zen.outcomeAccount = a.id;
+        } else {
+          zen.incomeAccount = a.id;
+        }
+        return null;
+      };
+      const errOut = origIsTransfer ? swapLeg(edit.outcomeAccount, orig.outAcc, "outcome") : null;
+      const errIn = origIsTransfer ? swapLeg(edit.incomeAccount, orig.inAcc, "income") : null;
+      // Single-leg debt op (interest paid etc.): both legs share one account.
+      const errSingle =
+        !origIsTransfer && edit.account !== undefined && edit.account !== orig.account
+          ? (() => {
+              const a = accountsByTitle.get(edit.account!);
+              if (!a) return `счёт "${edit.account}" не найден в Zenmoney`;
+              if (a.instrument !== original.outcomeInstrument)
+                return "смена счёта на счёт в другой валюте у долговой операции пока не поддерживается — отредактируйте в приложении Дзена";
+              zen.outcomeAccount = a.id;
+              zen.incomeAccount = a.id;
+              return null;
+            })()
+          : null;
+      const accErr = errOut || errIn || errSingle;
+      if (accErr) {
+        skipped.push({ id, reason: accErr });
+        continue;
+      }
+      applyDateComment(zen, edit);
+      // Counterparty — the editor's «Получатель» maps to `brand`. A debt op
+      // MUST keep a non-null payee, so prefer the explicit edit, else the
+      // original's payee.
+      let payeeStr = original.payee || "";
+      if (edit.brand !== undefined) payeeStr = (edit.brand || "").trim();
+      if (edit.payee !== undefined) payeeStr = (edit.payee || "").trim();
+      if (!payeeStr) {
+        skipped.push({
+          id,
+          reason: "у долговой операции должен быть указан плательщик (контрагент)",
+        });
+        continue;
+      }
+      zen.payee = payeeStr;
+      const mId = merchantsByTitle.get(payeeStr.toLowerCase());
+      zen.merchant = mId ?? original.merchant ?? null;
+      zen.changed = Math.floor(Date.now() / 1000);
+      toPush.push({ id, zen });
+      continue;
+    }
 
     // ── Branch A: target is a transfer ────────────────────────────────
     // Covers flip → transfer AND editing the accounts/amount of an
@@ -993,12 +1093,28 @@ export function buildDraftTransaction(
     zen.tag = [tagId];
   }
 
-  // Counterparty: known brand → merchant id; else free-text payee.
+  // Counterparty. A DEBT op (one leg is a debt-type account) MUST keep a
+  // non-null `payee` — Zenmoney rejects it otherwise — so we always write
+  // payee (and link the merchant too when the name is known). For a normal
+  // op the usual rule applies: known brand → merchant id, else free-text payee.
+  const accById = new Map(cache.accounts.map((a) => [a.id, a]));
+  const isDebtDraft =
+    DEBT_ACCOUNT_TYPES.has(accById.get(zen.outcomeAccount)?.type || "") ||
+    DEBT_ACCOUNT_TYPES.has(accById.get(zen.incomeAccount)?.type || "");
   const counterparty = (fields.payee || "").trim();
+  if (isDebtDraft && !counterparty) {
+    return { skip: "у долговой операции укажите контрагента (плательщика)" };
+  }
   if (counterparty) {
     const merchantId = merchantsByTitle.get(counterparty.toLowerCase());
-    if (merchantId) zen.merchant = merchantId;
-    else zen.payee = counterparty;
+    if (isDebtDraft) {
+      zen.payee = counterparty;
+      if (merchantId) zen.merchant = merchantId;
+    } else if (merchantId) {
+      zen.merchant = merchantId;
+    } else {
+      zen.payee = counterparty;
+    }
   }
 
   return { zen };

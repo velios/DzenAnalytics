@@ -63,7 +63,7 @@ const PAGE_ITEMS: { path: string; title: string; icon: React.ComponentType<{ cla
   { path: "/goals", title: "Цели · FIRE", icon: Target, aliases: ["goals", "fire"] },
   { path: "/calendar", title: "Календарь", icon: CalendarDays, aliases: ["calendar"] },
   { path: "/top", title: "Топ", icon: TrendingUp, aliases: ["top"] },
-  { path: "/tags", title: "Хэштеги", icon: Hash, aliases: ["tags"] },
+  { path: "/tags", title: "Теги", icon: Hash, aliases: ["tags"] },
   { path: "/recurring", title: "Регулярные", icon: Repeat, aliases: ["recurring", "subscriptions"] },
   { path: "/anomalies", title: "Аномалии", icon: Zap, aliases: ["anomalies"] },
   { path: "/duplicates", title: "Дубликаты", icon: Copy, aliases: ["duplicates"] },

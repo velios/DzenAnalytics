@@ -11,13 +11,13 @@ import {
   netWorthSeries,
   netWorthBasis,
   buildSankey,
-  buildObligatorySet,
   splitByObligation,
+  isObligatoryTx,
 } from "./aggregations";
 import { tx } from "../test/fixtures";
 import type { CurrencyRates } from "../types";
 
-describe("buildObligatorySet / splitByObligation — default obligatory", () => {
+describe("splitByObligation / isObligatoryTx — default obligatory, sub-aware", () => {
   const txs = [
     tx({ kind: "expense", category: "Аренда", amount: 100, amountBase: 100 }),
     tx({ kind: "expense", category: "Кафе", amount: 40, amountBase: 40 }),
@@ -25,39 +25,48 @@ describe("buildObligatorySet / splitByObligation — default obligatory", () => 
     tx({ kind: "income", category: "Зарплата", amount: 500, amountBase: 500 }),
   ];
 
-  it("treats every expense category as obligatory unless required === false", () => {
+  it("expense category obligatory unless required === false", () => {
     const meta = {
       Кафе: { required: false },
       Развлечения: { required: false },
       // «Аренда» has no meta row → defaults to obligatory.
     };
-    const set = buildObligatorySet(txs, meta);
-    expect(set.has("Аренда")).toBe(true);
-    expect(set.has("Кафе")).toBe(false);
-    expect(set.has("Развлечения")).toBe(false);
-    // Income categories never enter the set.
-    expect(set.has("Зарплата")).toBe(false);
+    const { obligatory, optional } = splitByObligation(txs, meta);
+    expect(obligatory).toBe(100); // Аренда
+    expect(optional).toBe(50); // Кафе 40 + Развлечения 10
   });
 
   it("required null/true both count as obligatory", () => {
     const meta = { Аренда: { required: null }, Кафе: { required: true } };
-    const set = buildObligatorySet(txs, meta);
-    expect(set.has("Аренда")).toBe(true);
-    expect(set.has("Кафе")).toBe(true);
-  });
-
-  it("splits expense into obligatory vs optional buckets", () => {
-    const set = new Set(["Аренда"]);
-    const { obligatory, optional } = splitByObligation(txs, set);
-    expect(obligatory).toBe(100);
-    expect(optional).toBe(50); // Кафе 40 + Развлечения 10; income excluded
+    const { obligatory } = splitByObligation(txs, meta);
+    expect(obligatory).toBe(150); // Аренда 100 + Кафе 40 + Развлечения 10 (default)
   });
 
   it("empty meta → all expenses obligatory", () => {
-    const set = buildObligatorySet(txs, {});
-    const { obligatory, optional } = splitByObligation(txs, set);
+    const { obligatory, optional } = splitByObligation(txs, {});
     expect(obligatory).toBe(150);
     expect(optional).toBe(0);
+  });
+
+  it("subcategory's own flag overrides the parent (#5)", () => {
+    const sub = tx({
+      kind: "expense",
+      category: "Покупки",
+      subcategory: "Одежда",
+      categoryFull: "Покупки / Одежда",
+      amount: 30,
+      amountBase: 30,
+    });
+    // Parent obligatory, sub explicitly NOT — sub wins.
+    expect(
+      isObligatoryTx(sub, { Покупки: { required: true }, "Покупки / Одежда": { required: false } })
+    ).toBe(false);
+    // Parent NOT obligatory, sub explicitly obligatory — sub wins.
+    expect(
+      isObligatoryTx(sub, { Покупки: { required: false }, "Покупки / Одежда": { required: true } })
+    ).toBe(true);
+    // Sub has no flag → inherits parent.
+    expect(isObligatoryTx(sub, { Покупки: { required: false } })).toBe(false);
   });
 });
 

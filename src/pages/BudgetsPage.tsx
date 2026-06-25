@@ -29,6 +29,8 @@ import {
   type BudgetLine,
 } from "../lib/budgets";
 import { formatMoney } from "../lib/format";
+import { loadZenCache } from "../lib/zenmoneyCache";
+import { zenPlansFromBudgets, zenPlanKey } from "../lib/zenBudgets";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { DateField } from "../components/DateField";
@@ -78,6 +80,22 @@ export function BudgetsPage() {
   useEffect(() => {
     if (!loaded) hydrate();
   }, [loaded, hydrate]);
+
+  // «План из Дзена» (pull-only): read the cached Zenmoney budgets and map them
+  // to per-(kind, category, month) amounts. Re-read when the dataset changes
+  // (a sync refreshes both transactions and the cache).
+  const [zenPlans, setZenPlans] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    let alive = true;
+    loadZenCache()
+      .then((cache) => {
+        if (alive && cache) setZenPlans(zenPlansFromBudgets(cache.budgets, cache.tags));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [transactions]);
 
   const cur = currentMonth();
   const [ym, setYm] = useState(cur);
@@ -375,6 +393,7 @@ export function BudgetsPage() {
               isCurrent={isCurrent}
               monthProgress={monthProgress}
               base={base}
+              zenPlans={zenPlans}
               onOpen={openCategory}
               setOverride={setOverride}
               updateLine={updateLine}
@@ -390,6 +409,7 @@ export function BudgetsPage() {
               isCurrent={isCurrent}
               monthProgress={monthProgress}
               base={base}
+              zenPlans={zenPlans}
               onOpen={openCategory}
               setOverride={setOverride}
               updateLine={updateLine}
@@ -453,6 +473,8 @@ interface SectionProps {
   isCurrent: boolean;
   monthProgress: number;
   base: string;
+  /** «kind:category:ym» → planned amount from Zenmoney (pull-only display). */
+  zenPlans: Map<string, number>;
   onOpen: (cat: string) => void;
   setOverride: (id: string, ym: string, amount: number | null) => Promise<void>;
   updateLine: (id: string, patch: Partial<BudgetLine>) => Promise<void>;
@@ -483,6 +505,7 @@ function BudgetRow({
   isCurrent,
   monthProgress,
   base,
+  zenPlans,
   onOpen,
   setOverride,
   updateLine,
@@ -490,6 +513,7 @@ function BudgetRow({
 }: RowProps) {
   const { line, planned, fact } = row;
   const isIncome = line.kind === "income";
+  const zenPlan = zenPlans.get(zenPlanKey(line.kind, line.category, ym));
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
   const hasOverride = line.overrides?.[ym] !== undefined;
@@ -592,6 +616,23 @@ function BudgetRow({
                   сделать нормой →
                 </button>
               </>
+            )}
+            {zenPlan !== undefined && !editing && (
+              <span
+                className="inline-flex items-center gap-1 text-accent2"
+                title="План этой категории из Дзен-мани (раздел «Планы»)"
+              >
+                Дзен: {formatMoney(zenPlan, base)}
+                {Math.round(zenPlan) !== Math.round(planned) && (
+                  <button
+                    onClick={() => setOverride(line.id, ym, zenPlan)}
+                    className="hover:underline"
+                    title="Взять план из Дзен-мани в этот месяц"
+                  >
+                    взять
+                  </button>
+                )}
+              </span>
             )}
           </div>
         </div>

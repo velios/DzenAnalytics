@@ -97,18 +97,27 @@ export function CategoryRequiredEditor() {
   // an explicit true/false only when it crosses the bucket boundary of the
   // cached value; landing back on the cached bucket clears the overlay (so no
   // no-op push, and `null` stays `null` instead of churning to `true`). The
-  // optimistic categoryMeta write is for TOP-LEVEL tags only — sub-tags don't
-  // feed the 50/30/20 split.
+  // optimistic categoryMeta write keys by TITLE for roots and by the FULL PATH
+  // «Родитель / Подкатегория» for sub-tags — both feed the per-transaction
+  // obligatory split (#5), so the analytics update instantly.
   async function setObligatory(tag: CategoryTag, obligatory: boolean) {
     const cacheVal = tag.required ?? null;
     const isRoot = !tag.parent;
+    const parentTitle = isRoot
+      ? undefined
+      : (Array.isArray(tags) ? tags.find((t) => t.id === tag.parent)?.title : undefined);
+    const metaKey = isRoot
+      ? tag.title
+      : parentTitle
+        ? `${parentTitle} / ${tag.title}`
+        : null;
     if (obligatory === isObligatory(cacheVal)) {
       await useTagEditsStore.getState().clearMany([tag.id]);
-      if (isRoot) await useCategoryMetaStore.getState().setRequired(tag.title, cacheVal);
+      if (metaKey) await useCategoryMetaStore.getState().setRequired(metaKey, cacheVal);
     } else {
       const next = obligatory ? true : false;
       await useTagEditsStore.getState().setRequired(tag.id, next);
-      if (isRoot) await useCategoryMetaStore.getState().setRequired(tag.title, next);
+      if (metaKey) await useCategoryMetaStore.getState().setRequired(metaKey, next);
     }
   }
 
@@ -133,12 +142,13 @@ export function CategoryRequiredEditor() {
     return (
       <div className="card card-pad">
         <div className="font-semibold mb-1 flex items-center gap-2">
-          <Lock className="w-4 h-4 text-warn" /> Обязательность расходов в категориях
+          <Lock className="w-4 h-4 text-warn" /> Обязательность доходов и расходов в категориях
         </div>
         <p className="text-sm text-muted">
-          Редактирование поля «обязательная» доступно только в режиме Zenmoney
-          API (нужен живой список тегов и синхронизация). В режиме CSV
-          используйте ручные флаги 🔒/☕ в списке «Иерархия».
+          Редактирование обязательности доступно только в режиме Zenmoney API —
+          нужен живой список категорий и синхронизация. Подключите Дзен-мани в
+          настройках, чтобы помечать категории как обязательные и
+          необязательные.
         </p>
       </div>
     );
@@ -159,7 +169,7 @@ export function CategoryRequiredEditor() {
             )}
           />
           <Lock className="w-4 h-4 text-warn shrink-0" />
-          <span className="truncate">Обязательность расходов в категориях</span>
+          <span className="truncate">Обязательность доходов и расходов в категориях</span>
         </button>
         <div className="flex items-center gap-2 shrink-0">
           {pendingCount > 0 && (
@@ -192,14 +202,15 @@ export function CategoryRequiredEditor() {
       {open && (
         <>
           <p className="text-xs text-muted">
-            Здесь можно отредактировать обязательность расходов в категориях
-            Дзен-мани. По умолчанию расходы в категориях (если вы их не
-            редактировали в приложении) являются обязательными. Параметр полезен
-            для аналитики на странице{" "}
+            Здесь можно отредактировать обязательность категорий Дзен-мани — как
+            расходных, так и доходных. По умолчанию категории (если вы их не
+            редактировали в приложении) считаются обязательными. Параметр
+            используется в аналитике обязательных и необязательных потоков —
+            например, в правиле{" "}
             <Link to="/50-30-20" className="text-accent hover:underline">
               50/30/20
-            </Link>
-            .
+            </Link>{" "}
+            и в оценке финансового здоровья (доля обязательных трат).
           </p>
 
           <div className="flex items-center gap-2 bg-panel2 rounded-lg px-2 py-1 border border-border">

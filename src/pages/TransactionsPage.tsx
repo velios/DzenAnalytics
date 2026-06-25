@@ -16,6 +16,7 @@ import {
   ArrowDown,
   ArrowLeftRight,
   Undo2,
+  HandCoins,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -48,11 +49,14 @@ const ADD_OPTIONS: {
   label: string;
   Icon: typeof ArrowUp;
   color: string;
+  /** Open the editor in «Долг» mode (a debt op rides on kind=transfer). */
+  debt?: boolean;
 }[] = [
   { kind: "expense", label: "Расход", Icon: ArrowDown, color: "text-expense" },
   { kind: "income", label: "Доход", Icon: ArrowUp, color: "text-income" },
   { kind: "refund", label: "Возврат", Icon: Undo2, color: "text-accent2" },
   { kind: "transfer", label: "Перевод", Icon: ArrowLeftRight, color: "text-slate-400" },
+  { kind: "transfer", label: "Долг", Icon: HandCoins, color: "text-warn", debt: true },
 ];
 
 /**
@@ -136,6 +140,7 @@ export function TransactionsPage() {
   const [sortMode, setSortMode] = useState<SortMode>("date-desc");
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [creating, setCreating] = useState<TxKind | null>(null);
+  const [creatingDebt, setCreatingDebt] = useState(false);
 
   // ── «Добавить» dropdown: pick which kind of operation to create. ─────
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -426,10 +431,11 @@ export function TransactionsPage() {
                 >
                   {ADD_OPTIONS.map((opt, i) => (
                     <button
-                      key={opt.kind}
+                      key={opt.label}
                       role="menuitem"
                       onClick={() => {
                         setCreating(opt.kind);
+                        setCreatingDebt(!!opt.debt);
                         setAddMenuOpen(false);
                       }}
                       className="animate-menu-item flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left hover:bg-panel2"
@@ -537,7 +543,11 @@ export function TransactionsPage() {
       {creating && (
         <EditTransactionModal
           initialKind={creating}
-          onClose={() => setCreating(null)}
+          initialDebt={creatingDebt}
+          onClose={() => {
+            setCreating(null);
+            setCreatingDebt(false);
+          }}
         />
       )}
 
@@ -757,7 +767,10 @@ function Row({
   hideDate?: boolean;
 }) {
   const template = hideDate ? GRID_COLS_NODATE : GRID_COLS_FULL;
-  const amountColor = kindColorClass(tx.kind);
+  // Debt rides on kind=transfer, but gets its own accent (amber) instead of
+  // the transfer grey — so the feed matches the editor's «Долг» colour.
+  const amountColor =
+    tx.category === "Долг" ? "text-warn" : kindColorClass(tx.kind);
   const amountSign = kindSignGlyph(tx.kind);
   const amountSignClass = kindGlyphClass(tx.kind);
 
@@ -837,7 +850,9 @@ function Row({
       <div
         className={`text-right tabular-nums font-medium whitespace-nowrap ${amountColor}`}
       >
-        {tx.kind === "transfer" ? (
+        {tx.category === "Долг" ? (
+          <HandCoins className="inline-block w-3.5 h-3.5 align-[-2px] mr-0.5" aria-hidden />
+        ) : tx.kind === "transfer" ? (
           <ArrowLeftRight className="inline-block w-3.5 h-3.5 align-[-2px] mr-0.5" aria-hidden />
         ) : (
           <span className={amountSignClass}>{amountSign}</span>

@@ -15,6 +15,21 @@ import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyl
 import { EmptyState } from "../components/EmptyState";
 import { SortableTable, type Column } from "../components/SortableTable";
 import type { Transaction } from "../types";
+import type { RuleField } from "../store/useCategoryRulesStore";
+
+/** Build the rule key for a suggestion: by получатель when present, otherwise
+ *  by the comment. Some operations (dividend payouts, bank fees) have no payee
+ *  but a distinctive comment — without this they couldn't be applied at all.
+ *  Returns null when there's nothing to match on. */
+function ruleKeyFor(
+  s: CategorySuggestion
+): { field: RuleField; value: string } | null {
+  const payee = (s.payee || "").trim();
+  if (payee) return { field: "payee", value: payee };
+  const comment = (s.comment || "").trim();
+  if (comment) return { field: "comment", value: comment };
+  return null;
+}
 
 export function UncategorizedPage() {
   const transactions = useDataStore((s) => s.transactions);
@@ -47,10 +62,11 @@ export function UncategorizedPage() {
     [transactions, list, showSuggestions]
   );
 
-  // Suggestions that can actually be applied (have a payee to key a rule on,
-  // not already applied). Selection / «выбрать все» operate on these.
+  // Suggestions that can actually be applied (have something to key a rule on
+  // — payee or comment — and aren't already applied). Selection / «выбрать
+  // все» operate on these.
   const selectable = useMemo(
-    () => suggestions.filter((s) => s.payee && !appliedIds.has(s.txId)),
+    () => suggestions.filter((s) => ruleKeyFor(s) && !appliedIds.has(s.txId)),
     [suggestions, appliedIds]
   );
   const selectedCount = selectable.filter((s) => selected.has(s.txId)).length;
@@ -72,13 +88,14 @@ export function UncategorizedPage() {
   }
 
   async function applyOne(s: CategorySuggestion) {
-    if (!s.payee) return;
+    const key = ruleKeyFor(s);
+    if (!key) return;
     setBusy(true);
     await addRule({
       enabled: true,
-      field: "payee",
+      field: key.field,
       op: "contains",
-      value: s.payee,
+      value: key.value,
       caseInsensitive: true,
       category: s.suggested,
     });
@@ -97,20 +114,25 @@ export function UncategorizedPage() {
     if (toApply.length === 0) return;
     const ok = await confirm({
       title: "Применить выбранные подсказки?",
-      message: `Будет создано ${toApply.length} ${pluralRu(toApply.length, ["правило", "правила", "правил"])} по получателю — выбранные операции категоризируются.`,
+      message: `Будет создано ${toApply.length} ${pluralRu(toApply.length, ["правило", "правила", "правил"])} (по получателю или комментарию) — выбранные операции категоризируются.`,
       confirmLabel: "Применить",
     });
     if (!ok) return;
     setBusy(true);
     await addManyRules(
-      toApply.map((s) => ({
-        enabled: true,
-        field: "payee",
-        op: "contains",
-        value: s.payee,
-        caseInsensitive: true,
-        category: s.suggested,
-      }))
+      toApply.flatMap((s) => {
+        const key = ruleKeyFor(s);
+        return key
+          ? [{
+              enabled: true,
+              field: key.field,
+              op: "contains" as const,
+              value: key.value,
+              caseInsensitive: true,
+              category: s.suggested,
+            }]
+          : [];
+      })
     );
     setAppliedIds((prev) => {
       const next = new Set(prev);
@@ -165,7 +187,8 @@ export function UncategorizedPage() {
               </div>
               <div className="text-xs text-muted mt-1">
                 Подобраны по похожести получателя, комментария и категории. Применение
-                создаёт правило (по получателю) — можно отменить на странице «Правила».
+                создаёт правило (по получателю, а если его нет — по комментарию) —
+                можно отменить на странице «Правила».
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -173,7 +196,7 @@ export function UncategorizedPage() {
                 onClick={applySelected}
                 disabled={busy || selectedCount === 0}
                 className="btn-primary text-xs"
-                title="Создаст правила по получателю для выбранных подсказок и применит их"
+                title="Создаст правила (по получателю или комментарию) для выбранных подсказок и применит их"
               >
                 <Wand2 className="w-3.5 h-3.5" />
                 Применить подсказки ({selectedCount})
@@ -221,12 +244,12 @@ export function UncategorizedPage() {
                   <input
                     type="checkbox"
                     checked={selected.has(s.txId)}
-                    disabled={applied || !s.payee}
+                    disabled={applied || !ruleKeyFor(s)}
                     onChange={() => toggleSelect(s.txId)}
                     className="accent-accent shrink-0"
                     title={
-                      !s.payee
-                        ? "Нет получателя — правило не создать"
+                      !ruleKeyFor(s)
+                        ? "Нет получателя и комментария — правило не создать"
                         : applied
                           ? "Уже применено"
                           : "Выбрать для применения"
@@ -262,11 +285,17 @@ export function UncategorizedPage() {
                   </div>
                   <button
                     onClick={() => applyOne(s)}
-                    disabled={busy || applied || !s.payee}
+                    disabled={busy || applied || !ruleKeyFor(s)}
                     className={`btn-ghost !p-1.5 text-xs ${
                       applied ? "text-income" : ""
                     }`}
-                    title={applied ? "Применено" : "Применить как правило"}
+                    title={
+                      applied
+                        ? "Применено"
+                        : ruleKeyFor(s)
+                          ? `Применить как правило (по ${ruleKeyFor(s)!.field === "payee" ? "получателю" : "комментарию"})`
+                          : "Нет получателя и комментария — правило не создать"
+                    }
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                   </button>

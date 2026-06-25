@@ -66,7 +66,7 @@ const SECONDARY = [
   { to: "/uncategorized", label: "Без категории", icon: Tag },
   { to: "/recurring", label: "Регулярные", icon: Repeat },
   { to: "/annotations", label: "Аннотации", icon: Bookmark },
-  { to: "/tags", label: "Хэштеги", icon: Hash },
+  { to: "/tags", label: "Теги", icon: Hash },
   { to: "/wordcloud", label: "Облако слов", icon: Cloud },
   { to: "/compare", label: "Сравнение", icon: GitCompare },
   { to: "/top", label: "Топ", icon: TrendingUp },

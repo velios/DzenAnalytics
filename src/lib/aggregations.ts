@@ -987,17 +987,21 @@ export function buildSankey(txs: Transaction[]): SankeyData {
  *  категориях» editor / pulled from Zenmoney) makes a category optional. Built
  *  from the categories present in `txs`. Single source of the rule, shared by
  *  the Dashboard «Свободные деньги», Health «доля обязательных» and 50/30/20. */
-export function buildObligatorySet(
-  txs: Transaction[],
-  categoryMeta: Record<string, { required?: boolean | null }>
-): Set<string> {
-  const set = new Set<string>();
-  for (const t of txs) {
-    if (!affectsExpense(t.kind)) continue;
-    const m = categoryMeta[t.category];
-    if (m ? m.required !== false : true) set.add(t.category);
+export type ObligationMeta = Record<string, { required?: boolean | null }>;
+
+/** Is this transaction's spending obligatory («обязательная»)? The
+ *  SUBCATEGORY's own flag wins when it set one (keyed by the full path
+ *  «Родитель / Подкатегория»); otherwise the parent category's flag; default
+ *  obligatory — only an explicit `required === false` makes it optional. This
+ *  lets a single «необязательная» subcategory under an obligatory parent be
+ *  counted correctly (issue #5). */
+export function isObligatoryTx(t: Transaction, meta: ObligationMeta): boolean {
+  if (t.subcategory) {
+    const sub = meta[t.categoryFull];
+    if (sub && sub.required != null) return sub.required !== false;
   }
-  return set;
+  const cat = meta[t.category];
+  return cat ? cat.required !== false : true;
 }
 
 export interface ObligationData {
@@ -1005,19 +1009,19 @@ export interface ObligationData {
   optional: number;
 }
 
-/** Split expense into obligatory vs optional buckets by category membership.
- *  Refunds subtract from their bucket — `expenseDelta` already returns a
- *  negative amount in that case, so we just add it through. */
+/** Split expense into obligatory vs optional buckets, per-transaction (so
+ *  subcategory-level «обязательность» is respected). Refunds subtract from
+ *  their bucket — `expenseDelta` already returns a negative amount there. */
 export function splitByObligation(
   txs: Transaction[],
-  obligatoryCategories: Set<string>
+  meta: ObligationMeta
 ): ObligationData {
   let obligatory = 0;
   let optional = 0;
   for (const t of txs) {
     if (!affectsExpense(t.kind)) continue;
     const delta = expenseDelta(t);
-    if (obligatoryCategories.has(t.category)) obligatory += delta;
+    if (isObligatoryTx(t, meta)) obligatory += delta;
     else optional += delta;
   }
   return { obligatory, optional };

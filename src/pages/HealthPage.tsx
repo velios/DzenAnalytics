@@ -13,7 +13,6 @@ import {
 import { useDataStore } from "../store/useDataStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
-import { buildObligatorySet } from "../lib/aggregations";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import {
   getLiveAccountsFromCache,
@@ -107,7 +106,6 @@ export function HealthPage() {
   }, [calibLoaded, hydrateCalibration, metaLoaded, hydrateMeta]);
 
   const score = useMemo(() => {
-    const obligatoryCategories = buildObligatorySet(transactions, categoryMeta);
     // Off-balance accounts' total — added to the emergency fund. When «include
     // off-balance» is on, the net-worth calibration already counts them, so we
     // add nothing extra (avoids double-counting).
@@ -124,7 +122,7 @@ export function HealthPage() {
       transactions,
       baseCurrency,
       calibration,
-      obligatoryCategories,
+      categoryMeta,
       extraLiquid,
     });
   }, [transactions, rates, baseCurrency, calibration, categoryMeta, includeOffBalance, liveAccounts]);

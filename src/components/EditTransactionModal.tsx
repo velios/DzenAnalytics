@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2 } from "lucide-react";
+import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, HandCoins } from "lucide-react";
 import { extractHashtags } from "../lib/aggregations";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -32,8 +32,13 @@ interface Props {
   /** Pre-selected kind for a freshly created operation (create mode only).
    *  Defaults to "expense". Ignored when editing an existing `tx`. */
   initialKind?: TxKind;
+  /** Open a freshly created operation as a «Долг» (create mode only). */
+  initialDebt?: boolean;
   onClose: () => void;
 }
+
+/** Zenmoney account types that make an operation a debt/loan/credit move. */
+const DEBT_ACCOUNT_TYPES = new Set(["loan", "credit", "debt"]);
 
 /** Today's date as ISO YYYY-MM-DD, for seeding a new draft. */
 function todayIso(): string {
@@ -70,7 +75,7 @@ function dateTimeToDate(dateIso: string, time: string): Date {
  * away and is sent to Zenmoney on the next push. API mode only (the caller
  * only offers the button when a token is present).
  */
-export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props) {
+export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onClose }: Props) {
   const isCreate = !txProp;
   const rates = useDataStore((s) => s.rates);
   // A blank seed so every `tx.<field>` read below works uniformly in
@@ -130,6 +135,42 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
   }
 
   const [kind, setKind] = useState<TxKind>(tx.kind);
+  // «Долг» editor mode. A debt op carries the synthetic «Долг» category and is
+  // a transfer between a real account and the single debt account «Долги».
+  // `kind` stays "transfer" underneath; this flag drives the debt-specific UI.
+  const [isDebt, setIsDebt] = useState(
+    tx.category === "Долг" || (isCreate && !!initialDebt)
+  );
+  // Debt money direction (two buttons, like Zenmoney):
+  //   • outgoing (real → «Долги»): «Я дал в долг | Я вернул долг»
+  //   • incoming («Долги» → real): «Мне дали в долг | Мне вернули долг»
+  const [debtOutgoing, setDebtOutgoing] = useState(true);
+  // The real (non-debt) account leg.
+  const [realAcc, setRealAcc] = useState(
+    tx.category === "Долг" ? tx.outcomeAccount || tx.incomeAccount || "" : ""
+  );
+  const [debtAccountTitle, setDebtAccountTitle] = useState<string | null>(null);
+  useEffect(() => {
+    loadZenCache().then((c) => {
+      if (!c) return;
+      const d =
+        c.accounts.find((a) => DEBT_ACCOUNT_TYPES.has(a.type) && !a.archive) ??
+        c.accounts.find((a) => DEBT_ACCOUNT_TYPES.has(a.type));
+      setDebtAccountTitle(d?.title ?? null);
+      // Existing debt op — derive direction + real account from its legs.
+      if (!isCreate && tx.category === "Долг" && d) {
+        if (tx.outcomeAccount === d.title) {
+          // «Долги» → real account: money came IN.
+          setDebtOutgoing(false);
+          setRealAcc(tx.incomeAccount || "");
+        } else {
+          // real account → «Долги»: money went OUT.
+          setDebtOutgoing(true);
+          setRealAcc(tx.outcomeAccount || tx.account || "");
+        }
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const categoryMeta = useCategoryMetaStore((s) => s.meta);
   const metaLoaded = useCategoryMetaStore((s) => s.loaded);
   const hydrateMeta = useCategoryMetaStore((s) => s.hydrate);
@@ -420,6 +461,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
     if (!isCreate || !defaultAccount) return;
     setAccount((a) => a || defaultAccount);
     setOutAcc((a) => a || defaultAccount);
+    setRealAcc((a) => a || defaultAccount);
   }, [isCreate, defaultAccount]);
   // Create mode, single-leg: a new operation's amount is in the source
   // account's own currency (the draft builder resolves the instrument from
@@ -442,6 +484,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
   const inAccCurrency = accountCurrency.get(inAcc.trim());
   const isCrossCurrencyTransfer =
     kind === "transfer" &&
+    !isDebt &&
     !!accountCurrency.get(outAcc.trim()) &&
     !!inAccCurrency &&
     accountCurrency.get(outAcc.trim()) !== inAccCurrency;
@@ -506,23 +549,33 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
       setError("Создание операций доступно только при синхронизации с Zenmoney.");
       return;
     }
+    // «Долг» legs: a debt op is a transfer between the real account and the
+    // debt account «Долги», direction decides which leg is the source.
+    const debtT = debtAccountTitle ?? "";
+    const debtSrc = debtOutgoing ? realAcc.trim() : debtT;
+    const debtDst = debtOutgoing ? debtT : realAcc.trim();
     const fields: DraftFields = {
       id: newDraftId(),
-      kind,
+      kind: isDebt ? "transfer" : kind,
       date,
       createdSeconds: /^\d{2}:\d{2}$/.test(time)
         ? Math.floor(dateTimeToDate(date, time).getTime() / 1000)
         : undefined,
       amount: Number(amount.replace(",", ".")),
-      account: kind === "transfer" ? outAcc.trim() : account.trim(),
-      incomeAccount: kind === "transfer" ? inAcc.trim() : undefined,
+      account: isDebt ? debtSrc : kind === "transfer" ? outAcc.trim() : account.trim(),
+      incomeAccount: isDebt
+        ? debtDst
+        : kind === "transfer"
+          ? inAcc.trim()
+          : undefined,
       incomeAmount:
-        kind === "transfer" && isCrossCurrencyTransfer
+        !isDebt && kind === "transfer" && isCrossCurrencyTransfer
           ? Number(inAmountValue.replace(",", "."))
           : undefined,
-      category: kind === "transfer" ? undefined : category.trim(),
-      subcategory: kind === "transfer" ? null : subcategory.trim() || null,
-      payee: kind === "transfer" ? undefined : payee.trim(),
+      category: isDebt || kind === "transfer" ? undefined : category.trim(),
+      subcategory: isDebt || kind === "transfer" ? null : subcategory.trim() || null,
+      // A debt op MUST carry the counterparty (payee); a plain transfer has none.
+      payee: isDebt ? payee.trim() : kind === "transfer" ? undefined : payee.trim(),
       comment: comment.trim(),
     };
     const built = buildDraftTransaction(
@@ -603,7 +656,21 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
 
       if (kind !== tx.kind) patch.kind = kind;
 
-      if (kind === "transfer") {
+      if (isDebt) {
+        // Debt op: rebuild the two legs from direction + real account; the
+        // debt account «Долги» stays on the other leg. The counterparty is
+        // already carried by `patch.brand` above (the push debt-branch maps
+        // it back onto the required `payee`).
+        const debtT = debtAccountTitle ?? "";
+        const real = realAcc.trim() || tx.outcomeAccount || tx.incomeAccount;
+        const src = debtOutgoing ? real : debtT;
+        const dst = debtOutgoing ? debtT : real;
+        if (changed(src, tx.outcomeAccount) || changed(dst, tx.incomeAccount)) {
+          patch.outcomeAccount = src;
+          patch.incomeAccount = dst;
+          patch.account = src;
+        }
+      } else if (kind === "transfer") {
         // For transfers we need both legs in sync. Whether or not the
         // user actually changed any account, write all three so the
         // pipeline never sees half-stale data. The push transformer
@@ -735,31 +802,53 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
           <Field label="Тип операции">
             <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5 w-full">
               <KindButton
-                active={kind === "expense"}
-                onClick={() => setKind("expense")}
+                active={kind === "expense" && !isDebt}
+                onClick={() => {
+                  setKind("expense");
+                  setIsDebt(false);
+                }}
                 icon={TrendingDown}
                 label="Расход"
                 tone="expense"
               />
               <KindButton
-                active={kind === "income"}
-                onClick={() => setKind("income")}
+                active={kind === "income" && !isDebt}
+                onClick={() => {
+                  setKind("income");
+                  setIsDebt(false);
+                }}
                 icon={TrendingUp}
                 label="Доход"
                 tone="income"
               />
               <KindButton
-                active={kind === "refund"}
-                onClick={() => setKind("refund")}
+                active={kind === "refund" && !isDebt}
+                onClick={() => {
+                  setKind("refund");
+                  setIsDebt(false);
+                }}
                 icon={Undo2}
                 label="Возврат"
                 tone="accent2"
               />
               <KindButton
-                active={kind === "transfer"}
-                onClick={() => setKind("transfer")}
+                active={kind === "transfer" && !isDebt}
+                onClick={() => {
+                  setKind("transfer");
+                  setIsDebt(false);
+                }}
                 icon={ArrowLeftRight}
                 label="Перевод"
+                tone="slate"
+              />
+              <KindButton
+                active={isDebt}
+                onClick={() => {
+                  setKind("transfer");
+                  setIsDebt(true);
+                }}
+                icon={HandCoins}
+                label="Долг"
                 tone="warn"
               />
             </div>
@@ -801,10 +890,49 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
               />
             </Field>
           )}
+          {/* «Долг»: direction + the real account. The debt account «Долги»
+              is implicit (Zenmoney keeps one per user). */}
+          {isDebt && (
+            <>
+              <Field label="Операция с долгом">
+                <div className="flex flex-col gap-1.5 bg-panel2 border border-border rounded-lg p-0.5 w-full">
+                  <button
+                    type="button"
+                    onClick={() => setDebtOutgoing(true)}
+                    className={`w-full text-sm py-1.5 rounded-md ${debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
+                  >
+                    Я дал в долг | Я вернул долг
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDebtOutgoing(false)}
+                    className={`w-full text-sm py-1.5 rounded-md ${!debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
+                  >
+                    Мне дали в долг | Мне вернули долг
+                  </button>
+                </div>
+              </Field>
+              <Field label={debtOutgoing ? "С какого счёта" : "На какой счёт"}>
+                <Combobox
+                  value={realAcc}
+                  options={accountOptions}
+                  groups={accountGroups}
+                  onChange={setRealAcc}
+                  placeholder="Реальный счёт"
+                  maxHeight={DROPDOWN_MAX}
+                />
+              </Field>
+              {debtAccountTitle && (
+                <div className="text-[11px] text-muted -mt-1.5">
+                  Счёт долга: «{debtAccountTitle}»
+                </div>
+              )}
+            </>
+          )}
           {/* Account(s): one field for income/expense, two for transfer.
               Placed right under category — it's the second-most
               identifying attribute of a transaction after the category. */}
-          {kind === "transfer" ? (
+          {!isDebt && kind === "transfer" ? (
             <div className="grid grid-cols-2 gap-3">
               <Field label="Со счёта">
                 <Combobox
@@ -827,7 +955,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
                 />
               </Field>
             </div>
-          ) : (
+          ) : isDebt ? null : (
             <Field label="Счёт">
               <Combobox
                 value={account}
@@ -840,7 +968,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
             </Field>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Field label={kind === "transfer" ? "Отправлено" : "Сумма"}>
+            <Field label={!isDebt && kind === "transfer" ? "Отправлено" : "Сумма"}>
               <input
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
@@ -910,8 +1038,16 @@ export function EditTransactionModal({ tx: txProp, initialKind, onClose }: Props
               Zenmoney merchant dictionary plus historical raw-payee
               strings. Hidden for transfers (counterparty there is the
               income account, surfaced above in its own field). */}
-          {kind !== "transfer" && (
-            <Field label={kind === "income" ? "Плательщик" : "Место платежа"}>
+          {(kind !== "transfer" || isDebt) && (
+            <Field
+              label={
+                isDebt
+                  ? "Контрагент"
+                  : kind === "income" || kind === "refund"
+                    ? "Плательщик"
+                    : "Место платежа"
+              }
+            >
               <Combobox
                 value={payee}
                 options={payeeOptions}
@@ -1057,7 +1193,7 @@ function KindButton({
   onClick: () => void;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  tone: "income" | "expense" | "warn" | "accent2";
+  tone: "income" | "expense" | "warn" | "accent2" | "slate";
 }) {
   const activeBg =
     tone === "income"
@@ -1066,7 +1202,9 @@ function KindButton({
         ? "bg-expense text-white"
         : tone === "accent2"
           ? "bg-accent2 text-white"
-          : "bg-warn text-white";
+          : tone === "slate"
+            ? "bg-slate-500 text-white"
+            : "bg-warn text-white";
   return (
     <button
       type="button"

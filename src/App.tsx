@@ -105,6 +105,19 @@ function App() {
     return initTheme();
   }, [hydrate, backupHydrate, reportPeriodHydrate, initTheme]);
 
+  // Ask the browser to keep our IndexedDB as PERSISTENT storage, so it isn't
+  // silently evicted on a browser update / "clear site data under pressure"
+  // (issue #24 — token + budgets + local edits live only in IDB). Best-effort:
+  // the prompt-less grant depends on engagement/heuristics, and a user clearing
+  // data manually still wipes it. We only ask once, when not already persisted.
+  useEffect(() => {
+    const s = navigator.storage;
+    if (!s?.persist || !s.persisted) return;
+    void s.persisted().then((already) => {
+      if (!already) void s.persist().catch(() => {});
+    }).catch(() => {});
+  }, []);
+
   // Suppress `title` tooltips on truncated table cells unless the text is
   // actually clipped (and non-empty). One delegated listener covers every table.
   useEffect(() => installTruncatedTitles(), []);
