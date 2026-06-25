@@ -23,6 +23,12 @@ interface Props {
    * cleanly on narrow ones.
    */
   right?: ReactNode;
+  /**
+   * Allow the hint to wrap onto multiple lines instead of truncating to one.
+   * Off by default (keeps header heights uniform); opt in for pages with a
+   * genuinely longer subtitle.
+   */
+  hintWrap?: boolean;
 }
 
 /**
@@ -36,7 +42,7 @@ interface Props {
  *      consistent regardless of which page you land on.
  *   3. A single, predictable slot for page-level actions on the right.
  */
-export function PageHeader({ title, icon: Icon, hint, right }: Props) {
+export function PageHeader({ title, icon: Icon, hint, right, hintWrap }: Props) {
   return (
     <div className="flex items-end justify-between flex-wrap gap-3">
       <div className="min-w-0">
@@ -50,7 +56,10 @@ export function PageHeader({ title, icon: Icon, hint, right }: Props) {
           // viewports the text truncates with an ellipsis instead of wrapping
           // to a second line, so the layout below never jumps around. Pages
           // should keep hints short enough that truncation is rare in practice.
-          <p className="text-muted text-sm mt-1 truncate" title={typeof hint === "string" ? hint : undefined}>
+          <p
+            className={`text-muted text-sm mt-1 ${hintWrap ? "" : "truncate"}`}
+            title={typeof hint === "string" ? hint : undefined}
+          >
             {hint}
           </p>
         )}

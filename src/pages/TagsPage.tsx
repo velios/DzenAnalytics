@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Hash, MousePointerClick } from "lucide-react";
+import { Hash } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -12,8 +12,9 @@ import {
   type TagBucket,
 } from "../lib/aggregations";
 import { formatMoney, formatNum, formatPct } from "../lib/format";
-import { pluralOps } from "../lib/plural";
+import { pluralOps, pluralRu } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
+import { CategoryDot } from "../components/CategoryDot";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -71,8 +72,8 @@ export function TagsPage() {
       <div className="space-y-6">
         <PageHeader
           icon={Hash}
-          title="Хэштеги"
-          hint="Метки `#проект` в комментариях позволяют группировать операции по темам — поездки, члены семьи, машины и так далее. В текущей выборке хэштегов нет."
+          title="Теги"
+          hint="Метки `#проект` в комментариях позволяют группировать операции по темам — поездки, члены семьи, машины и так далее. В текущей выборке тегов нет."
         />
         <GlobalFilters />
       </div>
@@ -83,20 +84,23 @@ export function TagsPage() {
     <div className="space-y-6">
       <PageHeader
         icon={Hash}
-        title="Хэштеги"
+        title="Теги"
         hint={
           <>
-            {tags.length} тегов в {taggedCount} операциях
-            {totalExpense > 0 && ` · всего ${formatMoney(totalExpense, base)}`}.
-            Клик по облаку — операции, по строке таблицы — разбивка по категориям.
+            {tags.length} {pluralRu(tags.length, ["тег", "тега", "тегов"])} в{" "}
+            {taggedCount} {pluralRu(taggedCount, ["операции", "операциях", "операциях"])}
+            {totalExpense > 0 && ` · по тегам ${formatMoney(totalExpense, base)}`}.{" "}
+            Проценты — доля от всех расходов за период
+            {periodExpense > 0 ? ` (${formatMoney(periodExpense, base)}` : ""}
+            {periodExpense > 0 && periodIncome > 0
+              ? ` · доходов ${formatMoney(periodIncome, base)})`
+              : periodExpense > 0
+                ? ")"
+                : ""}
+            . Клик по облаку — операции, по строке таблицы — разбивка по категориям.
           </>
         }
-        right={
-          <span className="inline-flex items-center gap-1 text-xs text-muted">
-            <MousePointerClick className="w-3.5 h-3.5" />
-            Кликабельные
-          </span>
-        }
+        hintWrap
       />
       <GlobalFilters />
 
@@ -142,8 +146,8 @@ export function TagsPage() {
       </div>
 
       <div className="card card-pad">
-        <div className="font-semibold mb-3">Все теги</div>
         <SortableTable<TagBucket>
+          title="Все теги"
           data={tags}
           rowKey={(t) => t.tag}
           defaultSortKey="total"
@@ -236,7 +240,12 @@ export function TagsPage() {
             return nodes.flatMap((n) => [
               <tr key={`${t.tag}:${n.category}`} className="bg-panel2/20">
                 <td className="table-td" />
-                <td className="table-td pl-6">{n.category}</td>
+                <td className="table-td pl-6">
+                  <span className="inline-flex items-center gap-2 min-w-0">
+                    <CategoryDot category={n.category} size="w-4 h-4" />
+                    <span className="truncate">{n.category}</span>
+                  </span>
+                </td>
                 <td className="table-td text-right tabular-nums text-expense">
                   {n.expense > 0 ? formatMoney(n.expense, base) : "—"}
                 </td>
@@ -261,7 +270,16 @@ export function TagsPage() {
                   className="bg-panel2/10 text-xs text-muted"
                 >
                   <td className="table-td" />
-                  <td className="table-td pl-10">{s.name}</td>
+                  <td className="table-td pl-10">
+                    <span className="inline-flex items-center gap-2 min-w-0">
+                      <CategoryDot
+                        category={s.name}
+                        parent={n.category}
+                        size="w-3.5 h-3.5"
+                      />
+                      <span className="truncate">{s.name}</span>
+                    </span>
+                  </td>
                   <td className="table-td text-right tabular-nums">
                     {s.expense > 0 ? formatMoney(s.expense, base) : "—"}
                   </td>

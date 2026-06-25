@@ -28,6 +28,9 @@ interface Props<T> {
   className?: string;
   exportName?: string;
   exportable?: boolean;
+  /** Optional heading rendered on the same row as the CSV button (left side),
+   *  so a card title and the export control share one line. */
+  title?: ReactNode;
   /**
    * Expandable rows. When `renderExpanded` is set, a leading chevron column
    * appears and clicking a row toggles it (via `onToggleExpand`). The function
@@ -66,6 +69,7 @@ export function SortableTable<T>({
   className,
   exportName,
   exportable = true,
+  title,
   renderExpanded,
   isExpanded,
   onToggleExpand,
@@ -136,16 +140,19 @@ export function SortableTable<T>({
 
   return (
     <div className={clsx(className)}>
-      {showExport && (
-        <div className="flex items-center justify-end mb-2">
-          <button
-            onClick={exportCsv}
-            className="btn-ghost text-xs"
-            title={`Скачать как CSV (${sorted.length} строк)`}
-          >
-            <Download className="w-3.5 h-3.5" />
-            CSV ({sorted.length})
-          </button>
+      {(title || showExport) && (
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="font-semibold">{title}</div>
+          {showExport && (
+            <button
+              onClick={exportCsv}
+              className="btn-ghost text-xs shrink-0"
+              title={`Скачать как CSV (${sorted.length} строк)`}
+            >
+              <Download className="w-3.5 h-3.5" />
+              CSV ({sorted.length})
+            </button>
+          )}
         </div>
       )}
       <div className="overflow-x-auto">

@@ -984,7 +984,7 @@ export function DashboardPage() {
         <Link to="/tags" className="card card-pad hover:border-accent transition-colors flex items-center gap-3">
           <Hash className="w-5 h-5 text-accent" />
           <div>
-            <div className="font-medium text-sm">Хэштеги</div>
+            <div className="font-medium text-sm">Теги</div>
             <div className="text-xs text-muted">Из комментариев</div>
           </div>
         </Link>
