@@ -45,7 +45,6 @@ import { useGoalsStore } from "../store/useGoalsStore";
 import { useBudgetsStore } from "../store/useBudgetsStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
-import { useAnnotationsStore } from "../store/useAnnotationsStore";
 import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore, recalcBalanceCalibration } from "../store/useZenmoneyStore";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
@@ -221,9 +220,11 @@ export function ImportPage() {
   // reads as "Нет правок для отправки".
   const draftsMap = useDraftsStore((s) => s.drafts);
   const pendingDraftCount = Object.keys(draftsMap).length;
-  const pendingTotal = pendingEditCount + pendingDraftCount;
-  // Local deletions also revert from the pending-changes modal.
+  // Local deletions also push (and revert from the pending-changes modal), so
+  // they're part of the headline count — otherwise a delete-only state reads as
+  // «Нет изменений для отправки» yet the rollback button counts it (issue #19: 4, 5).
   const deletedCount = useDeletedStore((s) => s.deletedIds.length);
+  const pendingTotal = pendingEditCount + pendingDraftCount + deletedCount;
   const [pendingModalOpen, setPendingModalOpen] = useState(false);
   // Orphaned edits: overrides whose transaction no longer exists in the data
   // (e.g. edits made on a CSV import, then switched to API — ids changed). They
@@ -359,7 +360,7 @@ export function ImportPage() {
     if (meta?.source === "csv" && transactions.length > 0) {
       const ok = await confirm({
         title: "Заменить CSV-данные на API?",
-        message: `У вас сейчас ${formatNum(transactions.length)} операций из CSV (${meta.fileName}). API-синк заменит их данными из Дзен-мани. Бюджеты, цели, аннотации и правила сохранятся.`,
+        message: `У вас сейчас ${formatNum(transactions.length)} операций из CSV (${meta.fileName}). API-синк заменит их данными из Дзен-мани. Бюджеты, цели и правила сохранятся.`,
         confirmLabel: "Заменить",
         tone: "warning",
       });
@@ -554,7 +555,6 @@ export function ImportPage() {
   const budgetsHydrate = useBudgetsStore((s) => s.hydrate);
   const calibHydrate = useCalibrationStore((s) => s.hydrate);
   const viewsHydrate = useSavedViewsStore((s) => s.hydrate);
-  const annHydrate = useAnnotationsStore((s) => s.hydrate);
   const dataHydrate = useDataStore((s) => s.hydrate);
   const backupRef = useRef<HTMLInputElement>(null);
   const [backupBusy, setBackupBusy] = useState(false);
@@ -622,7 +622,6 @@ export function ImportPage() {
         budgetsHydrate(),
         calibHydrate(),
         viewsHydrate(),
-        annHydrate(),
         hydrateInflation(),
         reportPeriodHydrate(),
         useOffBalanceStore.getState().hydrate(),
@@ -1254,7 +1253,7 @@ export function ImportPage() {
                   const ok = await confirm({
                     title: "Очистить локальные данные?",
                     message:
-                      "Удалятся ВСЕ локальные данные из этого браузера: операции, кэш, правки, черновики, исключения дубликатов, калибровка, бюджеты, правила, аннотации и т.п. Подключение к Дзен-мани и настройки сохранятся, данные в облаке НЕ пострадают. Страница перезагрузится.",
+                      "Удалятся ВСЕ локальные данные из этого браузера: операции, кэш, правки, черновики, исключения дубликатов, калибровка, бюджеты, правила и т.п. Подключение к Дзен-мани и настройки сохранятся, данные в облаке НЕ пострадают. Страница перезагрузится.",
                     confirmLabel: "Очистить",
                     tone: "danger",
                   });
@@ -1777,7 +1776,7 @@ export function ImportPage() {
           </div>
         <p className="text-xs text-muted mb-3">
           Экспортирует JSON со всеми транзакциями, бюджетами, целями, калибровкой, видами,
-          аннотациями, тегами категорий, инфляцией и настройкой группировки. Импорт восстанавливает
+          тегами категорий, инфляцией и настройкой группировки. Импорт восстанавливает
           всё одним файлом.
         </p>
         <div className="flex flex-wrap gap-2">
@@ -2348,14 +2347,14 @@ export function ImportPage() {
               })}
             </div>
 
-            {pendingTotal + deletedCount > 0 && (
+            {pendingTotal > 0 && (
               <button
                 onClick={() => setPendingModalOpen(true)}
                 className="btn-ghost text-xs mb-3"
                 title="Просмотр и откат локальных изменений, ещё не отправленных в облако"
               >
                 <CloudOff className="w-3.5 h-3.5" />
-                Посмотреть и откатить изменения ({pendingTotal + deletedCount})
+                Посмотреть и откатить изменения ({pendingTotal})
               </button>
             )}
 

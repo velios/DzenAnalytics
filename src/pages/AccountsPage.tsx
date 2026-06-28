@@ -32,6 +32,7 @@ import { confirm } from "../store/useConfirmStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { getLiveAccountsFromCache } from "../store/useZenmoneyStore";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
+import { useDraftsStore } from "../store/useDraftsStore";
 import type { LiveAccount } from "../store/useZenmoneyStore";
 import {
   balancesByAccount,
@@ -218,14 +219,20 @@ export function AccountsPage() {
     () => dailyBalanceSeries(filtered, selectedAccount ?? undefined),
     [filtered, selectedAccount]
   );
+  // Unsynced drafts live in `baseTxs` but not in the API balances — keep them
+  // out of the stacked chart's real-balance anchor so the line isn't shifted
+  // by the draft amount (issue #18).
+  const drafts = useDraftsStore((s) => s.drafts);
+  const unsyncedIds = useMemo(() => new Set(Object.keys(drafts)), [drafts]);
   const stacked = useMemo(
     () =>
       stackedBalanceByAccount(
         baseTxs,
         8,
-        hasRealBalances ? realBalancesByAccount : null
+        hasRealBalances ? realBalancesByAccount : null,
+        unsyncedIds
       ),
-    [baseTxs, hasRealBalances, realBalancesByAccount]
+    [baseTxs, hasRealBalances, realBalancesByAccount, unsyncedIds]
   );
   const netWorth = useNetWorthSeries(baseTxs);
 

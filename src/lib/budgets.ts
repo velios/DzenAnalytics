@@ -21,6 +21,15 @@ export type Recurrence = "monthly" | "quarterly" | "yearly" | "once";
 export interface BudgetLine {
   id: string;
   category: string;
+  /**
+   * Под-категория (под-тег Дзена) или null = сам родительский тег. Бюджет
+   * привязан РОВНО к одному тегу: строка с `subcategory: null` отражает план
+   * самой родительской категории (траты, помеченные напрямую родителем, БЕЗ
+   * детей), а под-тег получает собственную строку. Это зеркалит модель Дзен-
+   * «Планов» (один план на тег) и делает синк обратимым. Поле необязательно
+   * для обратной совместимости со старыми строками (читается как null).
+   */
+  subcategory?: string | null;
   kind: BudgetKind;
   /** Плановая сумма за ОДИН период (не за месяц для quarterly/yearly). */
   amount: number;
@@ -106,17 +115,24 @@ export function monthlyEquivalent(line: BudgetLine): number {
 
 /**
  * Actual amount for a line in month `ym`, derived from transactions.
- *   • expense line → Σ expenseDelta (expense minus refunds) over the category;
- *   • income line  → Σ amountBase of income transactions over the category.
+ *   • expense line → Σ expenseDelta (expense minus refunds) over the tag;
+ *   • income line  → Σ amountBase of income transactions over the tag.
+ *
+ * Per-tag matching: a parent line (`subcategory: null`) counts only
+ * transactions tagged directly with the parent (subcategory === null); a
+ * sub-line counts only its own sub-tag. This mirrors how a Zenmoney «План»
+ * tracks exactly one tag, so план/факт line up with what Дзен shows.
  */
 export function factFor(
   line: BudgetLine,
   txs: Transaction[],
   ym: string
 ): number {
+  const lineSub = line.subcategory ?? null;
   let sum = 0;
   for (const t of txs) {
     if (t.category !== line.category) continue;
+    if ((t.subcategory ?? null) !== lineSub) continue;
     if (!t.date.startsWith(ym)) continue;
     if (line.kind === "income") {
       if (t.kind === "income") sum += t.amountBase;
@@ -125,6 +141,126 @@ export function factFor(
     }
   }
   return sum;
+}
+
+/**
+ * A rough «forecast» plan for a line that has NO manual budget — the median of
+ * the tag's ACTUAL amount over the previous `lookback` months, rounded to the
+ * nearest 100. Mirrors what Zenmoney shows as «из X» for tags you don't budget
+ * manually (e.g. interest / cashback income). Returns 0 when there's no steady
+ * history (median below 100) — so one-off amounts don't become a phantom plan.
+ */
+export function forecastFor(
+  line: BudgetLine,
+  txs: Transaction[],
+  ym: string,
+  lookback = 6
+): number {
+  const vals: number[] = [];
+  for (let i = 1; i <= lookback; i++) vals.push(factFor(line, txs, addMonths(ym, -i)));
+  vals.sort((a, b) => a - b);
+  const mid = Math.floor(vals.length / 2);
+  const median =
+    vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+  const rounded = Math.round(median / 100) * 100;
+  return rounded >= 100 ? rounded : 0;
+}
+
+/** Days in the calendar month of a "YYYY-MM" string. */
+export function daysInMonth(ym: string): number {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
+/** One day on the cumulative cash-flow chart. Actual values are non-null up to
+ *  «today», forecast values non-null from «today» on (they share the today point
+ *  so the solid and dashed segments join). */
+export interface CashflowPoint {
+  day: number;
+  income: number | null;
+  expense: number | null;
+  incomeF: number | null;
+  expenseF: number | null;
+}
+
+export interface MonthCashflow {
+  points: CashflowPoint[];
+  /** Day-of-month treated as «today» (= actual/forecast split). */
+  todayDay: number;
+  days: number;
+  factIncome: number;
+  factExpense: number;
+  /** Linear end-of-month projection (actual totals for a past month). */
+  projIncome: number;
+  projExpense: number;
+}
+
+/**
+ * Daily CUMULATIVE income & expense for month `ym`, with a linear end-of-month
+ * forecast — the data behind the Zen-style «План на день» / cash-flow widget.
+ *
+ * Actual cumulative lines run day 1 → today; from today on, each line continues
+ * at its average daily pace so far (`cum/today`), which is the same simple
+ * extrapolation as the per-row «прогноз». A past month is fully actual (no
+ * forecast); a future month has neither.
+ */
+export function buildMonthCashflow(
+  txs: Transaction[],
+  ym: string,
+  now = Date.now()
+): MonthCashflow {
+  const days = daysInMonth(ym);
+  const today = new Date(now);
+  const curYm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  // Split day: current month → today's date; past month → whole month is actual;
+  // future month → nothing has happened yet.
+  const todayDay = ym === curYm ? today.getDate() : ym < curYm ? days : 0;
+
+  const incDelta = new Array(days + 1).fill(0);
+  const expDelta = new Array(days + 1).fill(0);
+  for (const t of txs) {
+    if (!t.date.startsWith(ym)) continue;
+    const d = Number(t.date.slice(8, 10));
+    if (!(d >= 1 && d <= days)) continue;
+    if (t.kind === "income") incDelta[d] += t.amountBase;
+    else if (affectsExpense(t.kind)) expDelta[d] += expenseDelta(t);
+  }
+
+  const incPace = todayDay > 0 ? cumulate(incDelta, todayDay) / todayDay : 0;
+  const expPace = todayDay > 0 ? cumulate(expDelta, todayDay) / todayDay : 0;
+
+  const points: CashflowPoint[] = [];
+  let cumInc = 0;
+  let cumExp = 0;
+  for (let d = 1; d <= days; d++) {
+    cumInc += incDelta[d];
+    cumExp += expDelta[d];
+    if (d < todayDay) {
+      points.push({ day: d, income: cumInc, expense: cumExp, incomeF: null, expenseF: null });
+    } else if (d === todayDay) {
+      // The split day anchors BOTH segments so the dashed forecast joins the solid line.
+      points.push({ day: d, income: cumInc, expense: cumExp, incomeF: cumInc, expenseF: cumExp });
+    } else {
+      const incF = cumulate(incDelta, todayDay) + incPace * (d - todayDay);
+      const expF = cumulate(expDelta, todayDay) + expPace * (d - todayDay);
+      points.push({ day: d, income: null, expense: null, incomeF: incF, expenseF: expF });
+    }
+  }
+
+  const factIncome = cumulate(incDelta, todayDay);
+  const factExpense = cumulate(expDelta, todayDay);
+  const last = points[points.length - 1];
+  const projIncome = last ? (last.income ?? last.incomeF ?? 0) : 0;
+  const projExpense = last ? (last.expense ?? last.expenseF ?? 0) : 0;
+
+  return { points, todayDay, days, factIncome, factExpense, projIncome, projExpense };
+}
+
+/** Σ of `arr[1..n]` (the per-day delta arrays are 1-indexed). */
+function cumulate(arr: number[], n: number): number {
+  let s = 0;
+  for (let i = 1; i <= n; i++) s += arr[i] ?? 0;
+  return s;
 }
 
 /**
@@ -144,6 +280,7 @@ export function migrateLegacyBudgets(
     .map(([category, amount], i) => ({
       id: `mig-${now}-${i}`,
       category,
+      subcategory: null,
       kind: "expense" as const,
       amount,
       recurrence: "monthly" as const,

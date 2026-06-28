@@ -12,7 +12,6 @@ import {
   Line,
   YAxis,
   CartesianGrid,
-  ReferenceLine,
 } from "recharts";
 import {
   TrendingUp,
@@ -34,8 +33,6 @@ import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
-import { useAnnotationsStore } from "../store/useAnnotationsStore";
-import { AnnotationMarker } from "../components/AnnotationMarker";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { currentPeriod, periodKey } from "../lib/period";
@@ -254,14 +251,10 @@ export function DashboardPage() {
   const categoryMeta = useCategoryMetaStore((s) => s.meta);
   const metaHydrate = useCategoryMetaStore((s) => s.hydrate);
   const metaLoaded = useCategoryMetaStore((s) => s.loaded);
-  const annotations = useAnnotationsStore((s) => s.annotations);
-  const annHydrate = useAnnotationsStore((s) => s.hydrate);
-  const annLoaded = useAnnotationsStore((s) => s.loaded);
   useEffect(() => {
     if (!calibLoaded) hydrateCalibration();
     if (!metaLoaded) metaHydrate();
-    if (!annLoaded) annHydrate();
-  }, [calibLoaded, hydrateCalibration, metaLoaded, metaHydrate, annLoaded, annHydrate]);
+  }, [calibLoaded, hydrateCalibration, metaLoaded, metaHydrate]);
 
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const months = useMemo(
@@ -651,15 +644,6 @@ export function DashboardPage() {
                   ]}
                 />
                 <Area type="monotone" dataKey="net" stroke="#22D3EE" strokeWidth={2} fill="url(#dashNw)" />
-                {annotations.map((a) => (
-                  <ReferenceLine
-                    key={a.id}
-                    x={a.date}
-                    stroke={a.color || "#A78BFA"}
-                    strokeDasharray="2 2"
-                    label={<AnnotationMarker ann={a} />}
-                  />
-                ))}
               </AreaChart>
             </ResponsiveContainer>
           </div>

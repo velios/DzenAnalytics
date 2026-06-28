@@ -438,6 +438,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     } else {
       await snapshotForCloudRestore([id]);
       await useDeletedStore.getState().remove(id);
+      // Deleting wins over a pending edit: drop the edit so it doesn't
+      // double-send (delete + upsert) or strand in «зависшие» (issue #19.4).
+      await useEditsStore.getState().clearEdit(id);
     }
     // Recompute visible list from the unchanged raw set — the row is
     // still in `transactionsRaw` (and IDB) so a restore brings it back.
@@ -456,6 +459,8 @@ export const useDataStore = create<DataState>((set, get) => ({
     if (syncedIds.length > 0) {
       await snapshotForCloudRestore(syncedIds);
       await useDeletedStore.getState().removeMany(syncedIds);
+      // Deleting wins over pending edits (issue #19.4).
+      await useEditsStore.getState().clearMany(syncedIds);
     }
     const { transactionsRaw: raw, rates } = get();
     const final = await finalize(raw, rates);

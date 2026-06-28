@@ -119,6 +119,11 @@ export interface ZenBudget {
   incomeLock: boolean;
   outcome: number;
   outcomeLock: boolean;
+  // Whether the value is Zenmoney's auto-forecast (true) vs a real user-set
+  // plan (false). This — NOT `*Lock` — is what distinguishes a manual budget
+  // from a predicted one. Optional for backward-compat with older caches.
+  isIncomeForecast?: boolean;
+  isOutcomeForecast?: boolean;
 }
 
 export interface ZenDiffResponse {
@@ -221,6 +226,7 @@ export interface PushPayload {
   account?: ZenAccount[];
   tag?: ZenTag[];
   merchant?: ZenMerchant[];
+  budget?: ZenBudget[];
   deletion?: ZenDeletion[];
 }
 

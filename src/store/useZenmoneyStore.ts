@@ -17,6 +17,7 @@ import {
 } from "../lib/zenmoneyCache";
 import {
   buildPushItems,
+  buildBudgetPush,
   buildDeletions,
   buildResurrections,
   buildTagPush,
@@ -26,6 +27,7 @@ import {
   type PushBuildResult,
 } from "../lib/zenmoneyPush";
 import { useTagEditsStore, loadTagEdits } from "./useTagEditsStore";
+import { useBudgetEditsStore, loadBudgetEdits } from "./useBudgetEditsStore";
 import { useDraftsStore, loadDrafts } from "./useDraftsStore";
 import { loadSnapshotIndex, takeSnapshot } from "../lib/cloudSnapshots";
 import { useDataStore } from "./useDataStore";
@@ -40,6 +42,8 @@ import {
   loadDeletedPayloads,
 } from "./useDeletedPayloadsStore";
 import { useSyncLogStore } from "./useSyncLogStore";
+import { useBudgetsStore } from "./useBudgetsStore";
+import { zenPlanList } from "../lib/zenBudgets";
 import { formatNum } from "../lib/format";
 import type { ImportMeta } from "../types";
 import {
@@ -657,6 +661,21 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       // any existing calibration since the API value is authoritative.
       await recalcBalanceCalibration();
 
+      // On a FULL sync, mirror Zenmoney «Планы»/budgets into local budget
+      // lines so they appear automatically (no manual import). Create-only:
+      // categories the user already budgets are left untouched.
+      if (isFull && nextCache.budgets && nextCache.budgets.length > 0) {
+        // Mirror Zenmoney «Планы»/budgets for EVERY month they cover — each
+        // category's line starts at its earliest planned month and carries a
+        // per-month plan via overrides, so past months fill in too.
+        const seeds = zenPlanList(nextCache.budgets, nextCache.tags);
+        if (seeds.length > 0) {
+          const bs = useBudgetsStore.getState();
+          if (!bs.loaded) await bs.hydrate();
+          await useBudgetsStore.getState().importFromZen(seeds);
+        }
+      }
+
       const now = new Date().toISOString();
       await db.saveJSON(TIMESTAMP_KEY, diff.serverTimestamp);
       await db.saveJSON(LAST_SYNC_KEY, now);
@@ -700,7 +719,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         (Object.keys(useEditsStore.getState().edits).length > 0 ||
           useDeletedStore.getState().deletedIds.length > 0 ||
           Object.keys(useDraftsStore.getState().drafts).length > 0 ||
-          Object.keys(useTagEditsStore.getState().edits).length > 0)
+          Object.keys(useTagEditsStore.getState().edits).length > 0 ||
+          Object.keys(useBudgetEditsStore.getState().edits).length > 0)
       ) {
         // Defer to next microtask so the sync's set() lands first and
         // pushPendingEdits sees `status: "ok"` (its own guard).
@@ -760,6 +780,25 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       db.saveJSON(PUSH_ENABLED_KEY, mode !== "off"),
     ]);
     set({ pushMode: mode, pushEnabled: mode !== "off", pushError: null });
+    // Switching to «auto» must flush whatever was queued while push was off or
+    // manual. The auto-push debounce (App.tsx) only fires on a NEW edit, so
+    // without this the backlog would sit until the next change — exactly the
+    // «внёс правку при выключенном Push, включил Авто, ничего не ушло» case.
+    // (manual → user pushes by hand; on-sync → flushes on the next sync.)
+    if (mode === "auto") {
+      const s = get();
+      const hasPending =
+        Object.keys(useEditsStore.getState().edits).length > 0 ||
+        useDeletedStore.getState().deletedIds.length > 0 ||
+        Object.keys(useDraftsStore.getState().drafts).length > 0 ||
+        Object.keys(useTagEditsStore.getState().edits).length > 0 ||
+        Object.keys(useBudgetEditsStore.getState().edits).length > 0;
+      if (s.token && s.pushStatus !== "syncing" && hasPending) {
+        void get().pushPendingEdits().catch(() => {
+          /* surfaced via pushError + sync log */
+        });
+      }
+    }
   },
 
   setSnapshotPolicy: async (policy) => {
@@ -851,14 +890,18 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
           reason:
             "операция изменена в облаке после последней синхронизации — обновите и повторите",
         }));
-      const toPush = built.toPush.filter((i) => !conflicts.has(i.id));
+      // A locally-deleted row must NOT also be pushed as an edit/upsert — the
+      // deletion wins (issue #19.4). Edits are cleared on delete, but guard here
+      // too so an edit can never race a deletion into the same request.
+      const deletedIds = useDeletedStore.getState().deletedIds;
+      const deletedSet = new Set(deletedIds);
+      const toPush = built.toPush.filter(
+        (i) => !conflicts.has(i.id) && !deletedSet.has(i.id)
+      );
       const skipped = [...built.skipped, ...conflictSkips];
       // Locally-deleted transactions → cloud `deletion` entries. Only
       // ids still present in cache produce a deletion (see buildDeletions).
-      const deletions = buildDeletions(
-        useDeletedStore.getState().deletedIds,
-        cache
-      );
+      const deletions = buildDeletions(deletedIds, cache);
       // Restored transactions whose cloud row was already deleted → revive
       // them by re-creating under a NEW id (tombstones are sticky — see
       // buildResurrections).
@@ -893,12 +936,32 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         reason: s.reason,
       }));
       skipped.push(...tagSkips);
+      // Pending plan/budget changes → ZenBudget upserts. Built against the
+      // fresh cache so the (tag, month) cell and its «other side» are current.
+      const budgetEdits = await loadBudgetEdits();
+      const budgetPush = buildBudgetPush(
+        Object.values(budgetEdits),
+        cache.budgets ?? [],
+        cache.tags,
+        Math.floor(Date.now() / 1000)
+      );
+      skipped.push(...budgetPush.skipped);
+      // Budget edits that aren't skipped are satisfied — either sent below, or a
+      // no-op because the cloud already matches. Either way the local intent is
+      // done, so they must leave the queue (clear the «ждёт отправки» arrow) in
+      // BOTH the normal push path AND the «nothing to send» early-return — else
+      // a no-op edit's arrow would stick forever.
+      const skippedBudgetIds = new Set(budgetPush.skipped.map((s) => s.id));
+      const doneBudgetIds = Object.keys(budgetEdits).filter(
+        (id) => !skippedBudgetIds.has(id)
+      );
       if (
         toPush.length === 0 &&
         deletions.length === 0 &&
         resurrections.length === 0 &&
         draftTxs.length === 0 &&
-        tagPush.tags.length === 0
+        tagPush.tags.length === 0 &&
+        budgetPush.budgets.length === 0
       ) {
         const result: PushResult = { pushed: 0, created: 0, skipped, snapshotId };
         set({
@@ -926,6 +989,11 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
           },
           durationMs: Date.now() - pushStartedAt,
         });
+        // Drop no-op budget edits even though we sent nothing — their cloud
+        // value already matches, so the «ждёт отправки» arrow should clear.
+        if (doneBudgetIds.length > 0) {
+          await useBudgetEditsStore.getState().clearMany(doneBudgetIds);
+        }
         return result;
       }
 
@@ -939,7 +1007,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         toPush,
         deletions,
         [...resurrections.map((r) => r.tx), ...draftTxs],
-        tagPush.tags
+        tagPush.tags,
+        budgetPush.budgets
       );
 
       // 4) Merge server response into local cache so subsequent diffs
@@ -1013,6 +1082,13 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       const sentTagIds = tagPush.tags.map((t) => String(t.id));
       if (sentTagIds.length > 0) {
         await useTagEditsStore.getState().clearMany(sentTagIds);
+      }
+      // Budget edits: clear everything that was sent OR a no-op (already in
+      // cloud); keep only the ones we skipped (tag not in cache) for retry.
+      // `doneBudgetIds` was computed up-front so the early-return path clears
+      // the same set.
+      if (doneBudgetIds.length > 0) {
+        await useBudgetEditsStore.getState().clearMany(doneBudgetIds);
       }
       overlayTagEdits(
         mapped.categoryMeta,

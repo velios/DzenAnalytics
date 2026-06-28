@@ -18,6 +18,14 @@ import type {
 } from "./zenmoney";
 import { SYNTHETIC_CATEGORY_COLORS } from "./categoryColor";
 
+/**
+ * Label for an operation with NO category. Zenmoney has no «uncategorized» tag —
+ * a tag-less transaction (`tag: null`) is simply shown as «Без категории». We
+ * surface it under this exact title, and the reverse mapper treats a category
+ * edit back to this title as «clear the tag» (`tag: null`), not a tag lookup.
+ */
+export const NO_CATEGORY = "Без категории";
+
 export interface CategoryMeta {
   /** CSS rgb() string or null when the tag has no colour set. */
   color: string | null;
@@ -80,11 +88,11 @@ function buildCategory(
   tagsById: Map<string, ZenTag>
 ): { category: string; subcategory: string | null; full: string } {
   if (!tagIds || tagIds.length === 0) {
-    return { category: "Без категории", subcategory: null, full: "Без категории" };
+    return { category: NO_CATEGORY, subcategory: null, full: NO_CATEGORY };
   }
   const tag = tagsById.get(tagIds[0]);
   if (!tag) {
-    return { category: "Без категории", subcategory: null, full: "Без категории" };
+    return { category: NO_CATEGORY, subcategory: null, full: NO_CATEGORY };
   }
   const parent = tag.parent ? tagsById.get(tag.parent) : null;
   if (parent) {

@@ -5,6 +5,8 @@ import {
   plannedFor,
   monthlyEquivalent,
   factFor,
+  forecastFor,
+  buildMonthCashflow,
   migrateLegacyBudgets,
   type BudgetLine,
 } from "./budgets";
@@ -102,6 +104,83 @@ describe("factFor", () => {
     const l = line({ category: "Зарплата", kind: "income" });
     expect(factFor(l, txs, "2026-03")).toBe(90000);
     expect(factFor(l, txs, "2026-04")).toBe(0);
+  });
+
+  it("per-tag: parent line counts only parent-direct txs, sub line only its sub", () => {
+    const mixed = [
+      tx({ category: "Еда", subcategory: null, kind: "expense", amountBase: 1000, date: "2026-03-05" }),
+      tx({ category: "Еда", subcategory: "Алкоголь", kind: "expense", amountBase: 400, date: "2026-03-06" }),
+    ];
+    // Parent budget (subcategory null) ignores the «Алкоголь» sub-tag spend.
+    expect(factFor(line({ category: "Еда", subcategory: null }), mixed, "2026-03")).toBe(1000);
+    // Sub budget counts only its own tag.
+    expect(factFor(line({ category: "Еда", subcategory: "Алкоголь" }), mixed, "2026-03")).toBe(400);
+  });
+});
+
+describe("forecastFor", () => {
+  const incLine = line({ category: "Проценты", kind: "income" });
+  const inc = (date: string, amt: number) =>
+    tx({ category: "Проценты", kind: "income", amountBase: amt, date });
+
+  it("median of the prior months, rounded to 100", () => {
+    // Last 6 months before 2026-06: May…Dec, all ~26 000 → median rounded to 100.
+    const txs = [
+      inc("2026-05-10", 26100),
+      inc("2026-04-10", 26000),
+      inc("2026-03-10", 26200),
+      inc("2026-02-10", 25900),
+      inc("2026-01-10", 26050),
+      inc("2025-12-10", 26300),
+    ];
+    expect(forecastFor(incLine, txs, "2026-06")).toBe(26100);
+  });
+
+  it("no forecast for sporadic income (median below 100 → 0)", () => {
+    // Income only once in the window → median of the six months is 0.
+    const txs = [inc("2026-03-10", 50000)];
+    expect(forecastFor(incLine, txs, "2026-06")).toBe(0);
+  });
+
+  it("ignores the current and future months — only looks back", () => {
+    const txs = [inc("2026-06-10", 99999), inc("2026-07-10", 99999)];
+    expect(forecastFor(incLine, txs, "2026-06")).toBe(0);
+  });
+});
+
+describe("buildMonthCashflow", () => {
+  // "Today" = 15 June 2026 → half the month elapsed.
+  const now = new Date("2026-06-15T12:00:00").getTime();
+  const txs = [
+    tx({ category: "З/п", kind: "income", amountBase: 100000, date: "2026-06-05" }),
+    tx({ category: "Еда", kind: "expense", amountBase: 20000, date: "2026-06-10" }),
+    tx({ category: "Еда", kind: "expense", amountBase: 10000, date: "2026-06-14" }),
+  ];
+
+  it("splits actual vs forecast at today and projects at the daily pace", () => {
+    const cf = buildMonthCashflow(txs, "2026-06", now);
+    expect(cf.days).toBe(30);
+    expect(cf.todayDay).toBe(15);
+    expect(cf.factIncome).toBe(100000);
+    expect(cf.factExpense).toBe(30000);
+    // Pace × full month: expense 30000/15 × 30 = 60000; income 100000/15 × 30 ≈ 200000.
+    expect(cf.projExpense).toBeCloseTo(60000, 0);
+    expect(cf.projIncome).toBeCloseTo(200000, 0);
+    // Day 15 carries BOTH actual and forecast so the segments join.
+    const d15 = cf.points.find((p) => p.day === 15)!;
+    expect(d15.expense).toBe(30000);
+    expect(d15.expenseF).toBe(30000);
+    // After today: actual is null, forecast non-null.
+    const d30 = cf.points.find((p) => p.day === 30)!;
+    expect(d30.expense).toBeNull();
+    expect(d30.expenseF).toBeCloseTo(60000, 0);
+  });
+
+  it("a past month is fully actual — no forecast segment", () => {
+    const cf = buildMonthCashflow(txs.map((t) => ({ ...t, date: t.date })), "2026-06", new Date("2026-08-01").getTime());
+    expect(cf.todayDay).toBe(30);
+    expect(cf.projExpense).toBe(30000); // equals the actual total
+    expect(cf.points.every((p) => p.expenseF === null || p.day === 30)).toBe(true);
   });
 });
 
