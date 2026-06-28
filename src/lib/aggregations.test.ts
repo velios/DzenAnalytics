@@ -107,6 +107,31 @@ describe("stackedBalanceByAccount — real-balance anchoring", () => {
     expect(accounts).toEqual(expect.arrayContaining(["A", "B", "Прочие"]));
     expect(accounts).not.toContain("C"); // small balance → folded into «Прочие»
   });
+
+  // issue #18 — an unsynced draft is in the walked history but NOT in the API
+  // balance. It must stay in the line shape yet be excluded from the anchor.
+  const withDraft = [
+    tx({ kind: "income", amount: 1_900_000, incomeAccount: "A", date: "2026-01-01" }),
+    tx({ id: "draft1", kind: "income", amount: 500, incomeAccount: "A", date: "2026-06-16" }),
+  ];
+
+  it("anchors past an unsynced draft so the baseline isn't shifted (issue #18)", () => {
+    // API balance = cloud only (1,900,000); projected after push = 1,900,500.
+    const { series } = stackedBalanceByAccount(withDraft, 8, { A: 1_900_000 }, new Set(["draft1"]));
+    // Line ends at the PROJECTED balance (cloud + draft) — same as after push.
+    expect(series[series.length - 1].A).toBe(1_900_500);
+    // Opening reconciles to the real cloud baseline (0): day-1 point is just the
+    // income, NOT slid down by −500. Before the fix this read 1,899,500.
+    expect(series[0].A).toBe(1_900_000);
+  });
+
+  it("without the unsynced set the draft counts as cloud flow (anchor contract)", () => {
+    // Same data, draft id NOT supplied → treated as synced, reproducing the
+    // off-by-draft slide. Guards that the param is what drives the fix.
+    const { series } = stackedBalanceByAccount(withDraft, 8, { A: 1_900_000 });
+    expect(series[0].A).toBe(1_899_500); // −500 shift
+    expect(series[series.length - 1].A).toBe(1_900_000);
+  });
 });
 
 describe("netWorthSeries — openings & account membership (issue #3)", () => {

@@ -166,7 +166,13 @@ export function stackedBalanceByAccount(
    *  When given, each line is shifted to END at the real balance — turning the
    *  «накопленный поток с нуля» into an actual balance-over-time, so the stack
    *  sums to real net worth and funded accounts don't sink below zero. */
-  realBalances?: Record<string, number | null> | null
+  realBalances?: Record<string, number | null> | null,
+  /** Ids of unsynced local drafts that ARE walked in `allTxs` but are NOT yet
+   *  reflected in `realBalances` (cloud truth from the API). They stay in the
+   *  line SHAPE, but are excluded from the real-balance anchor reconciliation —
+   *  so the line ends at the projected balance (cloud + draft) and the whole
+   *  historical baseline isn't shifted down by the draft amount. Issue #18. */
+  unsyncedIds?: Set<string> | null
 ): { series: StackedBalancePoint[]; accounts: string[] } {
   const balances = balancesByAccount(allTxs);
   // Pick the «biggest» accounts. With real balances (API mode, where the chart
@@ -185,9 +191,14 @@ export function stackedBalanceByAccount(
   const accountSet = new Set(topAccounts);
 
   const days = new Map<string, Map<string, number>>();
+  // Per-account flow contributed by unsynced drafts, binned the same way as
+  // `days`. Subtracted from the running total before anchoring so the cloud
+  // balance reconciles against the synced flow only (issue #18).
+  const unsyncedFlow = new Map<string, number>();
   for (const t of allTxs) {
     const d = ymdKey(t.date);
     if (!d) continue;
+    const unsynced = unsyncedIds ? unsyncedIds.has(t.id) : false;
     const apply = (acc: string, delta: number) => {
       if (!acc) return;
       const key = accountSet.has(acc) ? acc : "Прочие";
@@ -197,6 +208,7 @@ export function stackedBalanceByAccount(
         days.set(d, dayMap);
       }
       dayMap.set(key, (dayMap.get(key) || 0) + delta);
+      if (unsynced) unsyncedFlow.set(key, (unsyncedFlow.get(key) || 0) + delta);
     };
     if (t.kind === "expense") apply(t.outcomeAccount, -t.amountBase);
     else if (t.kind === "income" || t.kind === "refund") {
@@ -244,13 +256,18 @@ export function stackedBalanceByAccount(
     for (const [acc, bal] of Object.entries(realBalances)) {
       if (bal != null && !topSet.has(acc)) prochieReal += bal;
     }
+    // Reconcile against the SYNCED flow only: the API balance excludes unsynced
+    // drafts, so strip their flow from `running` before computing the shift.
+    // Otherwise the whole line slides by the draft amount (issue #18) — the
+    // offset becomes the true opening balance and the line ends at cloud+draft.
     const offset: Record<string, number> = {};
     for (const a of accountList) {
+      const synced = (running[a] || 0) - (unsyncedFlow.get(a) || 0);
       if (a === "Прочие") {
-        offset[a] = prochieReal - (running[a] || 0);
+        offset[a] = prochieReal - synced;
       } else {
         const real = realBalances[a];
-        offset[a] = real == null ? 0 : real - running[a];
+        offset[a] = real == null ? 0 : real - synced;
       }
     }
     for (const point of series) {
