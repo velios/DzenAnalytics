@@ -401,14 +401,14 @@ export function CategoriesPage() {
 
   // «Дельта» pill — change versus the same period a year ago. Colour is
   // semantic: for expenses a rise is «bad» (red) and a drop «good» (green);
-  // for income it's the other way round. «новое» when there was nothing a
+  // for income it's the other way round. «Нет данных» when there was nothing a
   // year ago, «—» when the period has no comparable year-ago window.
   function deltaPill(cur: number, prev: number | undefined) {
     if (!prevYear.comparable) return <span className="text-muted">—</span>;
     if (prev === undefined || prev <= 0) {
       return (
         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs text-muted bg-panel2">
-          Новое
+          Нет данных
         </span>
       );
     }
@@ -695,12 +695,13 @@ export function CategoriesPage() {
                   const color = resolvedCategoryColors[node.name] || COLORS[0];
                   const isOpen = expanded.has(node.name);
                   const hasSubs = node.subs.some((s) => s.total > 0);
-                  // Bars share ONE scale that also covers the «year ago» values,
-                  // so a year-ago marker always lands inside the track.
-                  const maxTotal = Math.max(
-                    tree[0]?.total || 1,
-                    ...tree.map((n) => prevYear.cat.get(n.name) || 0)
-                  );
+                  // Bars are scaled to the largest CURRENT category, so the top
+                  // bar fills the track and lengths read as proportional. The
+                  // year-ago marker clamps to the right edge when it's off-scale
+                  // (its exact value stays in the tooltip) — otherwise a single
+                  // big year-ago value (e.g. a full month vs the partial current
+                  // one) would squash every bar.
+                  const maxTotal = tree[0]?.total || 1;
                   const barPct = Math.max(0, (node.total / maxTotal) * 100);
                   const prevCat = prevYear.cat.get(node.name);
                   return (

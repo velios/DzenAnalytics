@@ -37,8 +37,6 @@ import {
 } from "../store/useFiltersStore";
 import { PeriodPills } from "../components/PeriodPills";
 import { useDrillStore } from "../store/useDrillStore";
-import { useAnnotationsStore } from "../store/useAnnotationsStore";
-import { AnnotationMarker } from "../components/AnnotationMarker";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { periodKey } from "../lib/period";
 import {
@@ -128,13 +126,6 @@ export function CashflowPage() {
     [transactions, filters, monthStartDay]
   );
 
-  const annotations = useAnnotationsStore((s) => s.annotations);
-  const annHydrate = useAnnotationsStore((s) => s.hydrate);
-  const annLoaded = useAnnotationsStore((s) => s.loaded);
-  useEffect(() => {
-    if (!annLoaded) annHydrate();
-  }, [annLoaded, annHydrate]);
-
   const allYears = useMemo(() => {
     const set = new Set<number>();
     for (const t of dimensionFiltered) set.add(Number(t.date.slice(0, 4)));
@@ -188,14 +179,6 @@ export function CashflowPage() {
     netForecastMid: p.isForecast ? Math.round(p.realistic) : null,
     isForecast: p.isForecast,
   }));
-
-  // Plain derived value (not useMemo) — it lives after the early
-  // `return <EmptyState />` above, so a hook here would violate
-  // rules-of-hooks. The filter is cheap, so memoizing isn't worth it.
-  const chartYms = new Set(chartData.map((d) => d.ym));
-  const annotationsInRange = annotations.filter((a) =>
-    chartYms.has(a.date.slice(0, 7))
-  );
 
   const monthsCount = months.length || 1;
   const avgMonthlyExpense = kpi.expense / monthsCount;
@@ -348,15 +331,6 @@ export function CashflowPage() {
                 strokeDasharray="3 3"
                 dot={false}
               />
-              {annotationsInRange.map((a) => (
-                <ReferenceLine
-                  key={a.id}
-                  x={monthLabel(a.date.slice(0, 7))}
-                  stroke={a.color || "#A78BFA"}
-                  strokeDasharray="2 2"
-                  label={<AnnotationMarker ann={a} />}
-                />
-              ))}
             </ComposedChart>
           </ResponsiveContainer>
           ) : (

@@ -28,7 +28,6 @@ import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { UncategorizedPage } from "./pages/UncategorizedPage";
 import { TrashPage } from "./pages/TrashPage";
 import { SankeyPage } from "./pages/SankeyPage";
-import { AnnotationsPage } from "./pages/AnnotationsPage";
 import { HelpPage } from "./pages/HelpPage";
 import { RulesPage } from "./pages/RulesPage";
 import { WordcloudPage } from "./pages/WordcloudPage";
@@ -45,6 +44,7 @@ import { useDeletedStore } from "./store/useDeletedStore";
 import { useDeletedPayloadsStore } from "./store/useDeletedPayloadsStore";
 import { useDraftsStore } from "./store/useDraftsStore";
 import { useTagEditsStore } from "./store/useTagEditsStore";
+import { useBudgetEditsStore } from "./store/useBudgetEditsStore";
 import { installTruncatedTitles } from "./lib/truncatedTitle";
 import { useDisplayStore } from "./store/useDisplayStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
@@ -97,6 +97,7 @@ function App() {
     useDeletedPayloadsStore.getState().hydrate();
     useDraftsStore.getState().hydrate();
     useTagEditsStore.getState().hydrate();
+    useBudgetEditsStore.getState().hydrate();
     useDisplayStore.getState().hydrate();
     useOffBalanceStore.getState().hydrate();
     hydrate();
@@ -170,7 +171,10 @@ function App() {
         Object.keys(useDraftsStore.getState().drafts).length > 0;
       const hasTagEdits =
         Object.keys(useTagEditsStore.getState().edits).length > 0;
-      if (!hasEdits && !hasDeletions && !hasDrafts && !hasTagEdits) return;
+      const hasBudgetEdits =
+        Object.keys(useBudgetEditsStore.getState().edits).length > 0;
+      if (!hasEdits && !hasDeletions && !hasDrafts && !hasTagEdits && !hasBudgetEdits)
+        return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
@@ -217,12 +221,19 @@ function App() {
       if (Object.keys(s.edits).length === 0) return;
       schedule();
     });
+    // Plan/budget edits push on the same debounce.
+    const unsubBudgetEdits = useBudgetEditsStore.subscribe((s, p) => {
+      if (s.edits === p.edits) return;
+      if (Object.keys(s.edits).length === 0) return;
+      schedule();
+    });
     return () => {
       if (timer) clearTimeout(timer);
       unsubEdits();
       unsubDeleted();
       unsubDrafts();
       unsubTagEdits();
+      unsubBudgetEdits();
     };
   }, []);
 
@@ -283,7 +294,6 @@ function App() {
             <Route path="/duplicates" element={<DuplicatesPage />} />
             <Route path="/uncategorized" element={<UncategorizedPage />} />
             <Route path="/trash" element={<TrashPage />} />
-            <Route path="/annotations" element={<AnnotationsPage />} />
             <Route path="/help" element={<HelpPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/health" element={<HealthPage />} />

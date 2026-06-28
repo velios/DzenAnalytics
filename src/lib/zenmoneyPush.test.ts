@@ -10,6 +10,7 @@ import {
   validateDrafts,
   type DraftFields,
 } from "./zenmoneyPush";
+import { NO_CATEGORY } from "./zenmoneyMap";
 import type { ZenCache } from "./zenmoneyCache";
 import type { ZenAccount, ZenInstrument, ZenTag, ZenTransaction } from "./zenmoney";
 import type { TransactionEdit } from "../store/useEditsStore";
@@ -548,6 +549,47 @@ describe("buildPushItems — transfer collapse", () => {
   });
 });
 
+describe("buildPushItems — clear category («Без категории»)", () => {
+  const catCache = (t: ZenTransaction): ZenCache => ({
+    serverTimestamp: 0,
+    instruments: [{ id: 2, shortTitle: "RUB" } as ZenInstrument],
+    accounts: [{ id: ACC, title: "Карта" } as ZenAccount],
+    tags: [{ id: "t-food", title: "Еда", parent: null, archive: false } as ZenTag],
+    merchants: [],
+    transactions: [t],
+    user: [],
+  });
+
+  it("maps a category edit to «Без категории» to a tag-less push, not a lookup", () => {
+    const t = fullTx({ id: "x", outcome: 500, tag: ["t-food"] });
+    const { toPush, skipped } = buildPushItems(
+      { x: { category: NO_CATEGORY, subcategory: null } as TransactionEdit },
+      catCache(t)
+    );
+    expect(skipped).toHaveLength(0);
+    expect(toPush).toHaveLength(1);
+    expect(toPush[0].zen.tag).toBeNull();
+  });
+
+  it("treats an empty-string category as «no tag» too", () => {
+    const t = fullTx({ id: "x", outcome: 500, tag: ["t-food"] });
+    const { toPush } = buildPushItems(
+      { x: { category: "" } as TransactionEdit },
+      catCache(t)
+    );
+    expect(toPush[0].zen.tag).toBeNull();
+  });
+
+  it("still resolves a real category and still skips a genuinely-missing one", () => {
+    const t = fullTx({ id: "x", outcome: 500, tag: null });
+    const ok = buildPushItems({ x: { category: "Еда" } as TransactionEdit }, catCache(t));
+    expect(ok.toPush[0].zen.tag).toEqual(["t-food"]);
+    const miss = buildPushItems({ x: { category: "Призрак" } as TransactionEdit }, catCache(t));
+    expect(miss.toPush).toHaveLength(0);
+    expect(miss.skipped[0].reason).toMatch(/не найдена/);
+  });
+});
+
 describe("detectConflicts", () => {
   const c = cache([
     { id: "a", changed: 100 } as ZenTransaction,
@@ -652,6 +694,17 @@ describe("buildDraftTransaction", () => {
     category: "Еда",
   };
 
+  // issue #19.3 — editing a not-yet-pushed draft rebuilds it IN PLACE (same id,
+  // updated fields), so it stays ONE create, not a create + separate edit.
+  it("rebuilding with the same id merges the edit into the draft", () => {
+    const v1 = buildDraftTransaction({ ...base, category: "Еда", amount: 500 }, draftCache(), 1000);
+    const v2 = buildDraftTransaction({ ...base, category: "Зарплата", kind: "income", amount: 800 }, draftCache(), 2000);
+    expect(v1.zen?.id).toBe("new-1");
+    expect(v2.zen?.id).toBe("new-1"); // same draft id → replace in place
+    expect(v1.zen?.outcome).toBe(500);
+    expect(v2.zen).toMatchObject({ income: 800, outcome: 0, tag: ["t-salary"] });
+  });
+
   it("builds a single-leg expense (both legs on one account, amount on outcome)", () => {
     const r = buildDraftTransaction(base, draftCache(), 1000);
     expect(r.skip).toBeUndefined();
@@ -679,6 +732,12 @@ describe("buildDraftTransaction", () => {
   it("falls back to the build stamp for created when no createdSeconds given", () => {
     const r = buildDraftTransaction(base, draftCache(), 1000);
     expect(r.zen).toMatchObject({ created: 1000, changed: 1000 });
+  });
+
+  it("builds a tag-less operation for «Без категории»", () => {
+    const r = buildDraftTransaction({ ...base, category: NO_CATEGORY }, draftCache(), 1);
+    expect(r.skip).toBeUndefined();
+    expect(r.zen?.tag).toBeNull();
   });
 
   it("builds a single-leg income (amount on income leg)", () => {
@@ -912,6 +971,36 @@ describe("buildPushItems — debt operations", () => {
     const out = pushDebt(t, { account: "Карта", incomeAccount: "Долг" } as TransactionEdit);
     expect(out.toPush).toHaveLength(1);
     expect(out.toPush[0].zen.payee).toBe("Иван");
+  });
+
+  // issue #19.7 / #19.1 — converting a REGULAR op into a debt one. The original
+  // isn't a debt op, so the debt branch doesn't fire; the transfer branch must
+  // still keep/require the payee because the TARGET leg is a debt account.
+  const plainExpense = () =>
+    debtTx({ id: "x", outcome: 1000, income: 0, outcomeAccount: "acc-card", incomeAccount: "acc-card", payee: null });
+
+  it("converting a regular expense INTO a debt op keeps the counterparty", () => {
+    const out = pushDebt(plainExpense(), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Долг",
+      brand: "Иван",
+    } as TransactionEdit);
+    expect(out.skipped).toHaveLength(0);
+    const zen = out.toPush[0].zen;
+    expect(zen.payee).toBe("Иван");
+    expect(zen.outcomeAccount).toBe("acc-card");
+    expect(zen.incomeAccount).toBe("acc-debt");
+  });
+
+  it("converting to a debt op without a counterparty is refused", () => {
+    const out = pushDebt(plainExpense(), {
+      kind: "transfer",
+      outcomeAccount: "Карта",
+      incomeAccount: "Долг",
+    } as TransactionEdit);
+    expect(out.toPush).toHaveLength(0);
+    expect(out.skipped[0].reason).toMatch(/плательщик/i);
   });
 });
 

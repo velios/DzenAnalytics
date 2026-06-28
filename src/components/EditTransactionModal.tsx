@@ -20,6 +20,8 @@ import {
 } from "../lib/zenmoneyPush";
 import { Combobox, type ComboboxGroup } from "./Combobox";
 import { CategoryCascadePicker, type CategoryNode } from "./CategoryCascadePicker";
+import { NO_CATEGORY } from "../lib/zenmoneyMap";
+import { validateOperation } from "../lib/operationValidation";
 import { DateField } from "./DateField";
 import type { ZenTag } from "../lib/zenmoney";
 import { HashtagTextarea } from "./HashtagTextarea";
@@ -111,6 +113,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
   const refresh = useDataStore((s) => s.refresh);
   const setEdit = useEditsStore((s) => s.setEdit);
   const addDraft = useDraftsStore((s) => s.add);
+  const updateDraft = useDraftsStore((s) => s.update);
   // A not-yet-pushed draft: deleting discards it permanently (no cloud row, no
   // restore), so the confirm copy below is tailored for that case.
   const isDraftEdit = useDraftsStore((s) => !isCreate && Boolean(s.drafts[tx.id]));
@@ -281,7 +284,11 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
       // are reached via the right panel.
       (c) => !c.includes(" / ") && (realTop.has(c) || !childNames.has(c))
     );
-    return tops.map((name) => ({
+    // Always offer «Без категории» (pinned first) so a category can be REMOVED —
+    // Zenmoney has no uncategorized tag, so this maps to a tag-less operation on
+    // push. Without this the option only appeared when uncategorized data existed.
+    const withClear = [NO_CATEGORY, ...tops.filter((c) => c !== NO_CATEGORY)];
+    return withClear.map((name) => ({
       name,
       subs: Array.from(subsMap.get(name) ?? []).sort((a, b) =>
         a.localeCompare(b, "ru")
@@ -543,19 +550,15 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
   // Create mode: build a fresh ZenTransaction from the form and store it as
   // a draft. Validation/resolution lives in `buildDraftTransaction` (pure,
   // unit-tested); we surface its skip reason inline on failure.
-  async function saveDraft() {
-    const cache = await loadZenCache();
-    if (!cache) {
-      setError("Создание операций доступно только при синхронизации с Zenmoney.");
-      return;
-    }
+  /** Form state → DraftFields for a given id (shared by create & draft-edit). */
+  function currentDraftFields(id: string): DraftFields {
     // «Долг» legs: a debt op is a transfer between the real account and the
     // debt account «Долги», direction decides which leg is the source.
     const debtT = debtAccountTitle ?? "";
     const debtSrc = debtOutgoing ? realAcc.trim() : debtT;
     const debtDst = debtOutgoing ? debtT : realAcc.trim();
-    const fields: DraftFields = {
-      id: newDraftId(),
+    return {
+      id,
       kind: isDebt ? "transfer" : kind,
       date,
       createdSeconds: /^\d{2}:\d{2}$/.test(time)
@@ -578,8 +581,16 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
       payee: isDebt ? payee.trim() : kind === "transfer" ? undefined : payee.trim(),
       comment: comment.trim(),
     };
+  }
+
+  async function saveDraft() {
+    const cache = await loadZenCache();
+    if (!cache) {
+      setError("Создание операций доступно только при синхронизации с Zenmoney.");
+      return;
+    }
     const built = buildDraftTransaction(
-      fields,
+      currentDraftFields(newDraftId()),
       cache,
       Math.floor(Date.now() / 1000)
     );
@@ -592,12 +603,62 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
     onClose();
   }
 
+  // Editing a not-yet-pushed draft: rebuild it IN PLACE (same id) so the change
+  // is immediately visible in the list and pushed as ONE create — not a create
+  // plus a separate edit overlay the row wouldn't even reflect (issue #19.3).
+  async function saveDraftEdit() {
+    const cache = await loadZenCache();
+    if (!cache) {
+      setError("Создание операций доступно только при синхронизации с Zenmoney.");
+      return;
+    }
+    const built = buildDraftTransaction(
+      currentDraftFields(tx.id),
+      cache,
+      Math.floor(Date.now() / 1000)
+    );
+    if (!built.zen) {
+      setError(built.skip ?? "Не удалось сохранить операцию");
+      return;
+    }
+    await updateDraft(built.zen);
+    await refresh();
+    onClose();
+  }
+
+  // Semantic validation BEFORE we persist — so the user gets an inline error
+  // instead of a silent push-time skip that strands the edit in «зависшие»
+  // (issue #19: 2, 7, 8). Mirrors the builder/push skip-reasons.
+  function validate(): string | null {
+    const cat = category.trim();
+    return validateOperation({
+      kind,
+      isDebt,
+      amount: Number(amount.replace(",", ".")),
+      payee: payee.trim(),
+      realAcc: realAcc.trim(),
+      outAcc: outAcc.trim(),
+      inAcc: inAcc.trim(),
+      category: cat,
+      categoryHasIncome: !!categoryMeta[cat]?.showIncome,
+    });
+  }
+
   async function save() {
+    const err = validate();
+    if (err) {
+      setError(err);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       if (isCreate) {
         await saveDraft();
+        return;
+      }
+      if (isDraftEdit) {
+        await saveDraftEdit();
         return;
       }
       const amtNum = Number(amount.replace(",", "."));

@@ -31,7 +31,7 @@ export const BACKUP_META_KEYS = [
   "fireExcludedAccounts",
   "includeOffBalance",
   "savedViews",
-  "annotations",
+  "annotations", // legacy — feature archived (see archive/annotations); data preserved
   "categoryFlags", // legacy — kept so old backups round-trip
   "inflation",
   "payeeGrouping",

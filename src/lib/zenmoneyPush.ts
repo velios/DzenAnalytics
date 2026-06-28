@@ -51,12 +51,14 @@
 import { pushDiff, type PushPayload } from "./zenmoney";
 import type {
   ZenAccount,
+  ZenBudget,
   ZenDeletion,
   ZenDiffResponse,
   ZenTag,
   ZenTransaction,
 } from "./zenmoney";
 import type { ZenCache } from "./zenmoneyCache";
+import { NO_CATEGORY } from "./zenmoneyMap";
 import type { TransactionEdit } from "../store/useEditsStore";
 import type { TxKind } from "../types";
 
@@ -195,6 +197,20 @@ function buildTransferTarget(
       };
     }
   }
+  // A leg on a loan/credit/debt account makes this a «Долг» op — Zenmoney then
+  // REQUIRES a non-null payee (the counterparty). This is the path for
+  // converting a regular operation INTO a debt one (the original isn't a debt
+  // op, so the dedicated debt branch upstream doesn't fire). Keep/require the
+  // payee instead of nulling it (issue #19.7 / #19.1).
+  const isDebtTransfer =
+    DEBT_ACCOUNT_TYPES.has(src.type || "") || DEBT_ACCOUNT_TYPES.has(dst.type || "");
+  let debtPayee: string | null = null;
+  if (isDebtTransfer) {
+    debtPayee = ((edit.brand ?? edit.payee ?? original.payee) || "").trim() || null;
+    if (!debtPayee) {
+      return { skip: "у долговой операции должен быть указан плательщик (контрагент)" };
+    }
+  }
   const zen: ZenTransaction = {
     ...original,
     outcome,
@@ -211,9 +227,9 @@ function buildTransferTarget(
     // freshly-synthesised destination leg has none.
     outcomeBankID: original.outcome > 0 ? original.outcomeBankID : original.incomeBankID,
     incomeBankID: null,
-    tag: null, // a transfer has no category in Zenmoney
+    tag: null, // a transfer / debt op has no category tag in Zenmoney
     merchant: null,
-    payee: null, // a transfer has no counterparty
+    payee: debtPayee, // debt → counterparty; plain transfer → none
   };
   return { zen };
 }
@@ -275,7 +291,11 @@ function collapseTransfer(
   zen.opIncome = 0;
   zen.opOutcomeInstrument = null;
   zen.opIncomeInstrument = null;
-  if (edit.category && !SYNTHETIC_CATEGORIES.has(edit.category)) {
+  if (
+    edit.category &&
+    edit.category !== NO_CATEGORY &&
+    !SYNTHETIC_CATEGORIES.has(edit.category)
+  ) {
     const resolved = resolveTagId(
       edit.category,
       edit.subcategory ?? null,
@@ -287,6 +307,7 @@ function collapseTransfer(
     }
     zen.tag = [resolved];
   } else {
+    // No category / «Без категории» / synthetic → tag-less.
     zen.tag = null;
   }
   return { zen };
@@ -749,20 +770,26 @@ export function buildPushItems(
     }
 
     if (edit.category !== undefined) {
-      const resolved = resolveTagId(
-        edit.category,
-        edit.subcategory ?? null,
-        tagsByTitle,
-        tagsById
-      );
-      if (!resolved) {
-        skipped.push({
-          id,
-          reason: `категория "${edit.category}"${edit.subcategory ? ` / "${edit.subcategory}"` : ""} не найдена в тегах Zenmoney`,
-        });
-        continue;
+      if (edit.category === NO_CATEGORY || edit.category === "") {
+        // «Без категории» = no tag. Zenmoney has no uncategorized tag, so a
+        // clear is simply `tag: null` — never a lookup (which would 404).
+        zen.tag = null;
+      } else {
+        const resolved = resolveTagId(
+          edit.category,
+          edit.subcategory ?? null,
+          tagsByTitle,
+          tagsById
+        );
+        if (!resolved) {
+          skipped.push({
+            id,
+            reason: `категория "${edit.category}"${edit.subcategory ? ` / "${edit.subcategory}"` : ""} не найдена в тегах Zenmoney`,
+          });
+          continue;
+        }
+        zen.tag = [resolved];
       }
-      zen.tag = [resolved];
     } else if (edit.subcategory !== undefined && original.tag?.[0]) {
       // The user changed only the subcategory. Try to find a sibling tag
       // with the same parent. If we can't, skip — better than silently
@@ -1073,24 +1100,27 @@ export function buildDraftTransaction(
       zen.income = fields.amount;
     }
 
-    // Category is required for single-leg rows and must resolve to a tag.
+    // Pick a category, or «Без категории» for a tag-less operation.
     const category = (fields.category || "").trim();
     if (!category) return { skip: "укажите категорию" };
-    if (SYNTHETIC_CATEGORIES.has(category)) {
-      return { skip: `категория "${category}" — локальный ярлык, тега в Zenmoney нет` };
+    if (category !== NO_CATEGORY) {
+      if (SYNTHETIC_CATEGORIES.has(category)) {
+        return { skip: `категория "${category}" — локальный ярлык, тега в Zenmoney нет` };
+      }
+      const tagId = resolveTagId(
+        category,
+        fields.subcategory?.trim() || null,
+        tagsByTitle,
+        tagsById
+      );
+      if (!tagId) {
+        return {
+          skip: `категория "${category}"${fields.subcategory ? ` / "${fields.subcategory}"` : ""} не найдена в тегах Zenmoney`,
+        };
+      }
+      zen.tag = [tagId];
     }
-    const tagId = resolveTagId(
-      category,
-      fields.subcategory?.trim() || null,
-      tagsByTitle,
-      tagsById
-    );
-    if (!tagId) {
-      return {
-        skip: `категория "${category}"${fields.subcategory ? ` / "${fields.subcategory}"` : ""} не найдена в тегах Zenmoney`,
-      };
-    }
-    zen.tag = [tagId];
+    // «Без категории» → leave zen.tag = null (an uncategorized operation).
   }
 
   // Counterparty. A DEBT op (one leg is a debt-type account) MUST keep a
@@ -1185,12 +1215,14 @@ export async function sendPush(
   items: PushItem[],
   deletions: ZenDeletion[] = [],
   resurrections: ZenTransaction[] = [],
-  tags: ZenTag[] = []
+  tags: ZenTag[] = [],
+  budgets: ZenBudget[] = []
 ): Promise<ZenDiffResponse> {
   const payload: PushPayload = {
     transaction: [...items.map((i) => i.zen), ...resurrections],
     ...(deletions.length > 0 ? { deletion: deletions } : {}),
     ...(tags.length > 0 ? { tag: tags } : {}),
+    ...(budgets.length > 0 ? { budget: budgets } : {}),
   };
   // Debug aid: surface the full payload in DevTools so it's easy to
   // verify which fields actually landed in the request body. Disabled
@@ -1244,4 +1276,112 @@ export function buildTagPush(
     tags.push({ ...orig, required: edit.required, changed: stampSeconds });
   }
   return { tags, skipped };
+}
+
+/** A pending budget/plan change, queued to push back to Zenmoney «Планы». */
+export interface BudgetEdit {
+  kind: "expense" | "income";
+  category: string;
+  subcategory: string | null;
+  ym: string; // "YYYY-MM"
+  amount: number;
+}
+
+/** Stable id for a budget edit — (kind, category, subcategory, month). */
+export function budgetEditId(e: {
+  kind: string;
+  category: string;
+  subcategory: string | null;
+  ym: string;
+}): string {
+  return [e.kind, e.category, e.subcategory ?? "", e.ym].join("\u0000");
+}
+
+/**
+ * Build the `ZenBudget[]` payload for pending plan changes. A budget sits on
+ * exactly one tag and has no surface id — it's keyed by (tag, date), so we
+ * resolve (category, subcategory) → tag id and upsert that cell.
+ *
+ * To avoid clobbering, we start from the EXISTING cached budget for that
+ * (tag, month) and override only the edited side (outcome for expense / income
+ * for income), clearing that side's auto-forecast flag so Zenmoney treats it as
+ * a manual plan — mirroring how real plans look (`isOutcomeForecast: false`).
+ *
+ * Edits whose tag isn't in the cache (need a re-sync) are reported in
+ * `skipped`; no-ops (cloud already equals the edit) are dropped silently.
+ */
+export function buildBudgetPush(
+  edits: BudgetEdit[],
+  cacheBudgets: ZenBudget[],
+  cacheTags: ZenTag[],
+  stampSeconds: number
+): { budgets: ZenBudget[]; skipped: { id: string; reason: string }[] } {
+  const budgets: ZenBudget[] = [];
+  const skipped: { id: string; reason: string }[] = [];
+
+  const userId = cacheBudgets[0]?.user ?? cacheTags[0]?.user ?? null;
+  const byId = new Map(cacheTags.map((t) => [t.id, t]));
+  // Reverse name→tag lookups: top-level by title, sub by "parentTitle\0subTitle".
+  const topByTitle = new Map<string, ZenTag>();
+  const subByPath = new Map<string, ZenTag>();
+  for (const t of cacheTags) {
+    if (!t.parent) {
+      topByTitle.set(t.title, t);
+    } else {
+      const p = byId.get(t.parent);
+      if (p) subByPath.set([p.title, t.title].join("\u0000"), t);
+    }
+  }
+  const existingByKey = new Map(
+    cacheBudgets.map((b) => [[b.tag, b.date].join("\u0000"), b])
+  );
+
+  for (const e of edits) {
+    const id = budgetEditId(e);
+    const tag = e.subcategory
+      ? subByPath.get([e.category, e.subcategory].join("\u0000"))
+      : topByTitle.get(e.category);
+    if (!tag) {
+      skipped.push({ id, reason: "тег не найден в кэше (нужна синхронизация)" });
+      continue;
+    }
+    if (userId == null) {
+      skipped.push({ id, reason: "нет userId в кэше" });
+      continue;
+    }
+    const date = `${e.ym}-01`;
+    const existing = existingByKey.get([tag.id, date].join("\u0000"));
+    // No-op: cloud already equals this edit (manual, same amount).
+    if (existing) {
+      const same =
+        e.kind === "expense"
+          ? existing.outcome === e.amount && existing.isOutcomeForecast === false
+          : existing.income === e.amount && existing.isIncomeForecast === false;
+      if (same) continue;
+    }
+    const base: ZenBudget = existing
+      ? { ...existing }
+      : {
+          user: userId,
+          changed: stampSeconds,
+          date,
+          tag: tag.id,
+          income: 0,
+          incomeLock: false,
+          outcome: 0,
+          outcomeLock: false,
+          isIncomeForecast: false,
+          isOutcomeForecast: false,
+        };
+    const next: ZenBudget = { ...base, user: userId, date, tag: tag.id, changed: stampSeconds };
+    if (e.kind === "expense") {
+      next.outcome = e.amount;
+      next.isOutcomeForecast = false;
+    } else {
+      next.income = e.amount;
+      next.isIncomeForecast = false;
+    }
+    budgets.push(next);
+  }
+  return { budgets, skipped };
 }

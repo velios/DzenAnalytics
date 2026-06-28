@@ -31,6 +31,7 @@ import { useFiltersStore, FILTER_NONE, type DatePreset } from "../store/useFilte
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { confirm } from "../store/useConfirmStore";
 import { monthLabel } from "../lib/format";
+import { NO_CATEGORY } from "../lib/zenmoneyMap";
 import { currencyFlagEmoji } from "../lib/currencyFlag";
 import { pluralRu } from "../lib/plural";
 
@@ -372,13 +373,18 @@ export function GlobalFilters({
       if (t.subcategory) e.subs.add(t.subcategory);
       else e.hasBare = true;
     }
-    return [...map.entries()]
+    const real = [...map.entries()]
+      .filter(([name]) => name !== NO_CATEGORY)
       .map(([name, e]) => ({
         name,
         hasBare: e.hasBare,
         subs: [...e.subs].sort((a, b) => a.localeCompare(b, "ru")),
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    // Pin «Без категории» first (mirrors the edit-modal picker) so the
+    // uncategorized leaf is always an obvious, selectable filter — handy for
+    // hunting down operations that still need a category.
+    return [{ name: NO_CATEGORY, hasBare: true, subs: [] }, ...real];
   }, [transactions]);
 
   const currencies = useMemo(() => {

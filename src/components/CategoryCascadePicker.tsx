@@ -16,6 +16,9 @@ interface Props {
   onChange: (category: string, subcategory: string) => void;
   placeholder?: string;
   maxHeight?: string;
+  /** Hide the «Без подкатегории» (parent-only) option for these categories —
+   *  used when the parent itself is already taken (e.g. already budgeted). */
+  hideParentOption?: (category: string) => boolean;
 }
 
 /**
@@ -34,6 +37,7 @@ export function CategoryCascadePicker({
   onChange,
   placeholder = "Выберите категорию",
   maxHeight = "min(46vh, 280px)",
+  hideParentOption,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -90,13 +94,14 @@ export function CategoryCascadePicker({
     if (!q) return null;
     const items: SearchLeaf[] = [];
     for (const c of categories) {
-      if (c.name.toLowerCase().includes(q)) items.push({ kind: "cat", cat: c.name });
+      if (c.name.toLowerCase().includes(q) && !hideParentOption?.(c.name))
+        items.push({ kind: "cat", cat: c.name });
       for (const s of c.subs) {
         if (s.toLowerCase().includes(q)) items.push({ kind: "sub", cat: c.name, sub: s });
       }
     }
     return items;
-  }, [categories, q]);
+  }, [categories, q, hideParentOption]);
 
   function toggle() {
     if (!open) {
@@ -230,17 +235,20 @@ export function CategoryCascadePicker({
             <div className="w-1/2 overflow-y-auto">
               {active && active.subs.length > 0 ? (
                 <>
-                  {/* Pick the parent category itself (no sub-category). */}
-                  <button
-                    type="button"
-                    onClick={() => commit(active.name, "")}
-                    className={`w-full text-left px-2.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 ${
-                      category === active.name && !subcategory ? "text-accent" : "text-muted"
-                    }`}
-                  >
-                    <CategoryDot category={active.name} size="w-4 h-4" />
-                    <span className="truncate">Без подкатегории</span>
-                  </button>
+                  {/* Pick the parent category itself (no sub-category) — hidden
+                      when the parent is already taken. */}
+                  {!hideParentOption?.(active.name) && (
+                    <button
+                      type="button"
+                      onClick={() => commit(active.name, "")}
+                      className={`w-full text-left px-2.5 py-1.5 text-sm flex items-center gap-2 hover:bg-panel2 ${
+                        category === active.name && !subcategory ? "text-accent" : "text-muted"
+                      }`}
+                    >
+                      <CategoryDot category={active.name} size="w-4 h-4" />
+                      <span className="truncate">Без подкатегории</span>
+                    </button>
+                  )}
                   {activeSubs.map((s) => {
                     const isSel = category === active.name && subcategory === s;
                     return (
