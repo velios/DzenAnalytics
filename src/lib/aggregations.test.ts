@@ -222,6 +222,16 @@ describe("netWorthBasis (issue #3)", () => {
     const { accounts } = netWorthBasis(live, [], RUB, true);
     expect(accounts.has("Off")).toBe(true);
   });
+
+  it("ignores an epoch/1970 startDate and falls back to the first transaction", () => {
+    // Zenmoney sometimes returns a bogus 1970 startDate — it must NOT seed a
+    // phantom «01.01.1970» opening (that inflated net worth for a user).
+    const live = [acc({ title: "Legacy", startBalance: 100000, startDate: "1970-01-01" })];
+    const txs = [tx({ account: "Legacy", outcomeAccount: "Legacy", date: "2021-03-01" })];
+    const { openings } = netWorthBasis(live, txs, RUB, false);
+    expect(openings).toContainEqual({ date: "2021-03-01", amount: 100000 });
+    expect(openings.some((o) => o.date === "1970-01-01")).toBe(false);
+  });
 });
 
 describe("detectRecurring — nextExpected projection", () => {

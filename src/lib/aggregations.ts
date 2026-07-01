@@ -1169,7 +1169,15 @@ export function netWorthBasis(
     if (!a.inBalance && !includeOffBalance) continue;
     accounts.add(a.title);
     if (a.startBalance) {
-      const date = a.startDate || earliest.get(a.title) || globalEarliest;
+      // Zenmoney occasionally hands back an epoch/1970 `startDate` (legacy or
+      // import artifact). Such a date would plant a phantom opening balance «at
+      // the dawn of time» (01.01.1970) and inflate/skew the curve. Treat an
+      // implausibly-old startDate as absent and fall back to the account's
+      // first transaction (or the global earliest). Legitimate early dates
+      // (an account opened before the first visible transaction) are kept.
+      const plausibleStart =
+        a.startDate && a.startDate >= "2000-01-01" ? a.startDate : null;
+      const date = plausibleStart || earliest.get(a.title) || globalEarliest;
       if (date) openings.push({ date, amount: toBaseAmt(a.startBalance, a.currency) });
     }
   }
