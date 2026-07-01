@@ -237,6 +237,12 @@ export function HealthPage() {
                           {c.status === "na" ? "—" : Math.round(c.score)}
                         </div>
                       </div>
+                      {c.extra && (
+                        <div title={c.extra.hint} className="cursor-help">
+                          <div className="text-muted">{c.extra.label}</div>
+                          <div className="font-mono tabular-nums">{c.extra.value}</div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
