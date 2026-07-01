@@ -177,7 +177,7 @@ export function SortableTable<T>({
                       <button
                         onClick={() => toggleSort(c.key)}
                         className={clsx(
-                          "inline-flex items-center gap-1 hover:text-text transition-colors",
+                          "inline-flex items-center gap-1 uppercase tracking-wider hover:text-text transition-colors",
                           active && "text-accent"
                         )}
                       >
@@ -218,7 +218,7 @@ export function SortableTable<T>({
                     <tr
                       onClick={handleClick}
                       className={clsx(
-                        "align-top",
+                        "align-middle",
                         (expandable || onRowClick) && "hover:bg-panel2/50 cursor-pointer",
                         rowClassName?.(row)
                       )}

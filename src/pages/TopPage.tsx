@@ -280,7 +280,7 @@ export function TopPage() {
                   sortValue: (t) => t.date,
                   render: (t) => (
                     <span className="whitespace-nowrap text-muted">
-                      {formatDate(t.date, "short")}
+                      {formatDate(t.date, "full")}
                     </span>
                   ),
                 },

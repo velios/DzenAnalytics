@@ -1,16 +1,18 @@
 import type { Transaction, CurrencyRates } from "../types";
 import type { TransactionEdit } from "../store/useEditsStore";
-import { toBase } from "./csv";
+import { baseWithHistory, type HistDayRates } from "./historicalRates";
 
 /**
  * Apply per-id user edits on top of an already post-processed transaction
- * array. Recomputes `amountBase` when amount/currency changes so all charts
- * stay consistent. The `id` is preserved untouched.
+ * array. Recomputes `amountBase` when amount/currency/date changes so all
+ * charts stay consistent — using the CBR rate of the op's date (`hist`) when
+ * available, falling back to sync-time rates. The `id` is preserved untouched.
  */
 export function applyEdits(
   txs: Transaction[],
   edits: Record<string, TransactionEdit>,
-  rates: CurrencyRates
+  rates: CurrencyRates,
+  hist: HistDayRates = {}
 ): Transaction[] {
   if (!edits || Object.keys(edits).length === 0) return txs;
   return txs.map((t) => {
@@ -38,9 +40,18 @@ export function applyEdits(
       merged.subcategory = null;
       merged.categoryFull = "Перевод";
     }
-    // Recompute base amount only if amount or currency changed.
-    if (patch.amount !== undefined || patch.currency !== undefined) {
-      merged.amountBase = toBase(merged.amount, merged.currency, rates);
+    if (
+      patch.amount !== undefined ||
+      patch.currency !== undefined ||
+      patch.date !== undefined
+    ) {
+      merged.amountBase = baseWithHistory(
+        merged.amount,
+        merged.currency,
+        merged.date,
+        rates,
+        hist
+      );
     }
     return merged;
   });

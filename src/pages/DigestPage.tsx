@@ -254,7 +254,7 @@ function DigestDetail({
                 <div className="flex-1 min-w-0">
                   <div className="truncate font-medium">{t.payee || "—"}</div>
                   <div className="text-xs text-muted truncate">
-                    {t.categoryFull} · {formatDate(t.date, "short")}
+                    {t.categoryFull} · {formatDate(t.date, "full")}
                   </div>
                 </div>
                 <div className="text-expense font-semibold tabular-nums">

@@ -384,7 +384,7 @@ export function SearchPage() {
                   <tr
                     key={t.id}
                     onClick={() => openOne(t)}
-                    className={`cursor-pointer align-top ${
+                    className={`cursor-pointer align-middle ${
                       isSel ? "bg-accent/5" : "hover:bg-panel2/50"
                     }`}
                   >
@@ -399,16 +399,16 @@ export function SearchPage() {
                       />
                     </td>
                     <td className="table-td whitespace-nowrap text-muted">
-                      {formatDate(t.date, "short")}
+                      {formatDate(t.date, "full")}
                     </td>
                     <td className="table-td truncate max-w-[160px]">{t.categoryFull}</td>
                     <td className="table-td truncate max-w-[160px]">{t.payee || "—"}</td>
-                    <td className="table-td max-w-[260px] text-xs text-muted">
+                    <td className="table-td max-w-[260px] text-muted">
                       <div className="line-clamp-2" title={t.comment}>
                         {t.comment}
                       </div>
                     </td>
-                    <td className="table-td truncate max-w-[120px] text-xs text-muted">
+                    <td className="table-td truncate max-w-[120px] text-muted">
                       {t.account}
                     </td>
                     <td
@@ -491,7 +491,7 @@ function SortHead({
     <th className={`table-th ${right ? "text-right" : ""}`}>
       <button
         onClick={() => on(k)}
-        className={`inline-flex items-center gap-1 hover:text-text ${active ? "text-accent" : ""}`}
+        className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-text ${active ? "text-accent" : ""}`}
       >
         {label}
         <ArrowUpDown className={`w-3 h-3 ${active ? "" : "opacity-30"}`} />

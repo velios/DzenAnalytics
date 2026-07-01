@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, HandCoins } from "lucide-react";
+import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, HandCoins, BadgeCheck, BadgeX, Info } from "lucide-react";
 import { extractHashtags } from "../lib/aggregations";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -25,6 +25,8 @@ import { validateOperation } from "../lib/operationValidation";
 import { DateField } from "./DateField";
 import type { ZenTag } from "../lib/zenmoney";
 import { HashtagTextarea } from "./HashtagTextarea";
+import { getHistoricalRubRate, type HistoricalRate } from "../lib/historicalRates";
+import { formatDate } from "../lib/format";
 import type { Transaction, TxKind } from "../types";
 
 interface Props {
@@ -37,6 +39,10 @@ interface Props {
   /** Open a freshly created operation as a «Долг» (create mode only). */
   initialDebt?: boolean;
   onClose: () => void;
+  /** Edit mode only. Step to the previous (-1) / next (+1) operation in the
+   *  caller's current order. Wired to ←/→ keys; the caller swaps which `tx`
+   *  is being edited. Omit to disable arrow navigation. */
+  onNavigate?: (dir: -1 | 1) => void;
 }
 
 /** Zenmoney account types that make an operation a debt/loan/credit move. */
@@ -77,7 +83,7 @@ function dateTimeToDate(dateIso: string, time: string): Date {
  * away and is sent to Zenmoney on the next push. API mode only (the caller
  * only offers the button when a token is present).
  */
-export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onClose }: Props) {
+export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onClose, onNavigate }: Props) {
   const isCreate = !txProp;
   const rates = useDataStore((s) => s.rates);
   // A blank seed so every `tx.<field>` read below works uniformly in
@@ -104,6 +110,8 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
         currency: rates.base,
         account: "",
         amountBase: 0,
+        opAmount: null,
+        opCurrency: null,
         createdAt: `${todayIso()}T00:00:00Z`,
       },
     [txProp, rates.base, initialKind]
@@ -437,6 +445,15 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
   // for what the bank actually printed.
   const [payee, setPayee] = useState(tx.brand?.trim() || tx.payee || "");
   const [comment, setComment] = useState(tx.comment);
+  // Whether the current counterparty is a Zenmoney-listed brand (case-
+  // insensitive equality — mirrors the push lookup in zenmoneyPush.ts).
+  // `null` while the dictionary is still hydrating or the value is empty:
+  // we stay silent rather than show a misleading ✗.
+  const payeeBrandMatch = useMemo<boolean | null>(() => {
+    const t = payee.trim().toLowerCase();
+    if (!t || cachedBrands === null) return null;
+    return cachedBrands.some((b) => b.toLowerCase() === t);
+  }, [payee, cachedBrands]);
 
   // Tags already used across the account — fed to the comment field's «#»
   // autocomplete (see HashtagTextarea).
@@ -533,6 +550,58 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
   const isCrossCurrencyMove =
     !!accountNativeCurrency && accountNativeCurrency !== currency;
 
+  // Historical RUB rate for the operation's date (CBR), shown read-only in a
+  // tooltip on the amount field. Deliberately NOT used to recompute
+  // `amountBase` — that stays on the sync-time rate everywhere else in the
+  // app. This is purely "what it was actually worth that day", to explain
+  // drift against Zenmoney's own number, which Zenmoney computes the same way.
+  const isForeignCurrency = currency !== rates.base;
+  const [histRate, setHistRate] = useState<HistoricalRate | null | undefined>(undefined);
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!isForeignCurrency || rates.base !== "RUB") {
+      setHistRate(null);
+      return;
+    }
+    let cancelled = false;
+    setHistRate(undefined);
+    getHistoricalRubRate(date, currency).then((r) => {
+      if (!cancelled) setHistRate(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isForeignCurrency, rates.base, date, currency]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Tooltip text for the ⓘ icon next to "Сумма". Bank-side conversion info
+  // (opAmount/opCurrency) is exact and free — fold it in when present.
+  const hasOpConversion = !isCreate && tx.opAmount != null && tx.opCurrency != null;
+  const impliedBankRate =
+    hasOpConversion && tx.opAmount && tx.opAmount > 0 ? tx.amount / tx.opAmount : null;
+  let fxTooltip: string | null = null;
+  if (isForeignCurrency) {
+    const amtNum = parseFloat(amount.replace(",", ".")) || tx.amount;
+    if (histRate) {
+      const baseAmount = amtNum * histRate.rate;
+      const dateNote =
+        histRate.rateDate !== date
+          ? ` (курс на ${formatDate(histRate.rateDate, "full")} — ближайший рабочий день)`
+          : "";
+      fxTooltip = `≈ ${baseAmount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ${rates.base} по курсу ЦБ РФ на дату операции${dateNote}: 1 ${currency} = ${histRate.rate.toLocaleString("ru-RU", { maximumFractionDigits: 4 })} ${rates.base}`;
+    } else if (histRate === null) {
+      fxTooltip =
+        rates.base === "RUB"
+          ? "Курс ЦБ РФ на эту дату недоступен"
+          : `Базовая валюта — ${rates.base}, исторический курс ЦБ РФ недоступен (есть только для RUB)`;
+    } else {
+      fxTooltip = "Загрузка курса…";
+    }
+    if (hasOpConversion && impliedBankRate != null) {
+      fxTooltip += `\nВ выписке: ${tx.opAmount?.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ${tx.opCurrency} (курс банка 1 ${tx.opCurrency} = ${impliedBankRate.toLocaleString("ru-RU", { maximumFractionDigits: 4 })} ${currency})`;
+    }
+  }
+
   // Tracks whether the most recent mousedown landed on the backdrop. Used
   // by the click handler to decide whether to close — drags that started
   // inside the modal but happened to release on the backdrop must NOT
@@ -541,11 +610,32 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // ←/→ step to the previous/next operation — but only when not typing in
+      // a field (there the arrows must move the text cursor), no modifiers,
+      // and only while editing an existing op (create mode has no neighbours).
+      if (isCreate || !onNavigate) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (
+        ae &&
+        (ae.tagName === "INPUT" ||
+          ae.tagName === "TEXTAREA" ||
+          ae.tagName === "SELECT" ||
+          ae.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      onNavigate(e.key === "ArrowLeft" ? -1 : 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, onNavigate, isCreate]);
 
   // Create mode: build a fresh ZenTransaction from the form and store it as
   // a draft. Validation/resolution lives in `buildDraftTransaction` (pure,
@@ -836,14 +926,13 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="card w-full max-w-lg max-h-[90vh] overflow-y-auto"
-        // Reserve the scrollbar's space at all times so toggling a field
-        // (e.g. the cross-currency «Получено» row appearing when you pick a
-        // foreign-currency account) doesn't change the content width and make
-        // the whole modal shift/jump sideways.
-        style={{ scrollbarGutter: "stable" }}
+        // Fixed height (capped at 90vh on short screens) so the card never
+        // changes size between operation kinds — only the inner body scrolls.
+        // Keeps the modal from "jumping" while paging through ops with ←/→.
+        // 740px fits the tallest variant («Долг» ≈ 729px) without scrolling.
+        className="card w-full max-w-lg h-[740px] max-h-[90vh] flex flex-col overflow-hidden"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="font-semibold flex items-center gap-2">
             {isCreate ? (
               <Plus className="w-4 h-4 text-accent2" />
@@ -852,11 +941,29 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
             )}
             {isCreate ? "Новая операция" : "Редактирование операции"}
           </div>
-          <button onClick={onClose} className="text-muted hover:text-text">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            {!isCreate && onNavigate && (
+              <span
+                className="hidden sm:flex items-center gap-1 text-[11px] text-muted"
+                title="Листать операции стрелками ← / →"
+              >
+                <kbd className="kbd">←</kbd>
+                <kbd className="kbd">→</kbd>
+                перелистывание
+              </span>
+            )}
+            <button onClick={onClose} className="text-muted hover:text-text">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div className="p-5 space-y-3">
+        <div
+          className="flex-1 overflow-y-auto p-5 space-y-2"
+          // Reserve the scrollbar's space at all times so toggling a field
+          // (e.g. the cross-currency «Получено» row appearing when you pick a
+          // foreign-currency account) doesn't change the content width.
+          style={{ scrollbarGutter: "stable" }}
+        >
           {/* Kind switcher — 4-way pill toggle. "Возврат" is a money-back
               flow on an expense category; it inflows the account but
               shrinks the category's spend rather than adding to income. */}
@@ -956,20 +1063,22 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
           {isDebt && (
             <>
               <Field label="Операция с долгом">
-                <div className="flex flex-col gap-1.5 bg-panel2 border border-border rounded-lg p-0.5 w-full">
+                <div className="grid grid-cols-2 gap-1 bg-panel2 border border-border rounded-lg p-0.5 w-full">
                   <button
                     type="button"
                     onClick={() => setDebtOutgoing(true)}
-                    className={`w-full text-sm py-1.5 rounded-md ${debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
+                    title="Я дал в долг | Я вернул долг"
+                    className={`text-xs py-1.5 px-2 rounded-md whitespace-nowrap ${debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
                   >
-                    Я дал в долг | Я вернул долг
+                    Я дал / вернул
                   </button>
                   <button
                     type="button"
                     onClick={() => setDebtOutgoing(false)}
-                    className={`w-full text-sm py-1.5 rounded-md ${!debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
+                    title="Мне дали в долг | Мне вернули долг"
+                    className={`text-xs py-1.5 px-2 rounded-md whitespace-nowrap ${!debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
                   >
-                    Мне дали в долг | Мне вернули долг
+                    Мне дали / вернули
                   </button>
                 </div>
               </Field>
@@ -1029,7 +1138,22 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
             </Field>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Field label={!isDebt && kind === "transfer" ? "Отправлено" : "Сумма"}>
+            <Field
+              label={!isDebt && kind === "transfer" ? "Отправлено" : "Сумма"}
+              labelAfter={
+                isForeignCurrency && fxTooltip ? (
+                  <span className="relative inline-flex group shrink-0">
+                    <Info className="w-3.5 h-3.5 text-muted cursor-help" aria-hidden />
+                    <span
+                      role="tooltip"
+                      className="invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-150 absolute z-50 left-0 top-full mt-1.5 w-60 rounded-lg border border-border bg-panel shadow-lg px-3 py-2 text-xs leading-relaxed text-text whitespace-pre-line"
+                    >
+                      {fxTooltip}
+                    </span>
+                  </span>
+                ) : undefined
+              }
+            >
               <input
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
@@ -1100,60 +1224,89 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
               strings. Hidden for transfers (counterparty there is the
               income account, surfaced above in its own field). */}
           {(kind !== "transfer" || isDebt) && (
-            <Field
-              label={
-                isDebt
-                  ? "Контрагент"
-                  : kind === "income" || kind === "refund"
-                    ? "Плательщик"
-                    : "Место платежа"
-              }
-            >
-              <Combobox
-                value={payee}
-                options={payeeOptions}
-                groups={payeeGroups}
-                onChange={setPayee}
-                placeholder="Введите или выберите из списка"
-                maxHeight={DROPDOWN_MAX}
-              />
-              {/* Tells the user how the current value will be pushed.
-                  Matching the dictionary by case-insensitive equality
-                  mirrors the lookup in zenmoneyPush.ts so the hint
-                  doesn't lie about what actually happens. */}
-              <PayeeKindHint value={payee} cachedBrands={cachedBrands} />
-              {tx.payeeRaw && tx.payeeRaw !== payee && (
-                // Honest "as printed by the bank" hint — uses the
-                // immutable `payeeRaw` (originalPayee from the API),
-                // not the possibly-edited `payee`. Helps the user
-                // figure out where a weird counterparty name came
-                // from. Hidden when raw equals current value.
-                <div
-                  className="text-[10px] text-muted/80 mt-1 pl-0 truncate"
-                  title={tx.payeeRaw}
-                >
-                  В выписке: {tx.payeeRaw}
-                </div>
+            <div className={tx.payeeRaw ? "grid grid-cols-2 gap-3 items-start" : ""}>
+              <Field
+                label={
+                  isDebt
+                    ? "Контрагент"
+                    : kind === "income" || kind === "refund"
+                      ? "Плательщик"
+                      : "Место платежа"
+                }
+                labelAfter={
+                  // Brand-match status next to the label: ✓ green = listed
+                  // Zenmoney brand, ✗ muted = not. Mirrors the push lookup
+                  // in zenmoneyPush.ts so the icon never lies. Hidden while
+                  // the dictionary is still hydrating or the value is empty.
+                  payeeBrandMatch === null ? undefined : (
+                    <span
+                      className="inline-flex"
+                      title={
+                        payeeBrandMatch
+                          ? "Бренд из списка Дзен-мани"
+                          : "Получатель не из списка Брендов"
+                      }
+                    >
+                      {payeeBrandMatch ? (
+                        <BadgeCheck
+                          className="w-3.5 h-3.5 text-income"
+                          aria-label="Бренд из списка Дзен-мани"
+                        />
+                      ) : (
+                        <BadgeX
+                          className="w-3.5 h-3.5 text-muted"
+                          aria-label="Получатель не из списка Брендов"
+                        />
+                      )}
+                    </span>
+                  )
+                }
+              >
+                <Combobox
+                  value={payee}
+                  options={payeeOptions}
+                  groups={payeeGroups}
+                  onChange={setPayee}
+                  placeholder="Введите или выберите из списка"
+                  maxHeight={DROPDOWN_MAX}
+                />
+              </Field>
+              {/* Read-only «as printed by the bank» field — the immutable
+                  `payeeRaw` (originalPayee from the API). Sits beside the
+                  editable counterparty so the source text stays visible
+                  without taking its own line. */}
+              {tx.payeeRaw && (
+                <Field label="В выписке">
+                  <input
+                    type="text"
+                    value={tx.payeeRaw}
+                    readOnly
+                    tabIndex={-1}
+                    title={tx.payeeRaw}
+                    aria-label="Текст из банковской выписки (не редактируется)"
+                    className="input text-sm w-full text-muted bg-panel2/60 cursor-default"
+                  />
+                </Field>
               )}
-            </Field>
+            </div>
           )}
           <Field label="Комментарий">
             <HashtagTextarea
               value={comment}
               onChange={setComment}
               tags={allTags}
-              rows={1}
-              // Single row by default; user can drag taller. min-h
-              // matches one line + the input's vertical padding so it
-              // can never shrink below a single readable row.
-              className="input text-sm w-full resize-y min-h-[2.5rem]"
+              rows={2}
+              // Two rows by default so a typical comment shows in full without
+              // clipping; min-h fits two lines + the input's vertical padding.
+              // Still resizable (drag) and scrollable past two lines.
+              className="input text-sm w-full resize-y min-h-[3.75rem]"
             />
           </Field>
         </div>
         {error && (
-          <div className="px-5 -mt-1 pb-1 text-xs text-expense">{error}</div>
+          <div className="shrink-0 px-5 pt-2 pb-1 text-xs text-expense">{error}</div>
         )}
-        <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
+        <div className="shrink-0 flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
           {isCreate ? (
             <span />
           ) : (
@@ -1193,52 +1346,22 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
 
 function Field({
   label,
+  labelAfter,
   children,
 }: {
   label: string;
+  /** Optional inline element rendered right after the label (e.g. a
+   *  small status badge), sharing the label's baseline. */
+  labelAfter?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <label className="label block mb-1">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-/**
- * Tiny indicator below the "Получатель" combobox. Tells the user
- * whether the currently-entered value will be pushed as a known
- * brand (merchant dictionary entry) or as free-text payee.
- *
- * Empty / whitespace-only input → render nothing (no noise on a
- * blank field). The dictionary lookup is case-insensitive to match
- * the equivalent lookup in `zenmoneyPush.ts`.
- */
-function PayeeKindHint({
-  value,
-  cachedBrands,
-}: {
-  value: string;
-  cachedBrands: string[] | null;
-}) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  // While the merchant dictionary is still being hydrated from cache
-  // we don't know yet — stay silent rather than mislead.
-  if (cachedBrands === null) return null;
-  const lower = trimmed.toLowerCase();
-  const matches = cachedBrands.some((b) => b.toLowerCase() === lower);
-  if (matches) {
-    return (
-      <div className="text-[10px] text-income/90 mt-1 pl-0">
-        Бренд из списка Дзен-мани ✓
+      <div className="flex items-center gap-1.5 mb-1">
+        <label className="label">{label}</label>
+        {labelAfter}
       </div>
-    );
-  }
-  return (
-    <div className="text-[10px] text-muted mt-1 pl-0">
-      Получатель не из списка Брендов ✗
+      {children}
     </div>
   );
 }

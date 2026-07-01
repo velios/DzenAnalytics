@@ -10,7 +10,6 @@ import {
   Wallet,
   ListFilter,
   ListChecks,
-  CloudUpload,
   List,
   ArrowUp,
   ArrowDown,
@@ -86,9 +85,9 @@ function transferCounterparty(t: Transaction): string | null {
  */
 // Leading 32px column = selection checkbox.
 const GRID_COLS_FULL =
-  "32px 84px minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
+  "32px 84px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 2.6fr) 140px 88px";
 const GRID_COLS_NODATE =
-  "32px minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 2.6fr) minmax(0, 1fr) 140px 88px";
+  "32px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 2.6fr) 140px 88px";
 
 const PAGE_SIZE = 100;
 
@@ -537,7 +536,16 @@ export function TransactionsPage() {
       </div>
 
       {editing && (
-        <EditTransactionModal tx={editing} onClose={() => setEditing(null)} />
+        <EditTransactionModal
+          key={editing.id}
+          tx={editing}
+          onClose={() => setEditing(null)}
+          onNavigate={(dir) => {
+            const i = sorted.findIndex((t) => t.id === editing.id);
+            const next = sorted[i + dir];
+            if (next) setEditing(next);
+          }}
+        />
       )}
 
       {creating && (
@@ -617,7 +625,7 @@ function HeaderRow({
   const template = grouped ? GRID_COLS_NODATE : GRID_COLS_FULL;
   return (
     <div
-      className="grid items-center gap-3 px-3 py-2 border-b border-border bg-panel text-xs uppercase tracking-wider text-muted font-medium sticky top-0 z-20"
+      className="grid items-center gap-3 px-3 py-2 border-b border-border bg-panel text-[length:calc(var(--tbl-font)-0.125rem)] uppercase tracking-wider text-muted font-medium sticky top-0 z-20"
       style={{ gridTemplateColumns: template }}
     >
       <input
@@ -633,9 +641,9 @@ function HeaderRow({
       />
       {!grouped && <div>Дата</div>}
       <div>Категория</div>
+      <div>Счёт</div>
       <div>Контрагент</div>
       <div>Комментарий</div>
-      <div>Счёт</div>
       <div className="text-right">Сумма</div>
       <div className="text-right">Операции</div>
     </div>
@@ -682,17 +690,17 @@ function DayGroup({
 
   return (
     <div>
-      <div className="px-4 py-2 border-b border-t border-border bg-panel2/60 flex items-center gap-3 text-sm">
+      <div className="px-4 py-2 border-b border-t border-border bg-panel2/60 flex items-center gap-3 text-base">
         <div className="flex items-baseline gap-2 min-w-0">
           <span className="font-semibold truncate">{label}</span>
-          {weekday && <span className="text-xs text-muted">{weekday}</span>}
+          {weekday && <span className="text-[13px] text-muted capitalize">{weekday}</span>}
         </div>
-        <div className="ml-auto flex items-center gap-3 sm:gap-4 text-xs tabular-nums">
+        <div className="ml-auto flex items-center gap-3 sm:gap-4 text-sm tabular-nums">
           <span
             className="flex items-center gap-1 text-muted whitespace-nowrap"
             title={`${txs.length} ${pluralOps(txs.length)}`}
           >
-            <List className="w-3.5 h-3.5" aria-hidden />
+            <List className="w-4 h-4" aria-hidden />
             {txs.length}
           </span>
           {showTransfers && totals.xfer > 0 && (
@@ -700,7 +708,7 @@ function DayGroup({
               className="flex items-center gap-1 text-slate-400 whitespace-nowrap"
               title="Переводы за день"
             >
-              <ArrowLeftRight className="w-3.5 h-3.5" aria-hidden />
+              <ArrowLeftRight className="w-4 h-4" aria-hidden />
               {formatMoney(totals.xfer, base)}
             </span>
           )}
@@ -709,7 +717,7 @@ function DayGroup({
               className="flex items-center gap-1 text-income whitespace-nowrap"
               title="Поступления за день"
             >
-              <ArrowUp className="w-3.5 h-3.5" aria-hidden />
+              <ArrowUp className="w-4 h-4" aria-hidden />
               {formatMoney(totals.inc, base)}
             </span>
           )}
@@ -718,7 +726,7 @@ function DayGroup({
               className="flex items-center gap-1 text-expense whitespace-nowrap"
               title="Траты за день"
             >
-              <ArrowDown className="w-3.5 h-3.5" aria-hidden />
+              <ArrowDown className="w-4 h-4" aria-hidden />
               {formatMoney(totals.exp, base)}
             </span>
           )}
@@ -777,7 +785,7 @@ function Row({
   return (
     <div
       onDoubleClick={onEdit}
-      className={`grid items-center gap-3 px-3 py-2 border-b border-border/40 cursor-pointer group text-sm ${
+      className={`grid items-center gap-3 px-3 py-2 border-b border-border/40 cursor-pointer group text-[length:var(--tbl-font)] ${
         selected ? "bg-accent/5" : "hover:bg-panel2/40"
       }`}
       style={{ gridTemplateColumns: template }}
@@ -791,32 +799,45 @@ function Row({
         aria-label="Выбрать операцию"
       />
       {!hideDate && (
-        <div className="text-muted text-xs tabular-nums whitespace-nowrap">
-          {tx.date.slice(8, 10)}.{tx.date.slice(5, 7)}.{tx.date.slice(2, 4)}
+        <div className="text-muted tabular-nums whitespace-nowrap">
+          {tx.date.slice(8, 10)}.{tx.date.slice(5, 7)}.{tx.date.slice(0, 4)}
         </div>
       )}
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 min-w-0" title={tx.categoryFull}>
-          <CategoryDot category={tx.category} size="w-5 h-5" />
-          <span className="truncate">{tx.category}</span>
+      <div className="flex items-center gap-2 min-w-0" title={tx.categoryFull}>
+        <span className="relative inline-flex shrink-0">
+          {/* Sub-category operations show the SUB-tag's own icon (resolved by the
+              «Parent / Sub» path), not the parent's. */}
+          <CategoryDot
+            category={tx.subcategory || tx.category}
+            parent={tx.subcategory ? tx.category : undefined}
+            size="w-7 h-7"
+          />
           {draft && (
-            <CloudUpload
-              className="w-3 h-3 text-warn shrink-0"
-              aria-label="Не синхронизировано"
+            <span
+              className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-expense border-2 border-panel"
+              aria-label="Новая операция — не синхронизирована"
             />
           )}
-          {edited && !draft && (
-            <Pencil
-              className="w-3 h-3 text-accent2 shrink-0"
-              aria-label="Отредактировано"
-            />
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="truncate">{tx.category}</span>
+            {edited && !draft && (
+              <Pencil
+                className="w-3 h-3 text-accent2 shrink-0"
+                aria-label="Отредактировано"
+              />
+            )}
+          </div>
+          {tx.subcategory && (
+            <div className="text-[0.85em] text-muted truncate" title={tx.subcategory}>
+              {tx.subcategory}
+            </div>
           )}
         </div>
-        {tx.subcategory && (
-          <div className="text-xs text-muted truncate pl-7" title={tx.subcategory}>
-            {tx.subcategory}
-          </div>
-        )}
+      </div>
+      <div className="truncate text-muted" title={tx.account}>
+        {tx.account}
       </div>
       {/* Show brand (Zenmoney's curated name) as the primary payee
           line. Raw bank-statement text (`tx.payee`) goes underneath
@@ -829,11 +850,11 @@ function Row({
           const tooltip = secondary ? `${primary} — ${secondary}` : primary;
           return (
             <>
-              <div className="truncate" title={tooltip}>
-                {primary || <span className="text-muted">—</span>}
+              <div className="truncate text-muted" title={tooltip}>
+                {primary || "—"}
               </div>
               {secondary && (
-                <div className="truncate text-[10px] text-muted/80" title={secondary}>
+                <div className="truncate text-[0.85em] text-text" title={secondary}>
                   {secondary}
                 </div>
               )}
@@ -841,11 +862,8 @@ function Row({
           );
         })()}
       </div>
-      <div className="text-xs text-muted truncate" title={tx.comment || ""}>
+      <div className="text-muted truncate" title={tx.comment || ""}>
         {tx.comment || ""}
-      </div>
-      <div className="truncate text-muted text-xs" title={tx.account}>
-        {tx.account}
       </div>
       <div
         className={`text-right tabular-nums font-medium whitespace-nowrap ${amountColor}`}
@@ -861,7 +879,7 @@ function Row({
         {(() => {
           const received = crossCurrencyReceived(tx);
           return received ? (
-            <div className="text-[10px] font-normal text-muted/80">
+            <div className="text-[0.85em] font-normal text-muted/80">
               ({received})
             </div>
           ) : null;

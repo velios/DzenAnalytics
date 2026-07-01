@@ -107,7 +107,10 @@ export function formatNum(value: number, opts?: { compact?: boolean }): string {
   }).format(value);
 }
 
-export function formatDate(iso: string, fmt: "short" | "medium" | "month" = "medium"): string {
+export function formatDate(
+  iso: string,
+  fmt: "short" | "full" | "medium" | "month" = "medium"
+): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   if (fmt === "short")
@@ -115,6 +118,14 @@ export function formatDate(iso: string, fmt: "short" | "medium" | "month" = "med
       day: "2-digit",
       month: "2-digit",
       year: "2-digit",
+    });
+  // «full» — numeric with the 4-digit year (DD.MM.YYYY); used for per-row
+  // dates in operation tables where the 2-digit «short» year reads oddly.
+  if (fmt === "full")
+    return d.toLocaleDateString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
     });
   if (fmt === "month") return d.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
   return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });

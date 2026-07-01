@@ -1,6 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { toPng } from "html-to-image";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -24,9 +23,7 @@ import {
   Hash,
   GitCompare,
   PieChart,
-  Camera,
   LayoutDashboard,
-  Loader2,
 } from "lucide-react";
 import { useEffect } from "react";
 import { useDataStore } from "../store/useDataStore";
@@ -310,8 +307,6 @@ export function DashboardPage() {
   // PNG-export state. Declared here (with the other hooks) rather than
   // lower down — they must run before the early `return <EmptyState />`
   // so hook order stays stable across renders (rules-of-hooks).
-  const exportRef = useRef<HTMLDivElement>(null);
-  const [exporting, setExporting] = useState(false);
   const accountRows = useMemo(() => {
     if (liveAccounts && liveAccounts.length > 0) {
       // Convert to base currency and sort by |balance| desc.
@@ -424,53 +419,12 @@ export function DashboardPage() {
     0
   );
 
-  async function exportPng() {
-    if (!exportRef.current) return;
-    setExporting(true);
-    try {
-      const bg = getComputedStyle(document.documentElement).getPropertyValue("--c-bg").trim();
-      const dataUrl = await toPng(exportRef.current, {
-        backgroundColor: `rgb(${bg})`,
-        pixelRatio: 2,
-        cacheBust: true,
-        filter: (node) => {
-          const el = node as HTMLElement;
-          if (el.dataset && el.dataset.exportSkip === "1") return false;
-          return true;
-        },
-      });
-      const a = document.createElement("a");
-      a.download = `dzenanalytics-dashboard-${new Date().toISOString().slice(0, 10)}.png`;
-      a.href = dataUrl;
-      a.click();
-    } catch (e) {
-      alert(`Не удалось экспортировать: ${e instanceof Error ? e.message : "ошибка"}`);
-    } finally {
-      setExporting(false);
-    }
-  }
-
   return (
-    <div className="space-y-6" ref={exportRef}>
+    <div className="space-y-6">
       <PageHeader
         icon={LayoutDashboard}
         title="Главная"
         hint="Ключевые метрики, тренды и быстрые переходы."
-        right={
-          <button
-            data-export-skip="1"
-            onClick={exportPng}
-            disabled={exporting}
-            className="btn-ghost text-xs"
-          >
-            {exporting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Camera className="w-3.5 h-3.5" />
-            )}
-            {exporting ? "Сохраняю..." : "Снимок PNG"}
-          </button>
-        }
       />
 
       {!apiConnected && (
@@ -766,13 +720,13 @@ export function DashboardPage() {
             <div className="text-sm text-muted text-center py-6">Нет счетов</div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
-              <table className="w-full text-sm">
+              <table className="w-full text-base">
                 <thead className="sticky top-0 bg-panel z-10">
-                  <tr className="text-xs text-muted text-left">
-                    <th className="font-normal py-1 w-8"></th>
-                    <th className="font-normal py-1">Счёт</th>
-                    <th className="font-normal py-1">Тип</th>
-                    <th className="font-normal py-1 text-right">Баланс</th>
+                  <tr>
+                    <th className="table-th w-8" aria-hidden />
+                    <th className="table-th">Счёт</th>
+                    <th className="table-th">Тип</th>
+                    <th className="table-th text-right">Баланс</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -783,14 +737,14 @@ export function DashboardPage() {
                       <tr
                         key={a.title}
                         onClick={() => openAccount(a.title)}
-                        className={`border-t border-border hover:bg-panel2/50 cursor-pointer group ${
+                        className={`align-middle hover:bg-panel2/50 cursor-pointer group ${
                           a.archive ? "opacity-60" : ""
                         }`}
                       >
-                          <td className="py-2 pr-2">
+                          <td className="table-td">
                             <AccountLogo title={a.title} type={a.type} />
                           </td>
-                          <td className="py-2 pr-2">
+                          <td className="table-td">
                             <div
                               className="font-medium truncate max-w-[180px] group-hover:text-accent"
                               title={a.title}
@@ -798,13 +752,13 @@ export function DashboardPage() {
                               {a.title}
                             </div>
                           </td>
-                          <td className="py-2 pr-2 text-xs text-muted whitespace-nowrap">
+                          <td className="table-td text-[13px] text-muted whitespace-nowrap">
                             {accountTypeLabel(a.type)}
                             {a.offBalance && (
                               <span className="ml-1 text-accent2">· вне баланса</span>
                             )}
                           </td>
-                          <td className="py-2 text-right whitespace-nowrap">
+                          <td className="table-td text-right whitespace-nowrap">
                             <div
                               className={`font-semibold tabular-nums ${
                                 isNegative ? "text-expense" : "text-text"
@@ -817,7 +771,7 @@ export function DashboardPage() {
                             </div>
                             {hasFx && (
                               <div
-                                className="text-[10px] text-muted tabular-nums"
+                                className="text-[13px] text-muted tabular-nums"
                                 title={formatMoney(
                                   a.nativeBalance,
                                   a.nativeCurrency,

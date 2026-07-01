@@ -11,7 +11,6 @@ import {
   Users,
   Download,
   Database,
-  Percent,
   Cloud,
   RefreshCw,
   Loader2,
@@ -33,6 +32,8 @@ import {
   ChevronDown,
   HardDrive,
   RotateCcw,
+  ALargeSmall,
+  Calculator,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
 import { SyncLog } from "../components/SyncLog";
@@ -43,7 +44,6 @@ import { useGoalsStore } from "../store/useGoalsStore";
 import { useBudgetsStore } from "../store/useBudgetsStore";
 import { useCalibrationStore } from "../store/useCalibrationStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
-import { useInflationStore } from "../store/useInflationStore";
 import { useZenmoneyStore, recalcBalanceCalibration } from "../store/useZenmoneyStore";
 import { useOffBalanceStore } from "../store/useOffBalanceStore";
 import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
@@ -57,7 +57,7 @@ import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
 import { formatNum, formatDate, formatMoney } from "../lib/format";
-import { useDisplayStore } from "../store/useDisplayStore";
+import { useDisplayStore, type TableFontLevel } from "../store/useDisplayStore";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import { parseAndValidateBackup, buildBackupPayload, restoreBackupPayload } from "../lib/backup";
 import { useCategoryRulesStore } from "../store/useCategoryRulesStore";
@@ -75,6 +75,14 @@ type Mode = "replace" | "merge";
  * fuzzy auto target applies again. Local input state keeps typing
  * snappy across hundreds of rows.
  */
+const TABLE_FONT_LABELS: Record<TableFontLevel, string> = {
+  1: "Мелкий",
+  2: "Компактный",
+  3: "Обычный",
+  4: "Крупный",
+  5: "Очень крупный",
+};
+
 function AutoGroupRow({
   from,
   autoTo,
@@ -160,19 +168,12 @@ export function ImportPage() {
   const meta = useDataStore((s) => s.importMeta);
   const payeeGrouping = useDataStore((s) => s.payeeGroupingEnabled);
   const setPayeeGrouping = useDataStore((s) => s.setPayeeGrouping);
-  const inflation = useInflationStore((s) => s.config);
-  const inflationLoaded = useInflationStore((s) => s.loaded);
   const fractionDigits = useDisplayStore((s) => s.fractionDigits);
   const setFractionDigits = useDisplayStore((s) => s.setFractionDigits);
+  const tableFontLevel = useDisplayStore((s) => s.tableFontLevel);
+  const setTableFontLevel = useDisplayStore((s) => s.setTableFontLevel);
   const includeOffBalance = useOffBalanceStore((s) => s.includeOffBalance);
   const setIncludeOffBalance = useOffBalanceStore((s) => s.setIncludeOffBalance);
-  const setInflEnabled = useInflationStore((s) => s.setEnabled);
-  const setInflBaseYear = useInflationStore((s) => s.setBaseYear);
-  const setInflRate = useInflationStore((s) => s.setRate);
-  const hydrateInflation = useInflationStore((s) => s.hydrate);
-  useEffect(() => {
-    if (!inflationLoaded) hydrateInflation();
-  }, [inflationLoaded, hydrateInflation]);
 
   // Zenmoney API sync state
   const zenToken = useZenmoneyStore((s) => s.token);
@@ -216,7 +217,18 @@ export function ImportPage() {
   // Local deletions also push (and revert from the pending-changes modal), so
   // they're part of the headline count — otherwise a delete-only state reads as
   // «Нет изменений для отправки» yet the rollback button counts it (issue #19: 4, 5).
-  const deletedCount = useDeletedStore((s) => s.deletedIds.length);
+  // Count ONLY deletions still backed by a cloud-cache row: those are the ones
+  // that still need a push AND that the rollback modal lists. Once pushed, the
+  // row drops out of `transactionsRaw`, but its id lingers in `deletedIds` as a
+  // permanent tombstone — counting the raw id-set overstated «pending» and
+  // disagreed with the modal, which showed an empty list while the button said N.
+  const deletedIds = useDeletedStore((s) => s.deletedIds);
+  const transactionsRaw = useDataStore((s) => s.transactionsRaw);
+  const deletedCount = useMemo(() => {
+    if (deletedIds.length === 0) return 0;
+    const rawIds = new Set(transactionsRaw.map((t) => t.id));
+    return deletedIds.reduce((n, id) => n + (rawIds.has(id) ? 1 : 0), 0);
+  }, [deletedIds, transactionsRaw]);
   const pendingTotal = pendingEditCount + pendingDraftCount + deletedCount;
   const [pendingModalOpen, setPendingModalOpen] = useState(false);
   // Orphaned edits: overrides whose transaction no longer exists in the data
@@ -291,7 +303,7 @@ export function ImportPage() {
   // long sections (data source, currency, data-processing,
   // reporting period, backups) into four logical buckets so the
   // page stops being a 2000-line scroll.
-  type SettingsTab = "source" | "currency" | "processing" | "backups";
+  type SettingsTab = "source" | "interface" | "processing" | "backups";
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("source");
 
   // Inner tab inside the Бэкапы section — local files vs cloud
@@ -560,7 +572,6 @@ export function ImportPage() {
         budgetsHydrate(),
         calibHydrate(),
         viewsHydrate(),
-        hydrateInflation(),
         reportPeriodHydrate(),
         useOffBalanceStore.getState().hydrate(),
       ]);
@@ -640,7 +651,7 @@ export function ImportPage() {
       <PageHeader
         icon={Settings}
         title="Настройки"
-        hint="Источник данных, валюты, обработка и бэкапы."
+        hint="Данные, расчёты, оформление и бэкапы."
       />
 
       {/* Horizontal tab bar — top-level grouping for the long
@@ -655,8 +666,8 @@ export function ImportPage() {
       >
         {([
           { id: "source", label: "Данные", icon: Database },
-          { id: "currency", label: "Валюты", icon: Coins },
-          { id: "processing", label: "Обработка", icon: Replace },
+          { id: "processing", label: "Расчёты", icon: Calculator },
+          { id: "interface", label: "Оформление", icon: ALargeSmall },
           { id: "backups", label: "Бэкапы", icon: History },
         ] as const).map((t) => {
           const active = settingsTab === t.id;
@@ -1176,7 +1187,7 @@ export function ImportPage() {
 
       </>)}
 
-      {settingsTab === "currency" && (<>
+      {settingsTab === "interface" && (<>
 
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
@@ -1219,6 +1230,66 @@ export function ImportPage() {
           </span>
         </div>
       </div>
+
+      <div className="card card-pad">
+        <div className="flex items-center gap-2 mb-3">
+          <ALargeSmall className="w-5 h-5 text-accent2" />
+          <span className="font-medium">Размер текста в таблицах</span>
+        </div>
+        <p className="text-xs text-muted mb-4">
+          Размер шрифта в списках операций — лента «Операции», поиск, окно
+          операций (Drawer), дубликаты, корзина и подобные таблицы. Пять
+          градаций: от компактной до крупной.
+        </p>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-muted text-[12px]" aria-hidden>
+              А
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={5}
+              step={1}
+              value={tableFontLevel}
+              onChange={(e) =>
+                setTableFontLevel(Number(e.target.value) as TableFontLevel)
+              }
+              className="w-56 accent-accent cursor-pointer"
+              aria-label="Размер текста в таблицах"
+            />
+            <span className="text-muted text-[18px]" aria-hidden>
+              А
+            </span>
+          </div>
+          <span className="text-xs text-muted tabular-nums">
+            {TABLE_FONT_LABELS[tableFontLevel]} ({tableFontLevel}/5)
+          </span>
+        </div>
+        {/* Live preview — uses the live CSS var, so it rescales as you drag. */}
+        <div className="mt-4 rounded-lg border border-border bg-panel2/40 px-3 py-2 flex items-center justify-between gap-3">
+          <span
+            className="text-muted truncate"
+            style={{ fontSize: "var(--tbl-font)" }}
+          >
+            01.06.2026 · Пятёрочка · Еда дома
+          </span>
+          <span
+            className="tabular-nums font-medium text-expense whitespace-nowrap"
+            style={{ fontSize: "var(--tbl-font)" }}
+          >
+            −1 234 ₽
+          </span>
+        </div>
+      </div>
+
+      </>)}
+
+      {/* Currency (base + rates) lives in the «Расчёты» tab — it's an input to
+          how every amount is computed, alongside the reporting period and
+          data-scope toggles. Rendered before the main processing block below, so
+          it sits first in the tab. */}
+      {settingsTab === "processing" && (<>
 
       <div className="card card-pad">
         <div className="flex items-center gap-2 mb-3">
@@ -1311,62 +1382,6 @@ export function ImportPage() {
             </>
           );
         })()}
-      </div>
-
-      <div className="card card-pad">
-        <div className="flex items-center gap-2 mb-3">
-          <Percent className="w-5 h-5 text-accent2" />
-          <span className="font-medium">Поправка на инфляцию</span>
-        </div>
-        <p className="text-xs text-muted mb-3">
-          Когда включено, все суммы пересчитываются в реальные деньги базового года: расход в 2022
-          умножается на накопленную инфляцию до базового. Полезно для честного сравнения трат за
-          разные годы.
-        </p>
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={inflation.enabled}
-              onChange={(e) => setInflEnabled(e.target.checked)}
-              className="accent-accent w-4 h-4"
-            />
-            Включить
-          </label>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted">Базовый год:</span>
-            <input
-              type="number"
-              value={inflation.baseYear}
-              onChange={(e) => setInflBaseYear(Number(e.target.value) || 2026)}
-              className="input text-sm w-24"
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {Object.entries(inflation.rates)
-            .sort(([a], [b]) => Number(a) - Number(b))
-            .map(([year, rate]) => (
-              <div key={year}>
-                <label className="label block mb-1">{year}</label>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={rate}
-                    onChange={(e) =>
-                      setInflRate(year, Number(e.target.value) || 0)
-                    }
-                    className="input text-sm"
-                  />
-                  <span className="text-xs text-muted">%</span>
-                </div>
-              </div>
-            ))}
-        </div>
-        <div className="text-[11px] text-muted mt-3">
-          Поправка применяется к графикам Cash-flow и Тренды (когда включено в этих разделах).
-        </div>
       </div>
 
       </>)}
@@ -2433,7 +2448,7 @@ export function ImportPage() {
       {/* Sync log — lives at the bottom of the Данные tab so the
           two-way-sync block above can deep-link errors into a
           specific row. Hidden on tabs other than "Данные" so it
-          doesn't compete with Бэкапы / Обработка content. */}
+          doesn't compete with the other tabs' content. */}
       {settingsTab === "source" && <SyncLog />}
 
       {pendingModalOpen && (

@@ -217,50 +217,50 @@ export function WhatIfPage() {
           {/* Compare scenarios */}
           <div className="card card-pad">
             <div className="font-semibold mb-3">Сравнение</div>
-            <table className="w-full text-sm">
+            <table className="w-full text-base">
               <thead>
-                <tr className="text-xs text-muted">
-                  <th className="text-left font-normal">Метрика</th>
-                  <th className="text-right font-normal">Сейчас</th>
-                  <th className="text-right font-normal">Если так</th>
+                <tr>
+                  <th className="table-th">Метрика</th>
+                  <th className="table-th text-right">Сейчас</th>
+                  <th className="table-th text-right">Если так</th>
                 </tr>
               </thead>
               <tbody className="tabular-nums">
-                <tr className="border-t border-border">
-                  <td className="py-2">Доход / мес</td>
-                  <td className="py-2 text-right">
+                <tr className="align-middle">
+                  <td className="table-td">Доход / мес</td>
+                  <td className="table-td text-right">
                     {formatMoney(baseScenario.avgIncome, base)}
                   </td>
-                  <td className="py-2 text-right">
+                  <td className="table-td text-right">
                     {formatMoney(out.newIncome, base)}
                   </td>
                 </tr>
-                <tr className="border-t border-border">
-                  <td className="py-2">Расход / мес</td>
-                  <td className="py-2 text-right">
+                <tr className="align-middle">
+                  <td className="table-td">Расход / мес</td>
+                  <td className="table-td text-right">
                     {formatMoney(baseScenario.avgExpense, base)}
                   </td>
-                  <td className="py-2 text-right">
+                  <td className="table-td text-right">
                     {formatMoney(out.newExpense, base)}
                   </td>
                 </tr>
-                <tr className="border-t border-border">
-                  <td className="py-2">Сбережения / мес</td>
-                  <td className="py-2 text-right">
+                <tr className="align-middle">
+                  <td className="table-td">Сбережения / мес</td>
+                  <td className="table-td text-right">
                     {formatMoney(baseScenario.avgSavings, base)}
                   </td>
                   <td
-                    className={`py-2 text-right font-semibold ${out.newSavings > baseScenario.avgSavings ? "text-income" : out.newSavings < baseScenario.avgSavings ? "text-expense" : ""}`}
+                    className={`table-td text-right font-semibold ${out.newSavings > baseScenario.avgSavings ? "text-income" : out.newSavings < baseScenario.avgSavings ? "text-expense" : ""}`}
                   >
                     {formatMoney(out.newSavings, base)}
                   </td>
                 </tr>
-                <tr className="border-t border-border">
-                  <td className="py-2">Норма сбережений</td>
-                  <td className="py-2 text-right">
+                <tr className="align-middle">
+                  <td className="table-td">Норма сбережений</td>
+                  <td className="table-td text-right">
                     {formatPct(baseScenario.savingsRate, 0)}
                   </td>
-                  <td className="py-2 text-right font-semibold">
+                  <td className="table-td text-right font-semibold">
                     {formatPct(out.newRate, 0)}
                   </td>
                 </tr>

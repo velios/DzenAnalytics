@@ -139,9 +139,12 @@ export function SyncLog() {
       ) : (
         <>
           <div>
-            <table className="w-full text-sm border-collapse">
+            <table
+              className="w-full border-collapse"
+              style={{ fontSize: "var(--tbl-font)" }}
+            >
               <thead>
-                <tr className="text-left text-xs text-muted border-b border-border">
+                <tr className="text-left text-[0.85em] uppercase tracking-wider text-muted border-b border-border">
                   <th className="font-medium px-2 py-2 w-6" />
                   <th className="font-medium px-2 py-2">Тип</th>
                   <th className="font-medium px-2 py-2">Дата-время</th>
