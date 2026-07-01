@@ -40,6 +40,8 @@ export function tx(partial: Partial<Transaction> = {}): Transaction {
     currency,
     account: partial.account ?? "Карта",
     amountBase: partial.amountBase ?? amount,
+    opAmount: partial.opAmount ?? null,
+    opCurrency: partial.opCurrency ?? null,
     createdAt: partial.createdAt ?? "2026-01-15",
     ...partial,
   };
