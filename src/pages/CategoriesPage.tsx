@@ -7,6 +7,7 @@ import { useDataStore } from "../store/useDataStore";
 import { useThemeStore } from "../store/useThemeStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { useFiltersStore, applyFilters, presetToRange } from "../store/useFiltersStore";
+import { periodRange, shiftPeriod } from "../lib/period";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
@@ -18,6 +19,7 @@ import { PageHeader } from "../components/PageHeader";
 import { CategoryRequiredEditor } from "../components/CategoryRequiredEditor";
 import { CategorySunburst } from "../components/CategorySunburst";
 import { CategoryDot } from "../components/CategoryDot";
+import { KindSwitcher } from "../components/KindSwitcher";
 import { PieChart as PieChartIcon } from "lucide-react";
 import type { Transaction } from "../types";
 
@@ -341,6 +343,9 @@ export function CategoriesPage() {
   const [view, setView] = useState<View>("rings");
   const [kind, setKind] = useState<"expense" | "income">("expense");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Bars view: how many previous periods feed the «среднее» baseline (Zenmoney
+  // «Среднее за N месяцев»). Default 3.
+  const [avgMonths, setAvgMonths] = useState<3 | 6 | 12>(3);
 
   const showDrill = useDrillStore((s) => s.show);
 
@@ -358,71 +363,94 @@ export function CategoriesPage() {
   }, [tree, categoryMeta]);
 
   const totalAll = tree.reduce((s, n) => s + n.total, 0);
-  const kindWord = kind === "expense" ? "Расходы" : "Доходы";
 
-  // «Год назад» comparison (Bars view): the SAME calendar window shifted back
-  // exactly one year, with every other filter (accounts / categories /
-  // currencies / search) preserved. Maps category & subcategory → its total a
-  // year ago, so the Bars list can show a year-over-year column. Only defined
-  // when the current selection has explicit bounds (preset «Всё» / open custom
-  // ranges have no analogous «year ago» window).
-  const prevYear = useMemo(() => {
+  // «Среднее за N мес» baseline (Bars view) — Zenmoney-style. Averages each
+  // category's spend over the N periods immediately BEFORE the current window
+  // (excluding the current one), so it reads as "your usual". Every other
+  // filter (accounts / categories / currencies / search) is preserved.
+  //
+  // For the «month» preset the N periods are the N preceding report-months
+  // (respecting monthStartDay). For other bounded presets they're the N
+  // preceding windows of the same length. Open ranges («Всё» / open custom)
+  // have no baseline → `comparable: false`.
+  const avgComp = useMemo(() => {
     const maxDate = transactions.reduce((m, t) => (t.date > m ? t.date : m), "");
     const curRange =
       filters.preset === "custom"
         ? { from: filters.from, to: filters.to }
         : presetToRange(filters.preset, maxDate, filters.monthYM, monthStartDay);
-    const shift = (d: string | null): string | null => {
-      if (!d) return null;
-      const dt = new Date(d);
-      dt.setFullYear(dt.getFullYear() - 1);
-      return dt.toISOString().slice(0, 10);
+    const empty = {
+      comparable: false,
+      cat: new Map<string, number>(),
+      sub: new Map<string, number>(),
     };
-    const from = shift(curRange.from);
-    const to = shift(curRange.to);
-    const comparable = !!(from && to);
-    if (!comparable) {
-      return { comparable, cat: new Map<string, number>(), sub: new Map<string, number>() };
+    if (!curRange.from || !curRange.to) return empty;
+
+    // Build the N previous windows.
+    const windows: { from: string; to: string }[] = [];
+    if (filters.preset === "month" && filters.monthYM) {
+      for (let k = 1; k <= avgMonths; k++) {
+        windows.push(periodRange(shiftPeriod(filters.monthYM, -k), monthStartDay));
+      }
+    } else {
+      const fromD = new Date(curRange.from);
+      const toD = new Date(curRange.to);
+      const lenDays =
+        Math.round((toD.getTime() - fromD.getTime()) / 86_400_000) + 1;
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      for (let k = 1; k <= avgMonths; k++) {
+        const f = new Date(fromD);
+        f.setDate(f.getDate() - lenDays * k);
+        const t = new Date(toD);
+        t.setDate(t.getDate() - lenDays * k);
+        windows.push({ from: iso(f), to: iso(t) });
+      }
     }
-    const prevTxs = applyFilters(
-      transactions,
-      { ...filters, preset: "custom", from, to },
-      monthStartDay
-    );
-    const prevTree = buildHierarchy(prevTxs, kind);
+
+    // Sum each category/subcategory across all windows, then divide by N.
+    const catSum = new Map<string, number>();
+    const subSum = new Map<string, number>();
+    for (const w of windows) {
+      const wt = applyFilters(
+        transactions,
+        { ...filters, preset: "custom", from: w.from, to: w.to },
+        monthStartDay
+      );
+      for (const n of buildHierarchy(wt, kind)) {
+        catSum.set(n.name, (catSum.get(n.name) || 0) + n.total);
+        for (const s of n.subs) {
+          subSum.set(s.fullName, (subSum.get(s.fullName) || 0) + s.total);
+        }
+      }
+    }
     const cat = new Map<string, number>();
     const sub = new Map<string, number>();
-    for (const n of prevTree) {
-      cat.set(n.name, n.total);
-      for (const s of n.subs) sub.set(s.fullName, s.total);
-    }
-    return { comparable, cat, sub };
-  }, [transactions, filters, monthStartDay, kind]);
+    for (const [k, v] of catSum) cat.set(k, v / avgMonths);
+    for (const [k, v] of subSum) sub.set(k, v / avgMonths);
+    return { comparable: true, cat, sub };
+  }, [transactions, filters, monthStartDay, kind, avgMonths]);
 
-  // «Дельта» pill — change versus the same period a year ago. Colour is
-  // semantic: for expenses a rise is «bad» (red) and a drop «good» (green);
-  // for income it's the other way round. «Нет данных» when there was nothing a
-  // year ago, «—» when the period has no comparable year-ago window.
-  function deltaPill(cur: number, prev: number | undefined) {
-    if (!prevYear.comparable) return <span className="text-muted">—</span>;
-    if (prev === undefined || prev <= 0) {
-      return (
-        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs text-muted bg-panel2">
-          Нет данных
-        </span>
-      );
+  // «Отклонение» pill — absolute difference of the current period from the
+  // N-month average (Zenmoney «выше/ниже среднего на N ₽»). Colour is semantic:
+  // for expenses spending MORE than usual is «bad» (red), less is «good»
+  // (green); income is the other way round. A category with no baseline
+  // (brand-new, nothing in the prior windows) reads as fully above average.
+  function devPill(cur: number, avg: number | undefined) {
+    if (!avgComp.comparable) return <span className="text-muted">—</span>;
+    const base0 = avg ?? 0;
+    const diff = cur - base0;
+    if (Math.abs(diff) < 0.5) {
+      return <span className="text-[0.85em] text-muted tabular-nums">≈ среднее</span>;
     }
-    const d = Math.round(((cur - prev) / prev) * 100);
-    if (d === 0) return <span className="text-xs text-muted tabular-nums">0%</span>;
-    const up = d > 0;
+    const up = diff > 0;
     const good = kind === "expense" ? !up : up;
     const cls = good ? "text-income bg-income/10" : "text-expense bg-expense/10";
     return (
       <span
-        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs tabular-nums ${cls}`}
+        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[0.85em] tabular-nums ${cls}`}
+        title={up ? "Выше среднего" : "Ниже среднего"}
       >
-        {up ? "▲" : "▼"} {up ? "+" : "−"}
-        {Math.abs(d)}%
+        {up ? "▲" : "▼"} {formatMoney(Math.abs(diff), base)}
       </span>
     );
   }
@@ -560,20 +588,6 @@ export function CategoriesPage() {
           <div className="flex flex-wrap gap-2">
             <div className="flex bg-panel2 rounded-lg p-1 border border-border">
               <button
-                onClick={() => setKind("expense")}
-                className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
-              >
-                Расходы
-              </button>
-              <button
-                onClick={() => setKind("income")}
-                className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
-              >
-                Доходы
-              </button>
-            </div>
-            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
-              <button
                 onClick={() => setView("rings")}
                 className={`px-3 py-1 text-xs rounded-md ${view === "rings" ? "bg-accent text-accent-fg" : "text-muted"}`}
               >
@@ -605,18 +619,17 @@ export function CategoriesPage() {
           {view !== "rings" && (
             <div className="mb-4 flex items-start justify-between gap-2">
               <div>
-                <div className="flex items-center gap-2 mb-1">
+                <div className="mb-4">
+                  <KindSwitcher kind={kind} onChange={setKind} />
+                </div>
+                <div>
                   <span
-                    className={`text-xs font-semibold px-2.5 py-1 rounded-full text-white ${
-                      kind === "expense" ? "bg-expense" : "bg-income"
+                    className={`inline-flex px-4 py-1 rounded-full text-3xl font-bold tabular-nums ${
+                      kind === "expense" ? "bg-expense/15 text-expense" : "bg-income/15 text-income"
                     }`}
                   >
-                    {kindWord}
+                    {formatMoney(totalAll, base)}
                   </span>
-                  <span className="text-sm text-muted">Все категории</span>
-                </div>
-                <div className="text-3xl font-bold tabular-nums">
-                  {formatMoney(totalAll, base)}
                 </div>
               </div>
               {view === "treemap" && (
@@ -629,26 +642,23 @@ export function CategoriesPage() {
                   На весь экран
                 </button>
               )}
-              {view === "bars" &&
-                (() => {
-                  const expandable = tree.filter((n) => n.subs.some((s) => s.total > 0));
-                  const allExpanded =
-                    expandable.length > 0 && expandable.every((n) => expanded.has(n.name));
-                  return (
-                    <button
-                      onClick={() => (allExpanded ? collapseAll() : expandAll())}
-                      title={allExpanded ? "Свернуть все" : "Развернуть все"}
-                      aria-label={allExpanded ? "Свернуть все" : "Развернуть все"}
-                      className="inline-flex items-center justify-center shrink-0 mt-1 w-8 h-8 rounded-md border border-border text-muted hover:text-accent hover:border-accent"
-                    >
-                      <ChevronDown
-                        className={`w-4 h-4 transition-transform duration-300 ${
-                          allExpanded ? "rotate-180" : ""
-                        }`}
-                      />
-                    </button>
-                  );
-                })()}
+              {view === "bars" && (
+                <label className="shrink-0 mt-1 inline-flex items-center gap-2 text-xs text-muted">
+                  Сравнить со средним за
+                  <select
+                    value={avgMonths}
+                    onChange={(e) =>
+                      setAvgMonths(Number(e.target.value) as 3 | 6 | 12)
+                    }
+                    className="input text-xs py-1 px-2 w-auto"
+                    title="Сколько предыдущих месяцев усреднять для базовой линии"
+                  >
+                    <option value={3}>3 мес</option>
+                    <option value={6}>6 мес</option>
+                    <option value={12}>12 мес</option>
+                  </select>
+                </label>
+              )}
             </div>
           )}
           {view === "rings" && (
@@ -657,6 +667,7 @@ export function CategoriesPage() {
               meta={categoryMeta}
               base={base}
               kind={kind}
+              onKindChange={setKind}
               onOpenCategory={openCategory}
               onOpenSubcategory={openSubcategory}
             />
@@ -667,28 +678,50 @@ export function CategoriesPage() {
           {view === "bars" && (
             <div
               className="overflow-y-auto pr-1 max-h-[560px]"
-              style={{ scrollbarGutter: "stable" }}
+              // Obeys the «Размер текста в таблицах» slider like the operation
+              // tables: rows inherit this, sub-text is em-relative.
+              style={{ scrollbarGutter: "stable", fontSize: "var(--tbl-font)" }}
             >
               {/* Column header — same shape & widths as the Donut legend so the
                   two views feel identical. */}
-              <div className="sticky top-0 z-10 bg-panel flex items-center gap-2 px-1.5 pb-1 mb-1 border-b border-border text-[11px] text-muted uppercase tracking-wide">
+              <div className="sticky top-0 z-10 bg-panel flex items-center gap-2 px-1.5 pb-1 mb-1 border-b border-border text-[0.85em] text-muted uppercase tracking-wide">
                 <span className="flex-1 min-w-0">Категория</span>
                 <span className="w-14 text-left shrink-0">%</span>
                 <span className="w-20 text-left shrink-0">Операции</span>
                 <span className="w-28 text-left shrink-0">Сумма</span>
                 <span
                   className="w-28 text-left shrink-0"
-                  title="Та же сумма за этот же период годом ранее"
+                  title={`Средний расход по категории за ${avgMonths} предыдущих ${avgMonths === 3 ? "месяца" : "месяцев"} (без текущего)`}
                 >
-                  Год назад
+                  Среднее
                 </span>
                 <span
-                  className="w-24 text-left shrink-0"
-                  title="Изменение к тому же периоду год назад: рост или снижение в процентах"
+                  className="w-28 text-left shrink-0"
+                  title="Насколько текущий период выше/ниже среднего"
                 >
-                  Дельта
+                  Отклонение
                 </span>
-                <span className="w-5 shrink-0" />
+                <span className="w-8 shrink-0 flex items-center justify-center">
+                  {(() => {
+                    const expandable = tree.filter((n) => n.subs.some((s) => s.total > 0));
+                    if (expandable.length === 0) return null;
+                    const allExpanded = expandable.every((n) => expanded.has(n.name));
+                    return (
+                      <button
+                        onClick={() => (allExpanded ? collapseAll() : expandAll())}
+                        title={allExpanded ? "Свернуть все" : "Развернуть все"}
+                        aria-label={allExpanded ? "Свернуть все" : "Развернуть все"}
+                        className="-m-1 p-1 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                      >
+                        <ChevronDown
+                          className={`w-4 h-4 transition-transform duration-300 ${
+                            allExpanded ? "rotate-180" : ""
+                          }`}
+                        />
+                      </button>
+                    );
+                  })()}
+                </span>
               </div>
               <div className="space-y-0.5">
                 {tree.map((node) => {
@@ -697,13 +730,12 @@ export function CategoriesPage() {
                   const hasSubs = node.subs.some((s) => s.total > 0);
                   // Bars are scaled to the largest CURRENT category, so the top
                   // bar fills the track and lengths read as proportional. The
-                  // year-ago marker clamps to the right edge when it's off-scale
+                  // average marker clamps to the right edge when it's off-scale
                   // (its exact value stays in the tooltip) — otherwise a single
-                  // big year-ago value (e.g. a full month vs the partial current
-                  // one) would squash every bar.
+                  // big average value would squash every bar.
                   const maxTotal = tree[0]?.total || 1;
                   const barPct = Math.max(0, (node.total / maxTotal) * 100);
-                  const prevCat = prevYear.cat.get(node.name);
+                  const avgCat = avgComp.cat.get(node.name);
                   return (
                     <div key={node.name}>
                       <div
@@ -712,7 +744,7 @@ export function CategoriesPage() {
                       >
                         <CategoryDot category={node.name} size="w-7 h-7" />
                         <div className="flex-1 min-w-0">
-                          <div className="text-base truncate" title={node.name}>
+                          <div className="truncate" title={node.name}>
                             {node.name}
                           </div>
                           <div className="relative h-2 mt-1">
@@ -722,49 +754,49 @@ export function CategoriesPage() {
                                 style={{ width: `${barPct}%`, background: color }}
                               />
                             </div>
-                            {prevCat !== undefined && (
+                            {avgComp.comparable && avgCat !== undefined && avgCat > 0 && (
                               <div
-                                className="absolute top-1/2 -translate-y-1/2 w-0 border-l-2 border-dashed border-text/70"
+                                className="absolute top-1/2 -translate-y-1/2 w-0 border-l-2 border-solid border-text/80"
                                 style={{
-                                  left: `${Math.min(100, (prevCat / maxTotal) * 100)}%`,
-                                  height: "175%",
+                                  left: `${Math.min(100, (avgCat / maxTotal) * 100)}%`,
+                                  height: "200%",
                                 }}
-                                title={`Год назад: ${formatMoney(prevCat, base)}`}
+                                title={`Среднее за ${avgMonths} мес: ${formatMoney(avgCat, base)}`}
                               />
                             )}
                           </div>
                         </div>
-                        <span className="w-14 text-left text-sm text-muted tabular-nums shrink-0">
+                        <span className="w-14 text-left tabular-nums shrink-0">
                           {formatPct(node.total / totalAll, 1)}
                         </span>
-                        <span className="w-20 text-left text-sm text-muted tabular-nums shrink-0">
+                        <span className="w-20 text-left tabular-nums shrink-0">
                           {node.count}
                         </span>
-                        <span className="w-28 text-left text-base tabular-nums shrink-0">
+                        <span className="w-28 text-left tabular-nums shrink-0">
                           {formatMoney(node.total, base)}
                         </span>
-                        <span className="w-28 text-left text-sm text-muted tabular-nums shrink-0">
-                          {prevYear.cat.has(node.name)
-                            ? formatMoney(prevYear.cat.get(node.name)!, base)
+                        <span className="w-28 text-left text-muted tabular-nums shrink-0">
+                          {avgComp.comparable && avgCat !== undefined
+                            ? formatMoney(avgCat, base)
                             : "—"}
                         </span>
-                        <span className="w-24 text-left shrink-0">
-                          {deltaPill(node.total, prevYear.cat.get(node.name))}
+                        <span className="w-28 text-left shrink-0">
+                          {devPill(node.total, avgCat)}
                         </span>
-                        <span className="w-5 shrink-0 flex items-center justify-center">
+                        <span className="w-8 shrink-0 flex items-center justify-center">
                           {hasSubs && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleExpand(node.name);
                               }}
-                              className="text-muted hover:text-accent"
+                              className="p-1 rounded-md text-muted hover:text-accent hover:bg-panel2"
                               title={isOpen ? "Свернуть" : "Подкатегории"}
                             >
                               {isOpen ? (
-                                <ChevronDown className="w-4 h-4" />
+                                <ChevronDown className="w-5 h-5" />
                               ) : (
-                                <ChevronRight className="w-4 h-4" />
+                                <ChevronRight className="w-5 h-5" />
                               )}
                             </button>
                           )}
@@ -772,7 +804,10 @@ export function CategoriesPage() {
                       </div>
 
                       {isOpen && hasSubs && (
-                        <div className="mb-1 space-y-0.5">
+                        <div
+                          className="mb-2 space-y-0.5"
+                          style={{ marginLeft: "19px", borderLeft: `3px solid ${color}` }}
+                        >
                           {node.subs
                             .filter((s) => s.total > 0)
                             .map((sub, idx) => {
@@ -782,12 +817,12 @@ export function CategoriesPage() {
                               return (
                                 <div
                                   key={sub.fullName}
-                                  className="flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-panel2/50 cursor-pointer"
+                                  className="flex items-center gap-2 pl-2 pr-1.5 py-1.5 rounded-md hover:bg-panel2/50 cursor-pointer"
                                   onClick={() => openSubcategory(sub.fullName)}
                                 >
-                                  {/* Full-size icon badge (own icon/colour, else
-                                      parent's), indented to read as a child. */}
-                                  <span className="pl-3 shrink-0">
+                                  {/* Icon badge (own icon/colour, else the parent's);
+                                      the coloured rail groups these rows as children. */}
+                                  <span className="shrink-0">
                                     <CategoryDot
                                       category={sub.name}
                                       parent={node.name}
@@ -796,7 +831,7 @@ export function CategoriesPage() {
                                     />
                                   </span>
                                   <div className="flex-1 min-w-0">
-                                    <div className="text-base truncate text-muted">{sub.name}</div>
+                                    <div className="truncate text-muted">{sub.name}</div>
                                     <div className="relative h-1.5 mt-1">
                                       <div className="absolute inset-0 bg-panel2 rounded-full overflow-hidden">
                                         <div
@@ -808,36 +843,41 @@ export function CategoriesPage() {
                                           }}
                                         />
                                       </div>
-                                      {prevYear.sub.get(sub.fullName) !== undefined && (
-                                        <div
-                                          className="absolute top-1/2 -translate-y-1/2 w-0 border-l-2 border-dashed border-text/60"
-                                          style={{
-                                            left: `${Math.min(100, (prevYear.sub.get(sub.fullName)! / maxTotal) * 100)}%`,
-                                            height: "200%",
-                                          }}
-                                          title={`Год назад: ${formatMoney(prevYear.sub.get(sub.fullName)!, base)}`}
-                                        />
-                                      )}
+                                      {(() => {
+                                        const avgSub = avgComp.sub.get(sub.fullName);
+                                        if (!avgComp.comparable || avgSub === undefined || avgSub <= 0)
+                                          return null;
+                                        return (
+                                          <div
+                                            className="absolute top-1/2 -translate-y-1/2 w-0 border-l-2 border-solid border-text/70"
+                                            style={{
+                                              left: `${Math.min(100, (avgSub / maxTotal) * 100)}%`,
+                                              height: "200%",
+                                            }}
+                                            title={`Среднее за ${avgMonths} мес: ${formatMoney(avgSub, base)}`}
+                                          />
+                                        );
+                                      })()}
                                     </div>
                                   </div>
-                                  <span className="w-14 text-left text-sm text-muted tabular-nums shrink-0">
+                                  <span className="w-14 text-left text-muted tabular-nums shrink-0">
                                     {formatPct(sub.total / totalAll, 1)}
                                   </span>
-                                  <span className="w-20 text-left text-sm text-muted tabular-nums shrink-0">
+                                  <span className="w-20 text-left text-muted tabular-nums shrink-0">
                                     {sub.count}
                                   </span>
-                                  <span className="w-28 text-left text-base tabular-nums shrink-0">
+                                  <span className="w-28 text-left text-muted tabular-nums shrink-0">
                                     {formatMoney(sub.total, base)}
                                   </span>
-                                  <span className="w-28 text-left text-sm text-muted tabular-nums shrink-0">
-                                    {prevYear.sub.has(sub.fullName)
-                                      ? formatMoney(prevYear.sub.get(sub.fullName)!, base)
+                                  <span className="w-28 text-left text-muted tabular-nums shrink-0">
+                                    {avgComp.comparable && avgComp.sub.has(sub.fullName)
+                                      ? formatMoney(avgComp.sub.get(sub.fullName)!, base)
                                       : "—"}
                                   </span>
-                                  <span className="w-24 text-left shrink-0">
-                                    {deltaPill(sub.total, prevYear.sub.get(sub.fullName))}
+                                  <span className="w-28 text-left shrink-0">
+                                    {devPill(sub.total, avgComp.sub.get(sub.fullName))}
                                   </span>
-                                  <span className="w-5 shrink-0" />
+                                  <span className="w-8 shrink-0" />
                                 </div>
                               );
                             })}

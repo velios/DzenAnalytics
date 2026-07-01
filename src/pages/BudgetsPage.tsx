@@ -286,14 +286,18 @@ export function BudgetsPage() {
       if (t.kind === "income") add("income", t.category, sub, t.amountBase);
       else if (affectsExpense(t.kind)) add("expense", t.category, sub, expenseDelta(t));
     }
+    // A tag belongs in «Без бюджета» only if it isn't ALREADY shown in the
+    // budget section above. That includes income tags shown via a history
+    // forecast (no manual plan, but clearly represented with a «≈» and a
+    // click-to-plan) — keying off `budgetedThisMonth` (manual plans only) listed
+    // such forecast-only tags BOTH above and here. Key off what's actually shown.
+    const shown = new Set(
+      rows.map((r) => budgetKey(r.line.kind, r.line.category, r.line.subcategory ?? null))
+    );
     return [...agg.values()]
-      .filter(
-        (u) =>
-          u.fact > 0 &&
-          !budgetedThisMonth.has(budgetKey(u.kind, u.category, u.subcategory))
-      )
+      .filter((u) => u.fact > 0 && !shown.has(budgetKey(u.kind, u.category, u.subcategory)))
       .sort((a, b) => b.fact - a.fact);
-  }, [transactions, ym, budgetedThisMonth]);
+  }, [transactions, ym, rows]);
 
   function openCategory(cat: string, sub: string | null) {
     const txs = transactions.filter(

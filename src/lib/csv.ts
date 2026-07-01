@@ -94,6 +94,8 @@ export function buildTransaction(row: RawRow, idx: number, rates: CurrencyRates)
     currency,
     account,
     amountBase: toBase(amount, currency, rates),
+    opAmount: null,
+    opCurrency: null,
     createdAt: row.createdDate || row.date,
   };
 }

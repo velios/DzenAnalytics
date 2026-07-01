@@ -261,18 +261,18 @@ export function DuplicatesPage() {
                           />
                         </td>
                         <td className="table-td whitespace-nowrap text-muted">
-                          {formatDate(t.date, "short")}
+                          {formatDate(t.date, "full")}
                         </td>
                         <td className="table-td truncate" title={t.categoryFull}>
                           {t.categoryFull}
                         </td>
                         <td
-                          className="table-td truncate text-xs text-muted"
+                          className="table-td truncate text-muted"
                           title={t.comment}
                         >
                           {t.comment}
                         </td>
-                        <td className="table-td truncate text-xs text-muted" title={t.account}>
+                        <td className="table-td truncate text-muted" title={t.account}>
                           {t.account}
                         </td>
                         <td

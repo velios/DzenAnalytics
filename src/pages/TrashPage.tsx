@@ -190,16 +190,16 @@ export function TrashPage() {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-base">
             <thead>
-              <tr className="text-xs text-muted text-left">
-                <th className="font-normal py-2 pr-2">Дата</th>
-                <th className="font-normal py-2 px-2">Категория</th>
-                <th className="font-normal py-2 px-2">Получатель</th>
-                <th className="font-normal py-2 px-2">Комментарий</th>
-                <th className="font-normal py-2 px-2">Счёт</th>
-                <th className="font-normal py-2 px-2 text-right">Сумма</th>
-                <th className="font-normal py-2 pl-2 text-right">Действие</th>
+              <tr>
+                <th className="table-th">Дата</th>
+                <th className="table-th">Категория</th>
+                <th className="table-th">Получатель</th>
+                <th className="table-th">Комментарий</th>
+                <th className="table-th">Счёт</th>
+                <th className="table-th text-right">Сумма</th>
+                <th className="table-th text-right">Действие</th>
               </tr>
             </thead>
             <tbody>
@@ -207,46 +207,46 @@ export function TrashPage() {
                 const primary = displayPayee(t) || "";
                 const secondary = secondaryPayee(t);
                 return (
-                  <tr key={t.id} className="border-t border-border align-top">
-                    <td className="py-2 pr-2 whitespace-nowrap text-muted">
-                      {formatDate(t.date, "short")}
+                  <tr key={t.id} className="align-middle">
+                    <td className="table-td whitespace-nowrap text-muted">
+                      {formatDate(t.date, "full")}
                     </td>
-                    <td className="py-2 px-2 max-w-[180px]">
+                    <td className="table-td max-w-[180px]">
                       <div className="truncate flex items-center gap-2" title={t.categoryFull}>
                         <CategoryDot category={t.category} size="w-5 h-5" />
                         <span className="truncate">{t.category || "—"}</span>
                       </div>
                       {t.subcategory && (
-                        <div className="text-xs text-muted truncate pl-7">
+                        <div className="text-[0.85em] text-muted truncate pl-7">
                           {t.subcategory}
                         </div>
                       )}
                     </td>
-                    <td className="py-2 px-2 max-w-[180px]">
-                      <div className="truncate" title={primary}>
-                        {primary || <span className="text-muted">—</span>}
+                    <td className="table-td max-w-[180px]">
+                      <div className="truncate text-muted" title={primary}>
+                        {primary || "—"}
                       </div>
                       {secondary && (
-                        <div className="truncate text-[10px] text-muted/80" title={secondary}>
+                        <div className="truncate text-[0.85em] text-text" title={secondary}>
                           {secondary}
                         </div>
                       )}
                     </td>
-                    <td className="py-2 px-2 max-w-[260px] text-xs text-muted">
+                    <td className="table-td max-w-[260px] text-muted">
                       <div className="line-clamp-2" title={t.comment}>
                         {t.comment || ""}
                       </div>
                     </td>
-                    <td className="py-2 px-2 max-w-[140px] truncate text-muted text-xs" title={t.account}>
+                    <td className="table-td max-w-[140px] truncate text-muted" title={t.account}>
                       {t.account}
                     </td>
                     <td
-                      className={`py-2 px-2 text-right tabular-nums font-medium whitespace-nowrap ${kindColorClass(t.kind)}`}
+                      className={`table-td text-right tabular-nums font-medium whitespace-nowrap ${kindColorClass(t.kind)}`}
                     >
                       <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
                       {formatMoney(t.amount, t.currency)}
                     </td>
-                    <td className="py-2 pl-2 text-right">
+                    <td className="table-td text-right">
                       <button
                         onClick={() => restoreTransaction(t.id)}
                         className="btn-ghost text-xs !py-1 whitespace-nowrap"

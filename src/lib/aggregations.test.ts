@@ -8,6 +8,7 @@ import {
   hashtagCategoryTrees,
   detectRecurring,
   stackedBalanceByAccount,
+  buildScenarioForecast,
   netWorthSeries,
   netWorthBasis,
   buildSankey,
@@ -131,6 +132,37 @@ describe("stackedBalanceByAccount — real-balance anchoring", () => {
     const { series } = stackedBalanceByAccount(withDraft, 8, { A: 1_900_000 });
     expect(series[0].A).toBe(1_899_500); // −500 shift
     expect(series[series.length - 1].A).toBe(1_900_000);
+  });
+});
+
+describe("buildScenarioForecast — robust center + tightened band (issue #28)", () => {
+  it("centers on the median month, not the mean (spike-robust)", () => {
+    // 5 typical income months (100) + one 700 spike. Mean income = 200, median = 100.
+    const months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
+    const inc = [100, 100, 100, 100, 100, 700];
+    const txs = months.map((ym, i) =>
+      tx({ kind: "income", amount: inc[i], incomeAccount: "A", date: `${ym}-15` })
+    );
+    const f = buildScenarioForecast(txs, 1, 6).find((p) => p.isForecast)!;
+    expect(f.realistic).toBe(100); // median net — the 700 spike doesn't inflate it
+    expect(f.income).toBe(100); // projected income also uses the median
+  });
+
+  it("uses the combined std (hypot), not stdI+stdE, so the pessimist isn't over-deep", () => {
+    // Income std 50, expense std 25 → old band 75, new band √(50²+25²) ≈ 55.9.
+    const months = ["2026-01", "2026-02", "2026-03", "2026-04"];
+    const inc = [100, 200, 100, 200];
+    const exp = [50, 100, 50, 100];
+    const txs = months.flatMap((ym, i) => [
+      tx({ kind: "income", amount: inc[i], incomeAccount: "A", date: `${ym}-10` }),
+      tx({ kind: "expense", amount: exp[i], outcomeAccount: "A", date: `${ym}-20` }),
+    ]);
+    const f = buildScenarioForecast(txs, 1, 6).find((p) => p.isForecast)!;
+    expect(f.realistic).toBeCloseTo(75); // medI − medE = 150 − 75
+    const half = f.optimistic - f.realistic;
+    expect(half).toBeCloseTo(Math.hypot(50, 25)); // combined std
+    expect(half).toBeLessThan(50 + 25); // strictly tighter than the old stdI+stdE
+    expect(f.optimistic - f.realistic).toBeCloseTo(f.realistic - f.pessimistic); // symmetric
   });
 });
 

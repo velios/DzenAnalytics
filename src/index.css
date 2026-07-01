@@ -20,6 +20,10 @@
   --grid: #E2E8F0;
   --tooltip-bg: rgba(255, 255, 255, 0.82);
   --tooltip-border: rgba(203, 213, 225, 0.7);
+  /* Operation-table text size (overridden at runtime by the «Размер текста в
+     таблицах» setting, levels 1–5). Default 0.875rem = 14px. Theme-independent,
+     but lives here so it has a value before the store hydrates. */
+  --tbl-font: 0.875rem;
 }
 
 :root[data-theme="dark"] {
@@ -110,11 +114,18 @@ body {
     @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium
            bg-panel2 border border-border text-text;
   }
+  /* Unified table typography (single source of truth):
+     header = 12px uppercase muted · value = 16px · secondary metadata = 13px
+     (apply `text-[13px] text-muted` on the secondary cell/sub-line). */
   .table-th {
-    @apply text-left text-xs uppercase tracking-wider text-muted font-medium px-3 py-2 border-b border-border;
+    @apply text-left uppercase tracking-wider text-muted font-medium px-3 py-2 border-b border-border;
+    /* Header tracks the table text size but stays a notch smaller
+       (matches the old text-xs at the default level). */
+    font-size: calc(var(--tbl-font) - 0.125rem);
   }
   .table-td {
-    @apply px-3 py-2 border-b border-border/60 text-sm;
+    @apply px-3 py-2 border-b border-border/60;
+    font-size: var(--tbl-font);
   }
 }
 

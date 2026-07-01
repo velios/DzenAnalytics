@@ -1,15 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Sparkles,
   TrendingUp,
   TrendingDown,
   Trophy,
-  Camera,
-  Loader2,
   Calendar,
   Award,
 } from "lucide-react";
-import { toPng } from "html-to-image";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import {
@@ -52,37 +49,6 @@ export function YearReviewPage() {
     [transactions, year]
   );
 
-  const exportRef = useRef<HTMLDivElement>(null);
-  const [exporting, setExporting] = useState(false);
-
-  async function exportPng() {
-    if (!exportRef.current) return;
-    setExporting(true);
-    try {
-      const bg = getComputedStyle(document.documentElement)
-        .getPropertyValue("--c-bg")
-        .trim();
-      const dataUrl = await toPng(exportRef.current, {
-        backgroundColor: `rgb(${bg})`,
-        pixelRatio: 2,
-        cacheBust: true,
-        filter: (node) => {
-          const el = node as HTMLElement;
-          if (el.dataset && el.dataset.exportSkip === "1") return false;
-          return true;
-        },
-      });
-      const a = document.createElement("a");
-      a.download = `dzenanalytics-${year}-review-${new Date().toISOString().slice(0, 10)}.png`;
-      a.href = dataUrl;
-      a.click();
-    } catch (e) {
-      alert(`Не удалось экспортировать: ${e instanceof Error ? e.message : "ошибка"}`);
-    } finally {
-      setExporting(false);
-    }
-  }
-
   if (transactions.length === 0) return <EmptyState />;
   if (!review.hasData) {
     return (
@@ -119,18 +85,10 @@ export function YearReviewPage() {
         </div>
         <div className="flex items-center gap-2">
           <YearSwitcher year={year} years={years} onChange={setYear} />
-          <button onClick={exportPng} disabled={exporting} className="btn-ghost text-xs">
-            {exporting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Camera className="w-3.5 h-3.5" />
-            )}
-            {exporting ? "Сохраняю..." : "Снимок PNG"}
-          </button>
         </div>
       </div>
 
-      <div className="space-y-6" ref={exportRef}>
+      <div className="space-y-6">
         {/* Hero */}
         <div className="card card-pad bg-gradient-to-br from-accent/10 to-accent2/10 border-accent/30">
           <div className="text-xs uppercase tracking-wider text-muted mb-2">

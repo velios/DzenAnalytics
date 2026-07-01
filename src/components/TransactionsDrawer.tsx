@@ -14,6 +14,7 @@ import { useDrillStore } from "../store/useDrillStore";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
 import type { TransactionEdit } from "../store/useEditsStore";
+import { useDraftsStore } from "../store/useDraftsStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { CategoryDot } from "./CategoryDot";
@@ -105,6 +106,7 @@ export function TransactionsDrawer() {
   }
 
   const edits = useEditsStore((s) => s.edits);
+  const drafts = useDraftsStore((s) => s.drafts);
   const editsLoaded = useEditsStore((s) => s.loaded);
   const hydrateEdits = useEditsStore((s) => s.hydrate);
   useEffect(() => {
@@ -374,9 +376,9 @@ export function TransactionsDrawer() {
                   </th>
                   <SortHead label="Дата" k="date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortHead label="Категория" k="category" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortHead label="Получатель" k="payee" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <th className="table-th">Комментарий</th>
                   <th className="table-th">Счёт</th>
+                  <SortHead label="Контрагент" k="payee" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <th className="table-th">Комментарий</th>
                   <SortHead label="Сумма" k="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
                   <th className="table-th text-right whitespace-nowrap">Операции</th>
                 </tr>
@@ -384,12 +386,13 @@ export function TransactionsDrawer() {
               <tbody>
                 {sorted.map((t) => {
                   const isEdited = !!edits[t.id];
+                  const isDraft = !!drafts[t.id];
                   const isSel = selected.has(t.id);
                   return (
                   <tr
                     key={t.id}
                     onDoubleClick={() => setEditing(t)}
-                    className={`align-top group cursor-pointer ${
+                    className={`align-middle group cursor-pointer ${
                       isSel ? "bg-accent/5" : "hover:bg-panel2/40"
                     }`}
                   >
@@ -404,27 +407,45 @@ export function TransactionsDrawer() {
                       />
                     </td>
                     <td className="table-td whitespace-nowrap text-muted">
-                      {formatDate(t.date, "short")}
+                      {formatDate(t.date, "full")}
                     </td>
                     <td className="table-td max-w-[180px]">
-                      <div className="truncate flex items-center gap-2" title={t.categoryFull}>
-                        <CategoryDot category={t.category} size="w-5 h-5" />
-                        <span className="truncate">{t.category}</span>
-                        {isEdited && (
-                          <Pencil
-                            className="w-3 h-3 text-accent2 shrink-0"
-                            aria-label="Отредактировано"
+                      <div className="flex items-center gap-2 min-w-0" title={t.categoryFull}>
+                        <span className="relative inline-flex shrink-0">
+                          {/* Sub-category operations show the SUB-tag's own icon
+                              (resolved by «Parent / Sub»), not the parent's. */}
+                          <CategoryDot
+                            category={t.subcategory || t.category}
+                            parent={t.subcategory ? t.category : undefined}
+                            size="w-7 h-7"
                           />
-                        )}
-                      </div>
-                      {t.subcategory && (
-                        // pl-7 aligns the subcategory under the category
-                        // *text* (icon w-5 + gap-2 = 28px), matching the
-                        // operations feed layout.
-                        <div className="text-xs text-muted truncate pl-7" title={t.subcategory}>
-                          {t.subcategory}
+                          {isDraft && (
+                            <span
+                              className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-expense border-2 border-panel"
+                              aria-label="Новая операция — не синхронизирована"
+                            />
+                          )}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="truncate">{t.category}</span>
+                            {isEdited && !isDraft && (
+                              <Pencil
+                                className="w-3 h-3 text-accent2 shrink-0"
+                                aria-label="Отредактировано"
+                              />
+                            )}
+                          </div>
+                          {t.subcategory && (
+                            <div className="text-[0.85em] text-muted truncate" title={t.subcategory}>
+                              {t.subcategory}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
+                    </td>
+                    <td className="table-td max-w-[140px] truncate text-muted" title={t.account}>
+                      {t.account}
                     </td>
                     {/* Brand (Zenmoney-curated) is the primary line;
                         raw payee text goes under it small-muted when
@@ -436,11 +457,11 @@ export function TransactionsDrawer() {
                         const tooltip = secondary ? `${primary} — ${secondary}` : primary;
                         return (
                           <div className="min-w-0">
-                            <div className="truncate" title={tooltip}>
-                              {primary || <span className="text-muted">—</span>}
+                            <div className="truncate text-muted" title={tooltip}>
+                              {primary || "—"}
                             </div>
                             {secondary && (
-                              <div className="truncate text-[10px] text-muted/80" title={secondary}>
+                              <div className="truncate text-[0.85em] text-text" title={secondary}>
                                 {secondary}
                               </div>
                             )}
@@ -448,13 +469,10 @@ export function TransactionsDrawer() {
                         );
                       })()}
                     </td>
-                    <td className="table-td max-w-[260px] text-xs text-muted">
-                      <div className="line-clamp-2" title={t.comment}>
+                    <td className="table-td max-w-[260px] text-muted">
+                      <div className="truncate" title={t.comment}>
                         {t.comment || ""}
                       </div>
-                    </td>
-                    <td className="table-td max-w-[140px] truncate text-muted text-xs" title={t.account}>
-                      {t.account}
                     </td>
                     <td
                       className={`table-td text-right tabular-nums font-medium whitespace-nowrap ${kindColorClass(t.kind)}`}
@@ -465,7 +483,7 @@ export function TransactionsDrawer() {
                       {(() => {
                         const received = crossCurrencyReceived(t);
                         return received ? (
-                          <div className="text-[10px] font-normal text-muted/80">
+                          <div className="text-[0.85em] font-normal text-muted/80">
                             ({received})
                           </div>
                         ) : null;
@@ -537,8 +555,14 @@ export function TransactionsDrawer() {
 
       {editing && (
         <EditTransactionModal
+          key={editing.id}
           tx={editing}
           onClose={() => setEditing(null)}
+          onNavigate={(dir) => {
+            const i = sorted.findIndex((t) => t.id === editing.id);
+            const next = sorted[i + dir];
+            if (next) setEditing(next);
+          }}
         />
       )}
     </>
@@ -565,7 +589,7 @@ function SortHead({
     <th className={`table-th ${align === "right" ? "text-right" : ""}`}>
       <button
         onClick={() => onSort(k)}
-        className={`inline-flex items-center gap-1 hover:text-text transition-colors ${
+        className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-text transition-colors ${
           active ? "text-accent" : ""
         }`}
       >

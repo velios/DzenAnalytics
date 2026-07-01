@@ -172,7 +172,7 @@ export function AnomaliesPage() {
                     sortValue: (a) => a.tx.date,
                     render: (a) => (
                       <span className="whitespace-nowrap text-muted">
-                        {formatDate(a.tx.date, "short")}
+                        {formatDate(a.tx.date, "full")}
                       </span>
                     ),
                   },
@@ -209,7 +209,7 @@ export function AnomaliesPage() {
                           {a.context}
                         </div>
                         {a.tx.comment && (
-                          <div className="text-[11px] mt-1 italic line-clamp-1" title={a.tx.comment}>
+                          <div className="text-[0.8em] mt-1 italic line-clamp-1" title={a.tx.comment}>
                             {a.tx.comment}
                           </div>
                         )}
