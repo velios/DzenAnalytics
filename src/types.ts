@@ -76,6 +76,11 @@ export interface Transaction {
   currency: Currency;
   account: string;
   amountBase: number;
+  /** Bank-original operation amount when the bank converted currencies
+   *  (e.g. 5 000 TRY on a USD account). Null when op currency = account currency. */
+  opAmount: number | null;
+  /** ISO code of the bank-original operation currency. */
+  opCurrency: string | null;
   createdAt: string;
 }
 

@@ -786,6 +786,25 @@ export function buildScenarioForecast(
     expenses.reduce((s, v) => s + (v - meanE) ** 2, 0) / expenses.length
   );
 
+  // Project from the MEDIAN month, not the mean — a single spike month (a bonus,
+  // a big one-off purchase) drags the mean and pushes the «realist» net above a
+  // typical month. Spread: the std of net = income − expense for two independent
+  // series is √(stdI² + stdE²), NOT stdI + stdE. Summing them assumes the worst
+  // income AND worst expense happen together at full 1σ, which over-counts
+  // volatility and sends the «pessimist» far deeper than anything observed
+  // (issue #28). hypot keeps the band realistic and the center consistent with
+  // the projected income/expense bars (medI − medE).
+  const median = (arr: number[]): number => {
+    if (arr.length === 0) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  const medI = median(incomes);
+  const medE = median(expenses);
+  const medNet = medI - medE;
+  const band = Math.hypot(stdI, stdE);
+
   const out: ScenarioForecast[] = months.map((m) => ({
     ym: m.ym,
     income: m.income,
@@ -803,11 +822,11 @@ export function buildScenarioForecast(
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     out.push({
       ym,
-      income: meanI,
-      expense: meanE,
-      optimistic: meanI + stdI - (meanE - stdE),
-      realistic: meanI - meanE,
-      pessimistic: meanI - stdI - (meanE + stdE),
+      income: medI,
+      expense: medE,
+      optimistic: medNet + band,
+      realistic: medNet,
+      pessimistic: medNet - band,
       isForecast: true,
     });
   }

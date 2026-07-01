@@ -1,7 +1,11 @@
 import { create } from "zustand";
 import type { Transaction, CurrencyRates, ImportMeta } from "../types";
 import * as db from "../lib/db";
-import { toBase } from "../lib/csv";
+import {
+  baseWithHistory,
+  fetchHistoricalRubRates,
+  type HistDayRates,
+} from "../lib/historicalRates";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
 import { applyCategoryRules, type CategoryRule } from "./useCategoryRulesStore";
 import { applyEdits } from "../lib/applyEdits";
@@ -70,10 +74,19 @@ interface DataState {
    */
   transactionsRaw: Transaction[];
   rates: CurrencyRates;
+  /** CBR rate index (op-date → currency → RUB/unit) used to reprice
+   *  foreign-currency operations at their own date. Warmed in the background. */
+  histDayRates: HistDayRates;
+  /** Background warm progress, or null when idle/done. Drives the UI chip. */
+  histWarming: { done: number; total: number } | null;
   importMeta: ImportMeta | null;
   payeeGroupingEnabled: boolean;
   loaded: boolean;
   hydrate: () => Promise<void>;
+  /** Fetch CBR rates for every foreign-currency op date not yet resolved,
+   *  then reprice. Fire-and-forget; safe to call repeatedly (only fetches the
+   *  gaps). No-op when the base currency isn't RUB (CBR is RUB-centric). */
+  warmHistoricalRates: () => Promise<void>;
   setTransactions: (txs: Transaction[], meta: ImportMeta) => Promise<void>;
   mergeTransactions: (
     incoming: Transaction[],
@@ -104,8 +117,19 @@ interface DataState {
   purgeDeleted: () => Promise<void>;
 }
 
-function recalcBase(txs: Transaction[], rates: CurrencyRates): Transaction[] {
-  return txs.map((t) => ({ ...t, amountBase: toBase(t.amount, t.currency, rates) }));
+// Key under which the resolved CBR day→currency rate index is persisted, so a
+// reload reprices instantly without re-fetching (and without a sync-time flash).
+const HIST_RATES_KEY = "histDayRates";
+
+function recalcBase(
+  txs: Transaction[],
+  rates: CurrencyRates,
+  hist: HistDayRates
+): Transaction[] {
+  return txs.map((t) => ({
+    ...t,
+    amountBase: baseWithHistory(t.amount, t.currency, t.date, rates, hist),
+  }));
 }
 
 /**
@@ -118,7 +142,12 @@ async function finalize(
   raw: Transaction[],
   rates: CurrencyRates
 ): Promise<Transaction[]> {
-  const withEdits = applyEdits(raw, await loadEditsFromStore(), rates);
+  // The historical-rate index is read from the store here (rather than
+  // threaded through all ~13 finalize call sites) — it's global state that
+  // never differs between simultaneous calls. Any action that just changed it
+  // (warmHistoricalRates) sets it before calling finalize.
+  const hist = useDataStore.getState().histDayRates;
+  const withEdits = applyEdits(raw, await loadEditsFromStore(), rates, hist);
   const deleted = await loadDeletedSet();
   const visible =
     deleted.size === 0
@@ -145,9 +174,13 @@ async function loadDraftRows(
   if (Object.keys(drafts).length === 0) return [];
   const cache = await loadZenCache();
   const seen = new Set(existing.map((t) => t.id));
+  const hist = useDataStore.getState().histDayRates;
   return draftsToTransactions(drafts, cache)
     .filter((t) => !seen.has(t.id))
-    .map((t) => ({ ...t, amountBase: toBase(t.amount, t.currency, rates) }));
+    .map((t) => ({
+      ...t,
+      amountBase: baseWithHistory(t.amount, t.currency, t.date, rates, hist),
+    }));
 }
 
 /**
@@ -273,21 +306,28 @@ export const useDataStore = create<DataState>((set, get) => ({
   transactions: [],
   transactionsRaw: [],
   rates: DEFAULT_RATES,
+  histDayRates: {},
+  histWarming: null,
   importMeta: null,
   payeeGroupingEnabled: false,
   loaded: false,
 
   hydrate: async () => {
-    const [txs, savedRates, meta, grouping, rules, manualAliases] = await Promise.all([
-      db.loadTransactions(),
-      db.loadRates(),
-      db.loadImportMeta(),
-      db.loadJSON<boolean>("payeeGrouping"),
-      loadRules(),
-      loadManualAliasesFromStore(),
-    ]);
+    const [txs, savedRates, savedHist, meta, grouping, rules, manualAliases] =
+      await Promise.all([
+        db.loadTransactions(),
+        db.loadRates(),
+        db.loadJSON<HistDayRates>(HIST_RATES_KEY),
+        db.loadImportMeta(),
+        db.loadJSON<boolean>("payeeGrouping"),
+        loadRules(),
+        loadManualAliasesFromStore(),
+      ]);
     const rates = mergeRatesWithDefaults(savedRates);
-    let raw = recalcBase(txs, rates);
+    const hist = savedHist || {};
+    // Seed histDayRates BEFORE finalize() (which reads it from the store).
+    set({ histDayRates: hist });
+    let raw = recalcBase(txs, rates, hist);
     raw = applyPayeeGrouping(raw, grouping || false, manualAliases);
     raw = applyCategoryRules(raw, rules);
     const final = await finalize(raw, rates);
@@ -299,6 +339,54 @@ export const useDataStore = create<DataState>((set, get) => ({
       payeeGroupingEnabled: grouping || false,
       loaded: true,
     });
+    // Fill any gaps (new dates / first run) in the background, then reprice.
+    void get().warmHistoricalRates();
+  },
+
+  warmHistoricalRates: async () => {
+    const { rates, transactionsRaw, histDayRates, histWarming } = get();
+    // CBR is RUB-centric — historical repricing is only exact with a RUB base.
+    // Other bases keep the sync-time conversion (handled by baseWithHistory).
+    if (rates.base !== "RUB") return;
+    // Don't run two warms at once (e.g. hydrate + a fast re-sync).
+    if (histWarming) return;
+    // Every foreign-currency op date we don't already have a resolved entry for.
+    const missing = new Set<string>();
+    for (const t of transactionsRaw) {
+      if (t.currency !== "RUB" && t.date && !(t.date in histDayRates)) {
+        missing.add(t.date);
+      }
+    }
+    if (missing.size === 0) return;
+
+    const dates = Array.from(missing);
+    const total = dates.length;
+    set({ histWarming: { done: 0, total } });
+    try {
+      // Fetch and PERSIST in chunks. Saving the resolved index after every
+      // chunk (not just at the very end) means an interrupted warm — the user
+      // reloads or navigates mid-download — keeps its progress: next load only
+      // fetches the dates still missing, instead of starting over. Each date is
+      // therefore fetched from CBR at most once, ever.
+      const CHUNK = 24;
+      let done = 0;
+      for (let i = 0; i < dates.length; i += CHUNK) {
+        const chunk = dates.slice(i, i + CHUNK);
+        const fetched = await fetchHistoricalRubRates(chunk);
+        const merged = { ...get().histDayRates, ...fetched };
+        await db.saveJSON(HIST_RATES_KEY, merged);
+        set({ histDayRates: merged });
+        done += chunk.length;
+        set({ histWarming: { done, total } });
+      }
+      // Reprice once, from the unchanged raw set, with the complete index.
+      const merged = get().histDayRates;
+      const raw = recalcBase(get().transactionsRaw, rates, merged);
+      const final = await finalize(raw, rates);
+      set({ transactions: final, transactionsRaw: raw });
+    } finally {
+      set({ histWarming: null });
+    }
   },
 
   setTransactions: async (txs, meta) => {
@@ -307,13 +395,14 @@ export const useDataStore = create<DataState>((set, get) => ({
     if (rates !== get().rates) await db.saveRates(rates);
     const rules = await loadRules();
     const manualAliases = await loadManualAliasesFromStore();
-    let raw = recalcBase(txs, rates);
+    let raw = recalcBase(txs, rates, get().histDayRates);
     raw = applyPayeeGrouping(raw, payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
     await db.saveImportMeta(meta);
     const final = await finalize(raw, rates);
     set({ transactions: final, transactionsRaw: raw, rates, importMeta: meta });
+    void get().warmHistoricalRates();
   },
 
   mergeTransactions: async (incoming, meta) => {
@@ -325,7 +414,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     const existingIds = new Set(existing.map((t) => t.id));
     const fresh = incoming.filter((t) => !existingIds.has(t.id));
     const combined = [...existing, ...fresh];
-    let raw = recalcBase(combined, rates);
+    let raw = recalcBase(combined, rates, get().histDayRates);
     raw = applyPayeeGrouping(raw, payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
@@ -342,6 +431,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       rates,
       importMeta: mergedMeta,
     });
+    void get().warmHistoricalRates();
     return { added: fresh.length, duplicates: incoming.length - fresh.length };
   },
 
@@ -360,7 +450,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     await db.saveRates(rates);
     const rules = await loadRules();
     const manualAliases = await loadManualAliasesFromStore();
-    let raw = recalcBase(get().transactionsRaw, rates);
+    let raw = recalcBase(get().transactionsRaw, rates, get().histDayRates);
     raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
@@ -389,7 +479,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     await db.saveRates(rates);
     const rules = await loadRules();
     const manualAliases = await loadManualAliasesFromStore();
-    let raw = recalcBase(get().transactionsRaw, rates);
+    let raw = recalcBase(get().transactionsRaw, rates, get().histDayRates);
     raw = applyPayeeGrouping(raw, get().payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
@@ -402,7 +492,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { transactionsRaw: existing, rates } = get();
     const rules = await loadRules();
     const manualAliases = await loadManualAliasesFromStore();
-    let raw = recalcBase(existing, rates);
+    let raw = recalcBase(existing, rates, get().histDayRates);
     raw = applyPayeeGrouping(raw, enabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);
@@ -414,7 +504,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { transactionsRaw: existing, rates, payeeGroupingEnabled } = get();
     const rules = await loadRules();
     const manualAliases = await loadManualAliasesFromStore();
-    let raw = recalcBase(existing, rates);
+    let raw = recalcBase(existing, rates, get().histDayRates);
     raw = applyPayeeGrouping(raw, payeeGroupingEnabled, manualAliases);
     raw = applyCategoryRules(raw, rules);
     await db.saveTransactions(raw);

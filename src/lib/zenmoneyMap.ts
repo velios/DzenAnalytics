@@ -217,6 +217,18 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       }
     }
 
+    // Bank-original operation currency/amount — only when the bank converted
+    // currencies for us (opOutcomeInstrument ≠ outcomeInstrument).
+    // Expense / transfer: use the outcome leg; income: use the income leg.
+    const opRawAmount = kind === "income" ? zt.opIncome : zt.opOutcome;
+    const opRawInstrId = kind === "income" ? zt.opIncomeInstrument : zt.opOutcomeInstrument;
+    const opRawInstr = opRawInstrId != null ? instrumentsById.get(opRawInstrId) : null;
+    const opCurrencyResolved = opRawInstr?.shortTitle ?? null;
+    const opAmountResolved =
+      opRawAmount != null && opCurrencyResolved != null && opCurrencyResolved !== currency
+        ? opRawAmount
+        : null;
+
     const cat = buildCategory(zt.tag, tagsById);
     // Display-only overrides. The transaction's tag/category from Zenmoney is
     // preserved in `*Original` fields below (for category rules to match
@@ -282,6 +294,8 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       currency,
       account,
       amountBase: toBase(amount, currency),
+      opAmount: opAmountResolved,
+      opCurrency: opAmountResolved != null ? opCurrencyResolved : null,
       createdAt: zt.created
         ? new Date(zt.created * 1000).toISOString()
         : `${zt.date}T00:00:00Z`,

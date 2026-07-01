@@ -10,6 +10,7 @@ import {
   Legend,
   ComposedChart,
   Line,
+  type TooltipContentProps,
 } from "recharts";
 import {
   Wallet,
@@ -47,6 +48,7 @@ import {
 import { useNetWorthSeries } from "../hooks/useNetWorthSeries";
 import {
   formatMoney,
+  chartTooltipStyle,
   formatNum,
   formatDate,
   toNum,
@@ -235,6 +237,38 @@ export function AccountsPage() {
     [baseTxs, hasRealBalances, realBalancesByAccount, unsyncedIds]
   );
   const netWorth = useNetWorthSeries(baseTxs);
+
+  // Stacked-chart tooltip: per-account rows + a bold «Итого» — the day's net
+  // worth, which the chart already carries on each datum as `total` (issue #27).
+  const renderStackedTooltip = ({ active, payload, label }: TooltipContentProps) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const datum = payload[0]?.payload as { total?: number } | undefined;
+    const total = datum?.total ?? payload.reduce((s, p) => s + toNum(p.value), 0);
+    return (
+      <div style={chartTooltipStyle}>
+        <div className="text-xs text-muted mb-1">{formatDate(label as string)}</div>
+        <div className="space-y-0.5">
+          {payload.map((p) => (
+            <div key={String(p.dataKey)} className="flex items-center gap-3 text-sm">
+              <span
+                className="w-2.5 h-2.5 rounded-[2px] shrink-0"
+                style={{ background: p.color as string }}
+              />
+              <span className="flex-1 min-w-0 truncate">{p.name}</span>
+              <span className="tabular-nums">
+                {formatMoney(toNum(p.value), base, { signed: true })}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 text-sm font-semibold mt-1 pt-1 border-t border-border">
+          <span className="w-2.5 shrink-0" />
+          <span className="flex-1">Итого</span>
+          <span className="tabular-nums">{formatMoney(total, base, { signed: true })}</span>
+        </div>
+      </div>
+    );
+  };
 
   function applyCalibration() {
     const amt = Number(calibAmount);
@@ -510,11 +544,7 @@ export function AccountsPage() {
                   fontSize={11}
                   tickFormatter={(v) => formatNum(v, { compact: true })}
                 />
-                <Tooltip
-                  {...chartTooltipProps}
-                  labelFormatter={(d) => formatDate(d as string)}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base, { signed: true })}
-                />
+                <Tooltip {...chartTooltipProps} content={renderStackedTooltip} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {stacked.accounts.map((acc, i) => (
                   <Area
@@ -835,7 +865,7 @@ export function AccountsPage() {
                 the filter (different rows/content) never reflows the columns.
                 Numeric columns are sized to fit million-ruble values so nothing
                 overflows its cell (which would force a horizontal scrollbar). */}
-            <table className="w-full min-w-[960px] text-sm table-fixed">
+            <table className="w-full min-w-[960px] text-base table-fixed">
               <colgroup>
                 <col />
                 <col style={{ width: 140 }} />
@@ -846,16 +876,16 @@ export function AccountsPage() {
                 <col style={{ width: 140 }} />
               </colgroup>
               <thead>
-                <tr className="text-xs text-muted text-left">
-                  <th className="font-normal py-2 pr-2">Счёт</th>
-                  <th className="font-normal py-2 px-2 text-right">
+                <tr>
+                  <th className="table-th">Счёт</th>
+                  <th className="table-th text-right">
                     {hasRealBalances ? "Баланс" : "Изменение"}
                   </th>
-                  <th className="font-normal py-2 px-2 text-right">Δ период</th>
-                  <th className="font-normal py-2 px-2 text-right">Поступления</th>
-                  <th className="font-normal py-2 px-2 text-right">Списания</th>
-                  <th className="font-normal py-2 px-2 text-right">Опер.</th>
-                  <th className="font-normal py-2 pl-2 text-right"></th>
+                  <th className="table-th text-right">Δ период</th>
+                  <th className="table-th text-right">Поступления</th>
+                  <th className="table-th text-right">Списания</th>
+                  <th className="table-th text-right">Опер.</th>
+                  <th className="table-th" aria-hidden />
                 </tr>
               </thead>
               <tbody>
@@ -873,11 +903,11 @@ export function AccountsPage() {
                     <tr
                       key={a.account}
                       onClick={() => setSelectedAccount(isSel ? null : a.account)}
-                      className={`border-t border-border cursor-pointer group ${
+                      className={`align-middle cursor-pointer group ${
                         isSel ? "bg-accent/10" : "hover:bg-panel2/50"
                       } ${a.archive ? "opacity-60" : ""}`}
                     >
-                      <td className="py-2 pr-2">
+                      <td className="table-td">
                         <div className="flex items-center gap-2 min-w-0">
                           <AccountLogo title={a.account} type={a.type} />
                           <div className="min-w-0">
@@ -888,7 +918,7 @@ export function AccountsPage() {
                               {a.account}
                             </div>
                             {hasReal && (
-                              <div className="text-[10px] text-muted">
+                              <div className="text-[13px] text-muted">
                                 {accountTypeLabel(a.type)}
                                 {a.offBalance && (
                                   <span className="ml-1 text-accent2">· вне баланса</span>
@@ -902,33 +932,33 @@ export function AccountsPage() {
                         </div>
                       </td>
                       <td
-                        className={`py-2 px-2 text-right tabular-nums font-semibold whitespace-nowrap ${headlineColor}`}
+                        className={`table-td text-right tabular-nums font-semibold whitespace-nowrap ${headlineColor}`}
                         title={formatMoney(headline, base, { decimals: 2 })}
                       >
                         {formatMoney(headline, base, { signed: !hasReal })}
                         {hasReal && a.nativeCurrency && a.nativeCurrency !== base && (
-                          <div className="text-[10px] text-muted font-normal">
+                          <div className="text-[13px] text-muted font-normal">
                             {formatMoney(a.nativeBalance!, a.nativeCurrency)}
                           </div>
                         )}
                       </td>
                       <td
-                        className={`py-2 px-2 text-right tabular-nums whitespace-nowrap ${
+                        className={`table-td text-right tabular-nums whitespace-nowrap ${
                           a.delta >= 0 ? "text-income" : "text-expense"
                         }`}
                       >
                         {formatMoney(a.delta, base, { signed: true })}
                       </td>
-                      <td className="py-2 px-2 text-right tabular-nums text-income whitespace-nowrap">
+                      <td className="table-td text-right tabular-nums text-income whitespace-nowrap">
                         {formatMoney(a.income, base)}
                       </td>
-                      <td className="py-2 px-2 text-right tabular-nums text-expense whitespace-nowrap">
+                      <td className="table-td text-right tabular-nums text-expense whitespace-nowrap">
                         {formatMoney(a.expense, base)}
                       </td>
-                      <td className="py-2 px-2 text-right tabular-nums text-muted">
+                      <td className="table-td text-right tabular-nums text-muted">
                         {formatNum(a.count)}
                       </td>
-                      <td className="py-2 pl-2 text-right">
+                      <td className="table-td text-right">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

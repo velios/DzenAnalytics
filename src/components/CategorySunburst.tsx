@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, ArrowLeft, ChartPie } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, ArrowLeft, ChartPie, type LucideIcon } from "lucide-react";
 import { formatMoney, formatPct } from "../lib/format";
 import { colorForCategory, subcategoryColor } from "../lib/categoryColor";
-import { zenIconToEmoji } from "../lib/zenIconEmoji";
+import { zenIconToLucide } from "../lib/zenIconLucide";
 import { pluralOps } from "../lib/plural";
+import { useDrillStore } from "../store/useDrillStore";
 import { CategoryDot } from "./CategoryDot";
+import { KindSwitcher } from "./KindSwitcher";
 
 // A Budgera-style two-ring category donut: the inner ring is the top-level
 // categories (each with its glyph), the outer thin ring breaks every category
@@ -37,6 +39,8 @@ interface Props {
   meta: Meta;
   base: string;
   kind: "expense" | "income";
+  /** Toggle expense/income — drives the in-header «Расходы/Доходы» slider. */
+  onKindChange: (k: "expense" | "income") => void;
   /** Open the transactions list for a whole category. */
   onOpenCategory: (name: string) => void;
   /** Open the transactions list for a subcategory (full «Parent / Sub» path). */
@@ -76,6 +80,7 @@ export function CategorySunburst({
   meta,
   base,
   kind,
+  onKindChange,
   onOpenCategory,
   onOpenSubcategory,
 }: Props) {
@@ -91,6 +96,24 @@ export function CategorySunburst({
     setAnim("out");
     setDrill(null);
   };
+  // Esc pops back up one level — but only while drilled, and only when nothing
+  // else owns Esc: an open drawer closes itself, and a focused input (command
+  // palette, filter search) keeps its own Escape.
+  useEffect(() => {
+    if (!drill) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (useDrillStore.getState().open) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable))
+        return;
+      e.preventDefault();
+      setAnim("out");
+      setDrill(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drill]);
   // What the pointer is over: a category, or a specific subcategory.
   const [hover, setHover] = useState<{ cat: string; sub?: string } | null>(null);
   // Pointer over the centre hole (while drilled it's the «back» target).
@@ -123,7 +146,7 @@ export function CategorySunburst({
     ro: number;
     a0: number;
     a1: number;
-    glyph?: string | null;
+    Icon?: LucideIcon | null;
   }
 
   const slices = useMemo<Slice[]>(() => {
@@ -144,7 +167,7 @@ export function CategorySunburst({
         ro: SUB_R1,
         a0: 0,
         a1: TAU,
-        glyph: zenIconToEmoji(meta[drillNode.name]?.icon),
+        Icon: zenIconToLucide(meta[drillNode.name]?.icon),
       });
       const posSubs = drillNode.subs.filter((s) => s.total > 0);
       const subSum = posSubs.reduce((s, x) => s + x.total, 0);
@@ -165,7 +188,7 @@ export function CategorySunburst({
           ro: CAT_R1,
           a0: a + GAP / 2,
           a1: a + span - GAP / 2,
-          glyph: zenIconToEmoji(meta[sub.fullName]?.icon),
+          Icon: zenIconToLucide(meta[sub.fullName]?.icon),
         });
         a += span;
       });
@@ -204,7 +227,7 @@ export function CategorySunburst({
         ro: CAT_R1,
         a0: a + GAP / 2,
         a1: a + span - GAP / 2,
-        glyph: zenIconToEmoji(meta[c.name]?.icon),
+        Icon: zenIconToLucide(meta[c.name]?.icon),
       });
       // Outer subcategory band, subdivided within this category's own span.
       const posSubs = c.subs.filter((s) => s.total > 0);
@@ -279,25 +302,43 @@ export function CategorySunburst({
   // instead of an empty ring.
   if (cats.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center text-center gap-3 py-20 text-muted">
-        <span className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-panel2">
-          <ChartPie className="w-8 h-8 opacity-50" />
-        </span>
-        <div className="text-base font-medium text-text">
-          Нет {kind === "expense" ? "расходов" : "доходов"} за выбранный период
-        </div>
-        <div className="text-sm max-w-sm">
-          Измените период или фильтры сверху — и здесь появится разбивка по
-          категориям.
+      <div>
+        {/* Keep the slider reachable with no data, so the user can switch back
+            to the kind that DOES have operations. */}
+        <KindSwitcher kind={kind} onChange={onKindChange} />
+        <div className="flex flex-col items-center justify-center text-center gap-3 py-16 text-muted">
+          <span className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-panel2">
+            <ChartPie className="w-8 h-8 opacity-50" />
+          </span>
+          <div className="text-base font-medium text-text">
+            Нет {kind === "expense" ? "расходов" : "доходов"} за выбранный период
+          </div>
+          <div className="text-sm max-w-sm">
+            Измените период или фильтры сверху — и здесь появится разбивка по
+            категориям.
+          </div>
         </div>
       </div>
     );
   }
 
+  // «Развернуть все» (top level only): expand / collapse every category that
+  // has subcategories at once — mirrors the Bars view.
+  const expandableCats = cats.filter((c) => c.subs.some((s) => s.total > 0));
+  const allCatsOpen =
+    expandableCats.length > 0 && expandableCats.every((c) => expanded.has(c.name));
+
   return (
-    <div className="flex flex-col md:flex-row gap-6 items-start">
-      {/* ── Donut ─────────────────────────────────────────────────────── */}
-      <div className="relative shrink-0 mx-auto md:mx-0" style={{ width: 470, maxWidth: "100%" }}>
+    <div className="flex flex-col md:flex-row-reverse gap-8 items-start">
+      {/* ── Donut (right on desktop, on top when stacked) ──────────────── */}
+      {/* Grows to fill the space freed by the narrow table; the ring itself is
+          capped and centred so it stays a sensible size on very wide screens
+          instead of leaving big empty margins. */}
+      <div className="w-full md:flex-1 md:min-w-0 flex justify-center md:mt-2">
+        <div
+          className="relative w-full mx-auto"
+          style={{ maxWidth: 620 }}
+        >
         <svg
           key={effectiveDrill ?? "__top"}
           viewBox="0 0 320 320"
@@ -342,18 +383,16 @@ export function CategorySunburst({
                   strokeWidth={1}
                   style={{ transition: "fill-opacity 120ms" }}
                 />
-                {isInnerCat && big && !effectiveDrill && s.glyph && (
-                  <text
-                    x={gx}
-                    y={gy}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={17}
+                {isInnerCat && big && !effectiveDrill && s.Icon && (
+                  <s.Icon
+                    x={gx - 9}
+                    y={gy - 9}
+                    size={18}
+                    color="#fff"
+                    strokeWidth={2.25}
                     opacity={dim ? 0.25 : 1}
                     style={{ pointerEvents: "none" }}
-                  >
-                    {s.glyph}
-                  </text>
+                  />
                 )}
               </g>
             );
@@ -376,56 +415,89 @@ export function CategorySunburst({
         {/* «Назад» hint near the top of the hole — just the arrow (no label),
             shown while hovering the centre of a drilled ring; sits above the
             figures without covering them. */}
-        {effectiveDrill && hoverCenter && (
-          <div className="absolute left-1/2 -translate-x-1/2 top-[32%] pointer-events-none text-accent">
+        {effectiveDrill && (
+          <div
+            className={`absolute left-1/2 -translate-x-1/2 top-[32%] pointer-events-none text-accent transition-opacity ${
+              hoverCenter ? "opacity-100" : "opacity-70"
+            }`}
+          >
             <ArrowLeft className="w-6 h-6" strokeWidth={2.5} />
           </div>
         )}
+        </div>
       </div>
 
+      {/* Vertical divider between the table and the donut — full-height via
+          self-stretch, desktop only (hidden when the columns stack). */}
+      <div className="hidden md:block md:self-stretch w-px bg-border" aria-hidden />
+
       {/* ── Legend ────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Kind badge — visually distinct «Расходы»/«Доходы» pill + scope. */}
-        <div className="flex items-center gap-2 mb-1">
+      {/* Fixed, capped width pinned to the left — it does NOT grow, so all the
+          freed horizontal space goes to the donut rather than to empty
+          margins. */}
+      <div className="w-full md:w-[576px] md:shrink-0 min-w-0 flex flex-col">
+        {/* Just the «Расходы/Доходы» slider — no scope label. The donut centre
+            already shows «Все расходы» / the drilled category name + total, so a
+            breadcrumb here only repeats it. */}
+        <div className="mb-4">
+          <KindSwitcher kind={kind} onChange={onKindChange} />
+        </div>
+        <div className="mb-3">
           <span
-            className={`text-xs font-semibold px-2.5 py-1 rounded-full text-white ${
-              kind === "expense" ? "bg-expense" : "bg-income"
+            className={`inline-flex px-4 py-1 rounded-full text-3xl font-bold tabular-nums ${
+              kind === "expense" ? "bg-expense/15 text-expense" : "bg-income/15 text-income"
             }`}
           >
-            {kindWord}
+            {formatMoney(drillNode ? drillNode.total : total, base)}
           </span>
-          <span className="text-sm text-muted truncate">
-            {drillNode ? drillNode.name : "Все категории"}
-          </span>
-        </div>
-        <div className="text-3xl font-bold tabular-nums mb-3">
-          {formatMoney(drillNode ? drillNode.total : total, base)}
         </div>
 
         {/* Header + rows live in ONE scroll container, so the column widths
             stay identical even once the scrollbar appears (the header is
             sticky and shares the rows' exact content width). */}
         <div
-          className="overflow-y-auto pr-1 h-[400px]"
-          style={{ scrollbarGutter: "stable" }}
+          className="overflow-y-auto pr-1 h-[504px] flex flex-col"
+          // Obeys the «Размер текста в таблицах» slider (rows inherit; sub-text
+          // is em-relative), matching the Bars view and operation tables.
+          style={{ scrollbarGutter: "stable", fontSize: "var(--tbl-font)" }}
         >
-          <div className="sticky top-0 z-10 bg-panel flex items-center gap-2 px-1.5 pb-1 mb-1 border-b border-border text-[11px] text-muted uppercase tracking-wide">
+          <div className="shrink-0 sticky top-0 z-10 bg-panel flex items-center gap-2 px-1.5 pb-1 mb-1 border-b border-border text-[0.85em] text-muted uppercase tracking-wide">
             <span className="flex-1 min-w-0">Категория</span>
             <span className="w-14 text-left shrink-0">%</span>
             <span className="w-20 text-left shrink-0">Операции</span>
             <span className="w-28 text-left shrink-0">Сумма</span>
-            <span className="w-5 shrink-0" />
+            <span className="w-8 shrink-0 flex items-center justify-center">
+              {!effectiveDrill && expandableCats.length > 0 && (
+                <button
+                  onClick={() =>
+                    setExpanded(
+                      allCatsOpen ? new Set() : new Set(expandableCats.map((c) => c.name))
+                    )
+                  }
+                  title={allCatsOpen ? "Свернуть все" : "Развернуть все"}
+                  aria-label={allCatsOpen ? "Свернуть все" : "Развернуть все"}
+                  className="-m-1 p-1 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                >
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform duration-300 ${
+                      allCatsOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+              )}
+            </span>
           </div>
-          <div className="space-y-0.5 animate-fade" key={effectiveDrill ?? "__top"}>
+          <div className="shrink-0 space-y-0.5 animate-fade" key={effectiveDrill ?? "__top"}>
           {(effectiveDrill && drillNode ? [drillNode] : cats).map((c) => {
             const posSubs = c.subs.filter((s) => s.total > 0);
             const open = effectiveDrill ? true : expanded.has(c.name);
-            const glyph = zenIconToEmoji(meta[c.name]?.icon);
             const cc = color(c.name);
             return (
               <div key={c.name}>
                 <div
-                  className="flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-panel2/50 cursor-pointer"
+                  className={`flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-panel2/50 cursor-pointer ${
+                    hover?.cat === c.name ? "bg-panel2/50" : ""
+                  }`}
                   onMouseEnter={() => setHover({ cat: c.name })}
                   onMouseLeave={() => setHover(null)}
                   onClick={() =>
@@ -436,25 +508,20 @@ export function CategorySunburst({
                         : onOpenCategory(c.name)
                   }
                 >
-                  <span
-                    className="w-7 h-7 rounded-full shrink-0 inline-flex items-center justify-center text-sm"
-                    style={{ background: cc }}
-                  >
-                    {glyph}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-base">{c.name}</span>
-                  <span className="w-14 text-left text-sm text-muted tabular-nums shrink-0">
+                  <CategoryDot category={c.name} size="w-7 h-7" />
+                  <span className="flex-1 min-w-0 truncate">{c.name}</span>
+                  <span className="w-14 text-left tabular-nums shrink-0">
                     {formatPct(c.total / total, 1)}
                   </span>
-                  <span className="w-20 text-left text-sm text-muted tabular-nums shrink-0">
+                  <span className="w-20 text-left tabular-nums shrink-0">
                     {c.count}
                   </span>
-                  <span className="w-28 text-left text-base tabular-nums shrink-0">
+                  <span className="w-28 text-left tabular-nums shrink-0">
                     {formatMoney(c.total, base)}
                   </span>
                   {/* Chevron column — always reserved (invisible without subs)
                       so the amounts above stay aligned. */}
-                  <span className="w-5 shrink-0 flex items-center justify-center">
+                  <span className="w-8 shrink-0 flex items-center justify-center">
                     {!effectiveDrill && posSubs.length > 0 && (
                       <button
                         onClick={(e) => {
@@ -466,31 +533,39 @@ export function CategorySunburst({
                             return n;
                           });
                         }}
-                        className="text-muted hover:text-accent"
+                        className="p-1 rounded-md text-muted hover:text-accent hover:bg-panel2"
                         title={open ? "Свернуть" : "Подкатегории"}
                       >
                         {open ? (
-                          <ChevronDown className="w-4 h-4" />
+                          <ChevronDown className="w-5 h-5" />
                         ) : (
-                          <ChevronRight className="w-4 h-4" />
+                          <ChevronRight className="w-5 h-5" />
                         )}
                       </button>
                     )}
                   </span>
                 </div>
                 {open && posSubs.length > 0 && (
-                  <div className="mb-1 space-y-0.5">
+                  <div
+                    className="mb-2 space-y-0.5"
+                    style={{ marginLeft: "19px", borderLeft: `3px solid ${cc}` }}
+                  >
                     {posSubs.map((sub) => (
                       <div
                         key={sub.fullName}
-                        className="flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-panel2/50 cursor-pointer"
+                        className={`flex items-center gap-2 rounded-md pl-2 pr-1.5 py-1.5 hover:bg-panel2/50 cursor-pointer ${
+                          hover?.cat === c.name && hover?.sub === sub.name
+                            ? "bg-panel2/50"
+                            : ""
+                        }`}
                         onMouseEnter={() => setHover({ cat: c.name, sub: sub.name })}
                         onMouseLeave={() => setHover(null)}
                         onClick={() => onOpenSubcategory(sub.fullName)}
                       >
-                        {/* Full-size icon badge (own icon/colour, else parent's
-                            colour), nudged in from the left to read as a child. */}
-                        <span className="pl-3 shrink-0">
+                        {/* Icon badge (own icon/colour, else the parent's). The
+                            coloured rail on the left already groups these rows as
+                            the category's children. */}
+                        <span className="shrink-0">
                           <CategoryDot
                             category={sub.name}
                             parent={c.name}
@@ -498,19 +573,19 @@ export function CategorySunburst({
                             size="w-6 h-6"
                           />
                         </span>
-                        <span className="flex-1 min-w-0 truncate text-base text-muted">
+                        <span className="flex-1 min-w-0 truncate text-muted">
                           {sub.name}
                         </span>
-                        <span className="w-14 text-left text-sm text-muted tabular-nums shrink-0">
+                        <span className="w-14 text-left text-muted tabular-nums shrink-0">
                           {formatPct(sub.total / total, 1)}
                         </span>
-                        <span className="w-20 text-left text-sm text-muted tabular-nums shrink-0">
+                        <span className="w-20 text-left text-muted tabular-nums shrink-0">
                           {sub.count}
                         </span>
-                        <span className="w-28 text-left text-base tabular-nums shrink-0">
+                        <span className="w-28 text-left text-muted tabular-nums shrink-0">
                           {formatMoney(sub.total, base)}
                         </span>
-                        <span className="w-5 shrink-0" />
+                        <span className="w-8 shrink-0" />
                       </div>
                     ))}
                   </div>
@@ -519,6 +594,32 @@ export function CategorySunburst({
             );
           })}
           </div>
+          {/* Empty area below the (often short) drilled list is a silent
+              «back» target — clicking it pops up one level (mirrors Esc, the
+              donut centre and the «Все категории» button below). No tooltip or
+              hover tint: just a convenient extra hit area that grows to push the
+              explicit button to the bottom. */}
+          {effectiveDrill && (
+            <button
+              type="button"
+              onClick={() => drillOut()}
+              aria-label="Назад ко всем категориям"
+              className="flex-1 min-h-[44px] w-full"
+            />
+          )}
+          {/* Explicit «up one level» control — wide and understated, pinned to
+              the bottom of the drilled list. Esc and the empty-area click above
+              do the same thing. */}
+          {effectiveDrill && (
+            <button
+              type="button"
+              onClick={() => drillOut()}
+              className="shrink-0 w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-border/50 text-[0.85em] text-muted hover:text-text hover:bg-panel2/50 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Все категории
+            </button>
+          )}
         </div>
       </div>
     </div>

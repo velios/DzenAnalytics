@@ -33,7 +33,7 @@ export const BACKUP_META_KEYS = [
   "savedViews",
   "annotations", // legacy — feature archived (see archive/annotations); data preserved
   "categoryFlags", // legacy — kept so old backups round-trip
-  "inflation",
+  "inflation", // legacy — feature removed; kept so old backups round-trip
   "payeeGrouping",
   "payeeAliases",
   "reportPeriod",

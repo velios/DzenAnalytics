@@ -72,3 +72,34 @@ describe("applyDiff — orphan transaction pruning", () => {
     expect(next.transactions.map((t) => t.id)).toEqual(["t1"]);
   });
 });
+
+describe("applyDiff — transaction deletions", () => {
+  // The push flow folds the deletions IT sent into the merge (the Zenmoney
+  // response doesn't echo our own deletions), so the just-deleted rows must
+  // drop from the local cache immediately — otherwise they linger as
+  // «Удалено» pending until the next full sync.
+  it("drops a transaction carried in the diff's `deletion` array", () => {
+    const prev = cache({
+      accounts: [acc("A")],
+      transactions: [txn("t1", "A", "A"), txn("t2", "A", "A")],
+    });
+    const diff = {
+      serverTimestamp: 2,
+      deletion: [del("t2", "transaction")],
+    } as ZenDiffResponse;
+    const next = applyDiff(prev, diff);
+    expect(next.transactions.map((t) => t.id)).toEqual(["t1"]);
+  });
+
+  it("keeps other rows and just drops the deleted ones", () => {
+    const prev = cache({
+      accounts: [acc("A")],
+      transactions: [txn("t1", "A", "A"), txn("t2", "A", "A"), txn("t3", "A", "A")],
+    });
+    const diff = {
+      serverTimestamp: 2,
+      deletion: [del("t1", "transaction"), del("t3", "transaction")],
+    } as ZenDiffResponse;
+    expect(applyDiff(prev, diff).transactions.map((t) => t.id)).toEqual(["t2"]);
+  });
+});

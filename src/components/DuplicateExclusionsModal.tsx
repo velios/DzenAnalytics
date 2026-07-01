@@ -109,30 +109,30 @@ export function DuplicateExclusionsModal({ onClose }: { onClose: () => void }) {
               По запросу ничего не найдено.
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-base">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-muted text-left">
-                  <th className="font-normal py-1.5 pr-2">Получатель</th>
-                  <th className="font-normal py-1.5 px-2">Тип</th>
-                  <th className="font-normal py-1.5 px-2">Категория</th>
-                  <th className="font-normal py-1.5 px-2 text-right">Сумма</th>
-                  <th className="w-6" />
+                <tr>
+                  <th className="table-th">Получатель</th>
+                  <th className="table-th">Тип</th>
+                  <th className="table-th">Категория</th>
+                  <th className="table-th text-right">Сумма</th>
+                  <th className="table-th w-6" aria-hidden />
                 </tr>
               </thead>
               <tbody>
                 {list.map((r) => (
-                  <tr key={r.signature} className="border-t border-border/40">
-                    <td className="py-2 pr-2 max-w-[240px] truncate" title={r.payee || "Без получателя"}>
+                  <tr key={r.signature} className="align-middle">
+                    <td className="table-td max-w-[240px] truncate" title={r.payee || "Без получателя"}>
                       {r.payee || "Без получателя"}
                     </td>
-                    <td className="py-2 px-2 text-muted whitespace-nowrap capitalize">{kindLabel(r.kind)}</td>
-                    <td className="py-2 px-2 max-w-[200px] truncate text-muted" title={r.category || ""}>
+                    <td className="table-td text-muted whitespace-nowrap capitalize">{kindLabel(r.kind)}</td>
+                    <td className="table-td max-w-[200px] truncate text-muted" title={r.category || ""}>
                       {r.category || "—"}
                     </td>
-                    <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap">
+                    <td className="table-td text-right tabular-nums whitespace-nowrap">
                       {formatMoney(r.amount, r.currency)}
                     </td>
-                    <td className="py-2 text-right">
+                    <td className="table-td text-right">
                       <button
                         onClick={() => remove(r.signature)}
                         className="p-1 text-muted hover:text-expense shrink-0"

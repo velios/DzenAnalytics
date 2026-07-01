@@ -256,7 +256,7 @@ export function UncategorizedPage() {
                     }
                   />
                   <div className="text-xs text-muted whitespace-nowrap tabular-nums w-20">
-                    {formatDate(s.date, "short")}
+                    {formatDate(s.date, "full")}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="truncate font-medium">{s.payee || "—"}</div>
@@ -345,7 +345,7 @@ export function UncategorizedPage() {
                   sortValue: (t) => t.date,
                   render: (t) => (
                     <span className="whitespace-nowrap text-muted">
-                      {formatDate(t.date, "short")}
+                      {formatDate(t.date, "full")}
                     </span>
                   ),
                 },

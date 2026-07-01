@@ -1,7 +1,7 @@
 import { useEffect, type ComponentType } from "react";
 import { HandCoins, ArrowLeftRight } from "lucide-react";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
-import { zenIconToEmoji } from "../lib/zenIconEmoji";
+import { zenIconToLucide } from "../lib/zenIconLucide";
 import { SYNTHETIC_CATEGORY_COLORS, fallbackColorForName } from "../lib/categoryColor";
 
 interface Props {
@@ -54,6 +54,11 @@ export function CategoryDot({
   // icon per sub), falling back to the bare title.
   const fullKey = parent ? `${parent} / ${category}` : category;
   const meta = useCategoryMetaStore((s) => s.meta[fullKey] ?? s.meta[category]);
+  // A sub-tag without its own colour inherits the parent's, so a category and
+  // its children read as one family (matches the legend's explicit fallback).
+  const parentColor = useCategoryMetaStore((s) =>
+    parent ? s.meta[parent]?.color ?? null : null
+  );
   const loaded = useCategoryMetaStore((s) => s.loaded);
   const hydrate = useCategoryMetaStore((s) => s.hydrate);
   useEffect(() => {
@@ -77,7 +82,7 @@ export function CategoryDot({
         className={`inline-flex items-center justify-center rounded-full shrink-0 text-white ${size}`}
         style={{ background: synthetic.color }}
       >
-        <Icon className="w-3 h-3" />
+        <Icon className="w-3/5 h-3/5" />
       </span>
     );
   }
@@ -86,24 +91,27 @@ export function CategoryDot({
   // from the name — so every category gets a stable, consistent swatch even
   // when Zenmoney didn't assign one (or in CSV mode). `hideEmpty` still wins
   // for callers that genuinely want nothing when there's no real meta.
-  const emoji = zenIconToEmoji(meta?.icon);
+  // A stable module-level lookup (always the same component for a given icon
+  // id), not a component created per render.
+  const Icon = zenIconToLucide(meta?.icon);
   const color =
-    meta?.color ?? fallback ?? (hideEmpty ? null : fallbackColorForName(fullKey));
+    meta?.color ?? fallback ?? parentColor ?? (hideEmpty ? null : fallbackColorForName(fullKey));
 
-  if (!color && !emoji) {
+  if (!color && !Icon) {
     return null;
   }
 
-  // With an icon → coloured circle + emoji inside. Without an icon → just a
-  // small coloured dot. Emoji-only (no colour) is uncommon but rendered too.
-  if (emoji) {
+  // With an icon → coloured circle + white Lucide glyph inside (zerro-style).
+  // Without an icon → just a plain coloured dot.
+  if (Icon) {
     return (
       <span
         aria-hidden
-        className={`inline-flex items-center justify-center rounded-full shrink-0 text-[11px] leading-none ${size}`}
+        className={`inline-flex items-center justify-center rounded-full shrink-0 text-white ${size}`}
         style={{ background: color || "rgb(148, 163, 184)" }}
       >
-        <span className="drop-shadow-sm">{emoji}</span>
+        {/* eslint-disable-next-line react-hooks/static-components -- stable lookup */}
+        <Icon className="w-3/5 h-3/5" strokeWidth={2.25} />
       </span>
     );
   }

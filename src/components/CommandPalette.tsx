@@ -27,7 +27,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  Camera,
   Trash2,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
@@ -132,13 +131,6 @@ export function CommandPalette({ open, onClose }: Props) {
       { id: "theme:light", group: "Действия", title: "Светлая тема", icon: Sun, action: () => setMode("light") },
       { id: "theme:dark", group: "Действия", title: "Тёмная тема", icon: Moon, action: () => setMode("dark") },
       { id: "theme:auto", group: "Действия", title: "Тема: авто", icon: Monitor, action: () => setMode("auto") },
-      {
-        id: "snapshot",
-        group: "Действия",
-        title: "Снимок дашборда (PNG)",
-        icon: Camera,
-        action: () => nav("/"),
-      },
       {
         id: "filter:reset",
         group: "Действия",

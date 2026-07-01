@@ -1012,10 +1012,22 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       );
 
       // 4) Merge server response into local cache so subsequent diffs
-      //    are anchored to the post-push state. `applyDiff` handles
-      //    upserts + deletions identically for push echoes and regular
-      //    pulls — the same shape comes back.
-      const nextCache = applyDiff(cache, response);
+      //    are anchored to the post-push state.
+      //
+      //    IMPORTANT: the Zenmoney `/v8/diff/` response does NOT echo back the
+      //    deletions WE just sent — its `deletion` array only reports rows
+      //    deleted by OTHER clients since our `serverTimestamp`. So without
+      //    folding our own (now server-accepted) deletions into the merge, the
+      //    just-deleted rows stay LIVE in the local cache until the next full
+      //    sync pulls the tombstone. That made a pushed deletion keep showing
+      //    as «Удалено» in the pending-changes list and keep the pending badge
+      //    lit, as if it never synced. The push returned 200 → the server
+      //    accepted these deletions → apply them to the cache now. (Idempotent:
+      //    if the server ever DID echo them, `applyDeletions` dedups by id.)
+      const nextCache = applyDiff(cache, {
+        ...response,
+        deletion: [...(response.deletion ?? []), ...deletions],
+      });
       await saveZenCache(nextCache);
 
       // Prune snapshots that are no longer needed:
