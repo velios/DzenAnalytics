@@ -19,6 +19,10 @@ export interface HealthComponent {
   status: HealthStatus;
   detail: string;    // what is measured, plain-language
   hint: string;      // advice when score is poor / fair
+  /** Optional secondary, purely informational figure shown under the card —
+   *  does NOT affect the score. Used by «Подушка безопасности» to also show
+   *  the runway on OBLIGATORY-only spending (issue #32). */
+  extra?: { label: string; value: string; hint?: string };
 }
 
 export interface HealthScore {
@@ -114,6 +118,22 @@ function computeEmergencyFund(opts: ComputeOptions): HealthComponent {
   const avgExpense = mean(recent.map((m) => m.expense));
   const coverage = avgExpense > 0 ? liquid / avgExpense : 0;
 
+  // Runway on OBLIGATORY spending over the last 12 months (issue #32). In a
+  // real emergency the discretionary spend is the first thing cut, so the
+  // savings actually last longer than the all-expenses figure suggests — this
+  // «worst-case survival» number divides the same liquid cushion by the
+  // average MONTHLY obligatory expense across up to 12 recent months.
+  const last12 = months.slice(-12);
+  const last12Set = new Set(last12.map((m) => m.ym));
+  const last12Txs = opts.transactions.filter((t) =>
+    last12Set.has(t.date.slice(0, 7))
+  );
+  const obligatory12 = splitByObligation(last12Txs, opts.categoryMeta).obligatory;
+  const avgMonthlyObligatory =
+    last12.length > 0 ? obligatory12 / last12.length : 0;
+  const obligatoryCoverage =
+    avgMonthlyObligatory > 0 ? liquid / avgMonthlyObligatory : 0;
+
   // Target: 6 months. Score: 0 → 0, 6 → 100, clamp.
   const score = clamp((coverage / 6) * 100);
 
@@ -126,6 +146,14 @@ function computeEmergencyFund(opts: ComputeOptions): HealthComponent {
     status: avgExpense <= 0 ? "na" : classify(score),
     detail:
       "Сколько месяцев средних расходов покрывает текущий баланс — включая забалансовые накопительные счета.",
+    extra:
+      avgMonthlyObligatory > 0
+        ? {
+            label: "Хватит по обязательным тратам",
+            value: `${obligatoryCoverage.toFixed(1)} мес`,
+            hint: "Если в кризис урезать всё необязательное — на сколько месяцев хватит накоплений при средних обязательных расходах за последние 12 месяцев.",
+          }
+        : undefined,
     hint:
       coverage < 1
         ? "Меньше месяца! Это критично — отложите подушку как первоочередную цель."

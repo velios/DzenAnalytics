@@ -39,7 +39,15 @@ export function useNetWorthSeries(
   return useMemo(() => {
     if (liveAccounts && liveAccounts.length > 0) {
       const basis = netWorthBasis(liveAccounts, txs, rates, includeOffBalance);
-      return netWorthSeries(txs, null, basis);
+      // Opening balances give the curve its SHAPE, but a manual calibration —
+      // when the user set one — is their ground-truth current balance and MUST
+      // still win. Passing `null` here used to silently drop it: once the live
+      // accounts loaded (async), the chart flipped from the correct calibrated
+      // value to the raw opening-seeded total, which can be off (e.g. an
+      // account with a bogus 1970 `startDate`, or an off-balance mismatch vs
+      // Zenmoney's headline). Anchoring to the calibration cancels any such
+      // offset and kills the «верный → завышенный» flicker.
+      return netWorthSeries(txs, calibration, basis);
     }
     // CSV / no cache — keep the manual-calibration behaviour.
     return netWorthSeries(txs, calibration);
