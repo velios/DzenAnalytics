@@ -3,6 +3,9 @@ import {
   X,
   Search,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeftRight,
   Download,
   Sparkles,
   Tag,
@@ -18,6 +21,7 @@ import { useDraftsStore } from "../store/useDraftsStore";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { CategoryDot } from "./CategoryDot";
+import { Tooltip } from "./Tooltip";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { BulkEditModal } from "./BulkEditModal";
 import { confirmBulkDelete } from "../lib/confirmBulkDelete";
@@ -209,6 +213,21 @@ export function TransactionsDrawer() {
     return { inc, exp, net: inc - exp };
   }, [sorted]);
 
+  // Sums of the currently-selected rows, split by kind — shown in the bulk bar.
+  const selectedTotals = useMemo(() => {
+    let inc = 0;
+    let exp = 0;
+    let xfer = 0;
+    for (const t of sorted) {
+      if (!selected.has(t.id)) continue;
+      if (t.kind === "income") inc += t.amountBase;
+      else if (t.kind === "expense") exp += t.amountBase;
+      else if (t.kind === "refund") exp -= t.amountBase;
+      else if (t.kind === "transfer") xfer += t.amountBase;
+    }
+    return { inc, exp, xfer };
+  }, [sorted, selected]);
+
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -255,18 +274,19 @@ export function TransactionsDrawer() {
             {title}
           </div>
         </div>
-        <button
-          onClick={close}
-          className="btn-ghost text-sm shrink-0"
-          aria-label="Закрыть (Esc)"
-          title="Закрыть (Esc)"
-        >
-          <X className="w-4 h-4" />
-          <span>Закрыть</span>
-          <kbd className="ml-1 px-1.5 py-0.5 text-[10px] rounded bg-panel2 border border-border font-mono">
-            Esc
-          </kbd>
-        </button>
+        <Tooltip content="Закрыть (Esc)">
+          <button
+            onClick={close}
+            className="btn-ghost text-sm shrink-0"
+            aria-label="Закрыть (Esc)"
+          >
+            <X className="w-4 h-4" />
+            <span>Закрыть</span>
+            <kbd className="ml-1 px-1.5 py-0.5 text-[10px] rounded bg-panel2 border border-border font-mono">
+              Esc
+            </kbd>
+          </button>
+        </Tooltip>
       </div>
 
         {transactions.length === 1 && (
@@ -522,25 +542,53 @@ export function TransactionsDrawer() {
         <div
           role="region"
           aria-label="Массовые действия"
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[55] flex flex-wrap items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-panel shadow-xl max-w-[calc(100vw-1.5rem)]"
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[55] rounded-xl border border-border bg-panel shadow-xl max-w-[calc(100vw-1.5rem)] overflow-hidden"
         >
-          <span className="text-sm">
-            Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
-          </span>
-          <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
-            <Pencil className="w-3.5 h-3.5" />
-            Изменить
-          </button>
-          <button onClick={deleteBulk} className="btn-danger text-sm">
-            <Trash2 className="w-3.5 h-3.5" />
-            Удалить
-          </button>
-          <button
-            onClick={() => setSelected(new Set())}
-            className="btn-ghost text-sm text-muted"
-          >
-            Снять выделение
-          </button>
+          {/* Row 1: count + per-kind sums of the selection. */}
+          <div className="flex items-center justify-center gap-x-4 gap-y-1 flex-wrap px-4 pt-2.5 pb-2 text-sm">
+            <span>
+              Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
+            </span>
+            {(selectedTotals.inc > 0 || selectedTotals.exp > 0 || selectedTotals.xfer > 0) && (
+              <span className="flex items-center gap-3 tabular-nums border-l border-border pl-4">
+                {selectedTotals.inc > 0 && (
+                  <span className="flex items-center gap-1 text-income">
+                    <ArrowUp className="w-3.5 h-3.5" />
+                    {formatMoney(selectedTotals.inc, base)}
+                  </span>
+                )}
+                {selectedTotals.exp > 0 && (
+                  <span className="flex items-center gap-1 text-expense">
+                    <ArrowDown className="w-3.5 h-3.5" />
+                    {formatMoney(selectedTotals.exp, base)}
+                  </span>
+                )}
+                {selectedTotals.xfer > 0 && (
+                  <span className="flex items-center gap-1 text-muted">
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    {formatMoney(selectedTotals.xfer, base)}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+          {/* Row 2: actions. */}
+          <div className="flex items-center justify-center gap-2 flex-wrap px-4 pb-2.5 pt-2 border-t border-border">
+            <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
+              <Pencil className="w-3.5 h-3.5" />
+              Изменить
+            </button>
+            <button onClick={deleteBulk} className="btn-danger text-sm">
+              <Trash2 className="w-3.5 h-3.5" />
+              Удалить
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="btn-ghost text-sm text-muted"
+            >
+              Снять выделение
+            </button>
+          </div>
         </div>
       )}
 
