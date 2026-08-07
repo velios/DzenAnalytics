@@ -17,17 +17,23 @@ import { currencySymbol } from "../lib/format";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
 import { getLiveAccountsFromCache, getCategoryTagsFromCache } from "../store/useZenmoneyStore";
+import { accountOptions } from "../lib/accountOptions";
 import { useFiltersStore, type DatePreset } from "../store/useFiltersStore";
 import type { PeriodController } from "../hooks/useLocalPeriod";
 import { FiltersMenu } from "./FiltersMenu";
 import { NO_CATEGORY } from "../lib/zenmoneyMap";
 import { currencyFlagEmoji } from "../lib/currencyFlag";
 
-const PRESETS: { value: DatePreset; label: string }[] = [
+const PRESETS: { value: DatePreset; label: string; title?: string }[] = [
   { value: "30d", label: "30 дней" },
   { value: "3m", label: "3 мес" },
   { value: "6m", label: "6 мес" },
   { value: "12m", label: "12 мес" },
+  {
+    value: "year",
+    label: "Год",
+    title: "Календарный год целиком — листается стрелками, в отличие от скользящих «12 мес»",
+  },
   { value: "ytd", label: "С начала года" },
   { value: "all", label: "Всё" },
 ];
@@ -131,21 +137,19 @@ export function GlobalFilters({
     };
   }, [transactions, setOffBalanceAccounts]);
 
-  const accounts = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of transactions) if (t.account) set.add(t.account);
-    // Архивные — вниз; внутри активных группируем по виду счёта, чтобы список
-    // читался так же, как страница «Счета». Внутри вида — по алфавиту.
-    return Array.from(set).sort((a, b) => {
-      const aa = archivedAccounts.has(a);
-      const ba = archivedAccounts.has(b);
-      if (aa !== ba) return aa ? 1 : -1;
-      const ka = accountKinds.get(a) ?? "";
-      const kb = accountKinds.get(b) ?? "";
-      if (ka !== kb) return ka.localeCompare(kb, "ru");
-      return a.localeCompare(b, "ru");
-    });
-  }, [transactions, archivedAccounts, accountKinds]);
+  // Список счетов — операции ПЛЮС справочник Дзен-мани: счёт без операций в
+  // загруженных данных на странице «Счета» есть, и в отборе он тоже должен
+  // быть (issue #67). `accountKinds` знает все счета справочника и пуст в
+  // режиме CSV — там остаются одни операции.
+  const accounts = useMemo(
+    () =>
+      accountOptions(
+        transactions.map((t) => t.account),
+        accountKinds.keys(),
+        { archived: archivedAccounts, kinds: accountKinds }
+      ),
+    [transactions, archivedAccounts, accountKinds]
+  );
 
   /** Заголовок группы для пикера счетов: архивные идут под своим разделителем,
    *  который рисует сам MultiSelect, поэтому им группу не назначаем. */
@@ -239,10 +243,10 @@ export function GlobalFilters({
     };
   }, [transactions]);
 
+  // Год якорится тем же `monthYM`, поэтому пикеру он подходит как есть.
+  const anchored = periodCtl.preset === "month" || periodCtl.preset === "year";
   const currentMonthYM =
-    periodCtl.preset === "month" && periodCtl.monthYM
-      ? periodCtl.monthYM
-      : dataRange.maxYM;
+    anchored && periodCtl.monthYM ? periodCtl.monthYM : dataRange.maxYM;
 
   // Default preset is now "current month"; treat anything else as user-set.
   const now = new Date();
@@ -418,6 +422,7 @@ export function GlobalFilters({
                 <button
                   key={p.value}
                   onClick={() => periodCtl.setPreset(p.value)}
+                  title={p.title}
                   className={clsx(
                     // No weight change on active — keeps the control width stable.
                     "px-2 py-1 text-xs rounded-md transition-colors",
@@ -439,9 +444,11 @@ export function GlobalFilters({
                 value={currentMonthYM}
                 minYM={dataRange.minYM}
                 maxYM={dataRange.maxYM}
-                active={periodCtl.preset === "month"}
+                active={anchored}
+                mode={periodCtl.preset === "year" ? "year" : "month"}
                 onSelect={(ym) => periodCtl.setMonth(ym)}
-                onStep={(dir) => periodCtl.stepMonth(dir, dataRange.maxYM)}
+                onSelectYear={(y) => periodCtl.setYear(y)}
+                onStep={(dir) => periodCtl.stepPeriod(dir, dataRange.maxYM)}
               />
 
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
