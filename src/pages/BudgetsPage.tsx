@@ -19,6 +19,8 @@ import {
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { getZenForecastsFromCache } from "../store/useZenmoneyStore";
+import { loadZenCache } from "../lib/zenmoneyCache";
+import { plannedOps, type PlannedOp } from "../lib/plannedOps";
 import { zenPlanKey } from "../lib/zenBudgets";
 import { useBudgetsStore } from "../store/useBudgetsStore";
 import { useBudgetEditsStore } from "../store/useBudgetEditsStore";
@@ -33,7 +35,12 @@ import { BudgetSettingsPopover } from "../components/BudgetSettingsPopover";
 import { buildBudgetYear } from "../lib/budgetYear";
 import { buildBudgetDashboard } from "../lib/budgetDashboard";
 import { BudgetDashboardPrint } from "../components/BudgetDashboardPrint";
-import { budgetHits, insidePerimeter, transactionsForCell } from "../lib/budgetScope";
+import {
+  budgetHits,
+  insidePerimeter,
+  transactionsForCell,
+  TRANSFER_CATEGORY,
+} from "../lib/budgetScope";
 import { useBudgetSettingsStore } from "../store/useBudgetSettingsStore";
 import { Segmented } from "../components/Segmented";
 import { Tooltip } from "../components/Tooltip";
@@ -44,6 +51,8 @@ import {
   forecastFor,
   addMonths,
   budgetTone,
+  ownSubsIndex,
+  ownSubsFor,
   type BudgetKind,
   type BudgetLine,
 } from "../lib/budgets";
@@ -78,6 +87,7 @@ interface Row {
 export function BudgetsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
+  const rates = useDataStore((s) => s.rates);
   const showDrill = useDrillStore((s) => s.show);
   const lines = useBudgetsStore((s) => s.lines);
   const addLine = useBudgetsStore((s) => s.addLine);
@@ -131,6 +141,21 @@ export function BudgetsPage() {
     };
   }, [transactions]);
 
+  // Запланированные операции Дзен-мани этого месяца, разложенные по дням: на
+  // графике они видны ступенькой в свой день, а не размазаны до конца месяца
+  // (issue #72). Прогнозы самого Дзена не берём — это не назначенная дата, а
+  // достроенная регулярность, обещать её конкретным днём неправильно.
+  const [zenPlanned, setZenPlanned] = useState<PlannedOp[]>([]);
+  useEffect(() => {
+    let alive = true;
+    loadZenCache().then((c) => {
+      if (alive) setZenPlanned(plannedOps(c, rates));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [transactions, rates]);
+
   const cur = currentMonth();
   const [ym, setYm] = useState(cur);
   const isCurrent = ym === cur;
@@ -139,6 +164,26 @@ export function BudgetsPage() {
   const monthProgress = isCurrent
     ? new Date().getDate() / daysInMonth(ym)
     : 1;
+
+  const plannedByDay = useMemo(() => {
+    const days = daysInMonth(ym);
+    const income = new Array(days + 1).fill(0);
+    const expense = new Array(days + 1).fill(0);
+    // Периметр счетов действует и на планы: если бюджет сужен до карты, чужой
+    // счёт не должен подрисовывать ступеньку на графике. Пустой периметр —
+    // все счета, как и везде в разделе.
+    const inScope = (account: string) =>
+      scope.accounts.size === 0 || scope.accounts.has(account);
+    for (const p of zenPlanned) {
+      if (p.forecast || !p.date.startsWith(ym)) continue;
+      if (!inScope(p.account)) continue;
+      const d = Number(p.date.slice(8, 10));
+      if (!(d >= 1 && d <= days)) continue;
+      if (p.kind === "income") income[d] += p.amountBase;
+      else if (p.kind === "expense") expense[d] += p.amountBase;
+    }
+    return { income, expense };
+  }, [zenPlanned, ym, scope]);
 
   // ── Inline add: a draft row inside the «Расходы»/«Доходы» section ──
   const [draftKind, setDraftKind] = useState<BudgetKind | null>(null);
@@ -373,6 +418,9 @@ export function BudgetsPage() {
     }
   }
 
+  /** Под-категории со своим бюджетом — по ним строка категории не задваивает. */
+  const ownSubs = useMemo(() => ownSubsIndex(lines), [lines]);
+
   const rows = useMemo<Row[]>(() => {
     const inWindow = lines
       // A line belongs to a month only while it's inside its validity window
@@ -383,7 +431,9 @@ export function BudgetsPage() {
       )
       .map((line): Row => {
         const planned = plannedFor(line, ym);
-        const fact = factFor(line, transactions, ym, scope);
+        // Строка категории забирает и траты по её под-категориям — кроме тех, у
+        // которых есть свой бюджет (issue #70).
+        const fact = factFor(line, transactions, ym, scope, ownSubsFor(ownSubs, line));
         // Income with no manual plan → show a forecast «≈ из X». In API mode use
         // ZENMONEY's own auto-forecast (so numbers match Дзен, and tags Дзен
         // doesn't forecast get no phantom «≈»); in CSV mode fall back to a local
@@ -462,8 +512,25 @@ export function BudgetsPage() {
     const shown = new Set(
       rows.map((r) => budgetKey(r.line.kind, r.line.category, r.line.subcategory ?? null))
     );
+    // Под-категория не «без бюджета», если план есть у её КАТЕГОРИИ: эти траты
+    // уже проедают родительский план и показаны в нём (#70). Иначе одни и те же
+    // деньги стояли бы на экране дважды — в строке «Медицина» и здесь же
+    // отдельной строкой «Медицина / Лекарства».
+    const parentBudgeted = (u: { kind: BudgetKind; category: string; subcategory: string | null }) =>
+      u.subcategory !== null && shown.has(budgetKey(u.kind, u.category, null));
     return [...agg.values()]
-      .filter((u) => u.fact > 0 && !shown.has(budgetKey(u.kind, u.category, u.subcategory)))
+      .filter(
+        (u) =>
+          u.fact > 0 &&
+          // Переводы планировать нельзя и не нужно. «Переводы» — наша
+          // собственная статья, в справочнике Дзен-мани такого тега нет:
+          // заведённый по ней план навсегда завис бы неотправленным. Да и по
+          // сути перевод между своими счетами не доход и не расход — его
+          // показывают, чтобы видеть обороты, а не чтобы на него планировать.
+          u.category !== TRANSFER_CATEGORY &&
+          !shown.has(budgetKey(u.kind, u.category, u.subcategory)) &&
+          !parentBudgeted(u)
+      )
       .sort((a, b) => b.fact - a.fact);
   }, [transactions, ym, rows]);
 
@@ -733,6 +800,8 @@ export function BudgetsPage() {
         onDayClick={openDay}
         plannedIncome={incPlan}
         plannedExpense={expPlan}
+        plannedIncomeByDay={plannedByDay.income}
+        plannedExpenseByDay={plannedByDay.expense}
       />
 
       <div className="space-y-6">
@@ -992,9 +1061,17 @@ function Section({ heading, rows, base, headerAction, prepend, ...rest }: Sectio
           rollupFact={
             hasSubs ? parent.fact + g.subs.reduce((s, r) => s + r.fact, 0) : undefined
           }
+          // План категории — это план ВСЕЙ категории, а не добавка к планам
+          // под-категорий. Раньше они складывались: при «Кот 10 000» и «Собака
+          // 25 000» строка «Животные» показывала 35 000, а стоило поставить ей
+          // 37 000 — становилось 72 000. Человек имеет в виду другое: вся
+          // категория стоит 37 000, из них 35 000 уже расписаны. Своего плана
+          // нет — показываем сумму под-категорий, как и раньше.
           rollupPlanned={
             hasSubs
-              ? parent.planned + g.subs.reduce((s, r) => s + r.planned, 0)
+              ? parent.planned > 0
+                ? parent.planned
+                : g.subs.reduce((s, r) => s + r.planned, 0)
               : undefined
           }
           {...rest}

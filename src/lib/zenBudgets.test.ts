@@ -146,7 +146,7 @@ describe("planned operations folding (unlocked budgets)", () => {
   });
 
   it("adds planned income to an UNLOCKED budget (Работа: −22000 + 145000 = 123000)", () => {
-    const planned = plannedOpsByTagMonth([marker({ income: 145000 })], [rub], 2);
+    const planned = plannedOpsByTagMonth([marker({ income: 145000 })], [rub], 2, "2026-07-01");
     const m = zenPlansFromBudgets(
       [budget({ tag: "work", income: -22000, incomeLock: false, date: "2026-07-01" })],
       tags,
@@ -156,7 +156,7 @@ describe("planned operations folding (unlocked budgets)", () => {
   });
 
   it("a LOCKED budget ignores planned ops (exact amount)", () => {
-    const planned = plannedOpsByTagMonth([marker({ income: 145000 })], [rub], 2);
+    const planned = plannedOpsByTagMonth([marker({ income: 145000 })], [rub], 2, "2026-07-01");
     const m = zenPlansFromBudgets(
       [budget({ tag: "work", income: 130000, incomeLock: true, date: "2026-07-01" })],
       tags,
@@ -172,7 +172,8 @@ describe("planned operations folding (unlocked budgets)", () => {
         marker({ id: "b", income: 50000, state: "processed" }),
       ],
       [rub],
-      2
+      2,
+      "2026-07-01"
     );
     expect(planned.get("work|2026-07")?.income).toBe(100000);
   });
@@ -181,7 +182,8 @@ describe("planned operations folding (unlocked budgets)", () => {
     const planned = plannedOpsByTagMonth(
       [marker({ income: 1000, incomeInstrument: 1 })], // 1000 USD
       [rub, usd],
-      2 // base RUB
+      2, // base RUB
+      "2026-07-01"
     );
     expect(planned.get("work|2026-07")?.income).toBe(90000); // 1000 * 90 / 1
   });
@@ -212,5 +214,71 @@ describe("zenPlanList", () => {
       ym: "2026-05",
       amount: 3000,
     });
+  });
+});
+
+describe("живой случай «Работа»: сложение верно, мешают застрявшие планы", () => {
+  const tagsWork = [tag("work", "Работа")];
+  const rubW: ZenInstrument = { id: 2, title: "RUB", shortTitle: "RUB", symbol: "₽", rate: 1 };
+  const mk = (id: string, income: number, date: string): ZenReminderMarker => ({
+    id, user: 1, changed: 0, date, income, incomeInstrument: 2, outcome: 0,
+    outcomeInstrument: 2, tag: ["work"], reminder: "r" + id, state: "planned",
+  });
+
+  it("план 145 000 плюс запланированный аванс 160 000 дают 305 000, как в Дзен-мани", () => {
+    const planned = plannedOpsByTagMonth([mk("аванс", 160000, "2026-08-25")], [rubW], 2, "2026-08-01");
+    const m = zenPlansFromBudgets(
+      [budget({ tag: "work", income: 145000, incomeLock: false, date: "2026-08-01" })],
+      tagsWork,
+      planned
+    );
+    expect(m.get(zenPlanKey("income", "Работа", null, "2026-08"))).toBe(305000);
+  });
+
+  it("план уже пришедшей зарплаты второй раз не считается", () => {
+    // Из-за него и выходило 465 900 вместо 305 000: зарплата пришла 10-го, её
+    // план остался в кэше, и мы прибавляли его к факту. Дзен так не делает —
+    // место исполненного плана занял факт.
+    const planned = plannedOpsByTagMonth(
+      [mk("аванс", 160000, "2026-08-25"), mk("зарплата-уже-пришла", 160900.33, "2026-08-10")],
+      [rubW],
+      2,
+      "2026-08-11" // сегодня 11-е: зарплата позади, аванс впереди
+    );
+    const m = zenPlansFromBudgets(
+      [budget({ tag: "work", income: 145000, incomeLock: false, date: "2026-08-01" })],
+      tagsWork,
+      planned
+    );
+    expect(m.get(zenPlanKey("income", "Работа", null, "2026-08"))).toBe(305000);
+  });
+
+  it("план сегодняшнего дня ещё считается — он мог не исполниться", () => {
+    const planned = plannedOpsByTagMonth(
+      [mk("сегодня", 50000, "2026-08-11")],
+      [rubW],
+      2,
+      "2026-08-11"
+    );
+    expect(planned.get("work|2026-08")?.income).toBe(50000);
+  });
+});
+
+describe("прогноз Дзена не прибавляется к плану", () => {
+  const rubF: ZenInstrument = { id: 2, title: "RUB", shortTitle: "RUB", symbol: "₽", rate: 1 };
+  const mkF = (id: string, income: number, isForecast: boolean): ZenReminderMarker => ({
+    id, user: 1, changed: 0, date: "2026-08-25", income, incomeInstrument: 2,
+    outcome: 0, outcomeInstrument: 2, tag: ["work"], reminder: "r" + id,
+    state: "planned", isForecast,
+  });
+
+  it("считается только назначенная операция, не достроенная Дзеном", () => {
+    const planned = plannedOpsByTagMonth(
+      [mkF("аванс", 160000, false), mkF("прогноз-зарплаты", 160900.33, true)],
+      [rubF],
+      2,
+      "2026-08-11"
+    );
+    expect(planned.get("work|2026-08")?.income).toBe(160000);
   });
 });
