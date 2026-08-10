@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { accountKindLabel } from "../lib/accountType";
 import { getLiveAccountsFromCache, getBrandTitlesFromCache } from "../store/useZenmoneyStore";
 import {
@@ -40,7 +40,9 @@ import { pluralRu } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { Stat } from "../components/Stat";
-import { Switch } from "../components/Switch";
+import { Segmented } from "../components/Segmented";
+import { Tooltip } from "../components/Tooltip";
+import { Popover } from "../components/Popover";
 import { RuleEditModal, type RuleDraft } from "../components/RuleEditModal";
 import { RulePreviewModal } from "../components/RulePreviewModal";
 import { buildRulePlan, type RuleRow } from "../lib/rulePlan";
@@ -65,6 +67,56 @@ const TARGET_LABELS: Record<RuleTargetField, string> = {
  * действием список всегда на глазах. Все числа на странице считаются из ОДНОГО
  * плана: два независимых расчёта разошлись бы, и объяснить разницу было бы нечем.
  */
+/**
+ * Режим правила — одно свойство с тремя состояниями вместо двух флажков.
+ *
+ * `enabled` и `autoApply` независимыми переключателями выглядели как две
+ * настройки, хотя автоприменение у выключенного правила не значит ничего и
+ * стояло погашенным. Плюс рядом жила галочка отбора, и две одинаковые с виду
+ * галочки в соседних колонках приходилось объяснять словами.
+ *
+ * Теперь вид контрола отвечает смыслу: сегмент — про само правило и живёт в
+ * базе, галочка слева — про текущий прогон и живёт до перезагрузки.
+ */
+type RuleMode = "off" | "manual" | "auto";
+
+const MODE_OPTIONS: { value: RuleMode; label: string; title: string }[] = [
+  { value: "off", label: "Выкл", title: "Правило не работает нигде" },
+  {
+    value: "manual",
+    label: "По кнопке",
+    title: "Работает только через «Проверить и применить»",
+  },
+  {
+    value: "auto",
+    label: "Авто",
+    title: "Само размечает новые операции при синхронизации, без кнопки",
+  },
+];
+
+/**
+ * Что рассказывает подсказка над галочками.
+ *
+ * Заголовка у колонки нет намеренно: одно слово («Выбор», «Прогнать») смысла не
+ * добавляло — из него всё равно не понять, чем галочка отличается от режима и
+ * зачем она нужна. Объяснять надо сценарий, а он в заголовок не влезает.
+ */
+const PICK_HELP = (
+  <span className="block space-y-1.5">
+    <span className="block font-medium">Какие правила прогнать сейчас</span>
+    <span className="block">
+      «Проверить и применить» разбирает только отмеченные — так прогоняют одно
+      правило, не выключая остальные. Отметки сбрасываются при перезагрузке и на
+      сами правила не влияют.
+    </span>
+  </span>
+);
+
+function ruleMode(rule: { enabled: boolean; autoApply?: boolean }): RuleMode {
+  if (!rule.enabled) return "off";
+  return rule.autoApply ? "auto" : "manual";
+}
+
 export function RulesPage() {
   const transactions = useDataStore((s) => s.transactions);
   const transactionsRaw = useDataStore((s) => s.transactionsRaw);
@@ -91,6 +143,7 @@ export function RulesPage() {
   /** null — окно закрыто, «create» — новое правило, иначе редактируем. */
   const [editing, setEditing] = useState<StoredCategoryRule | "create" | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
   const [zenTags, setZenTags] = useState<ZenTag[] | null>(null);
   /** Окно «Что изменят правила» — разбор и запись за один заход. */
   const [preview, setPreview] = useState(false);
@@ -202,6 +255,14 @@ export function RulesPage() {
   /** Сколько операций подходит под условия каждого правила — считаем тем же
    *  движком, что и применение, по исходникам: у уже сработавшего правила счёт
    *  по текущим значениям показал бы ноль. */
+  /** Записать режим. Оба поля задаём явно: иначе у выключенного правила
+   *  осталось бы висеть `autoApply: true`, невидимое на экране. */
+  const setMode = (id: string, mode: RuleMode) =>
+    update(id, {
+      enabled: mode !== "off",
+      autoApply: mode === "auto",
+    }).then(reapplyRules);
+
   const matchCounts = useMemo(() => {
     const out = new Map<string, number>();
     for (const r of rules) {
@@ -379,7 +440,7 @@ export function RulesPage() {
             </span>
           </div>
 
-          <div className="relative shrink-0">
+          <div ref={infoRef} className="relative shrink-0">
             <button
               type="button"
               onClick={() => setInfoOpen((v) => !v)}
@@ -395,56 +456,58 @@ export function RulesPage() {
             >
               <HelpCircle className="w-5 h-5" />
             </button>
-            {infoOpen && (
-              <>
-                <div className="fixed inset-0 z-20" onClick={() => setInfoOpen(false)} />
-                <div className="absolute left-0 z-30 mt-2 w-96 max-w-[calc(100vw-2rem)] border border-border rounded-xl bg-panel p-4 shadow-xl space-y-2 text-xs text-muted">
-                  <p>
-                    Правило отбирает операции по условиям (несколько условий
-                    объединяются <strong className="text-text">И</strong> или{" "}
-                    <strong className="text-text">ИЛИ</strong>) и меняет у них
-                    категорию, получателя и комментарий.
-                  </p>
-                  <p>
-                    <strong className="text-text">Порядок важен:</strong> сверху вниз.
-                    Поле занимает первое высказавшееся о нём правило: если верхнее
-                    правило поставило категорию, нижнее может ещё дописать
-                    комментарий. Двигать — стрелками в колонке «№».
-                  </p>
-                  <p>
-                    <strong className="text-text">
-                      Само по себе правило ничего не меняет.
-                    </strong>{" "}
-                    Категория, получатель и комментарий попадают в операции только
-                    через кнопку{" "}
-                    <strong className="text-text">«Проверить и применить»</strong> и
-                    только у тех операций, что отмечены в окне.
-                  </p>
-                  <p>
-                    <strong className="text-text">Автоприменение</strong> — та же
-                    запись, но без кнопки и только для операций, которых раньше не
-                    было: пришли синхронизацией или импортом. Уже имеющиеся оно не
-                    трогает никогда, для них есть кнопка.
-                  </p>
-                  <p>
-                    Записанное становится обычной правкой операции: отменяется
-                    построчно в списке изменений, а не выключением правила.
-                  </p>
-                  <p>
-                    <strong className="text-text">«Проверить и применить»</strong>{" "}
-                    открывает разбор: сначала строки, которые правила изменят, —
-                    переключателем в окне можно посмотреть и остальные совпадения.
-                    Записывается только отмеченное. Считается по всем включённым
-                    правилам; у каждого изменения подписано, чьё оно.
-                  </p>
-                  <p>
-                    Правила создаются и со страницы{" "}
-                    <strong className="text-text">«Без категории»</strong> — это самый
-                    быстрый способ заполнить пробелы.
-                  </p>
-                </div>
-              </>
-            )}
+            {/* Панель должна помещаться целиком: `Popover` закрывается на любую
+                прокрутку — так задумано для меню, — поэтому внутренний скролл в
+                ней не работал бы. Отсюда и ширина, и краткость: всё, что нужно
+                знать про раздел, пятью абзацами. */}
+            <Popover
+              open={infoOpen}
+              anchorRef={infoRef}
+              onClose={() => setInfoOpen(false)}
+              className="w-[34rem] max-w-[calc(100vw-2rem)]"
+            >
+              <div className="border border-border rounded-xl bg-panel p-4 shadow-xl space-y-2.5 text-xs text-muted">
+                <p>
+                  <strong className="text-text">Правило</strong> отбирает операции
+                  по условиям и меняет у них категорию, получателя или
+                  комментарий. Само по себе оно ничего не переписывает.
+                </p>
+                <p>
+                  <strong className="text-text">«Режим»</strong> — что правило
+                  делает вообще:
+                </p>
+                <ul className="list-disc list-inside space-y-0.5 pl-1">
+                  <li>
+                    <strong className="text-text">Выкл</strong> — не работает
+                    нигде;
+                  </li>
+                  <li>
+                    <strong className="text-text">По кнопке</strong> — только
+                    через «Проверить и применить»;
+                  </li>
+                  <li>
+                    <strong className="text-text">Авто</strong> — само, но лишь
+                    для операций, которых раньше не было. Прежние не трогает.
+                  </li>
+                </ul>
+                <p>
+                  <strong className="text-text">Галочки слева</strong> — какие
+                  правила разобрать кнопкой сейчас. Так прогоняют одно правило,
+                  не выключая остальные. Они сбрасываются при перезагрузке и на
+                  сами правила не влияют.
+                </p>
+                <p>
+                  <strong className="text-text">Порядок важен:</strong> поле
+                  занимает первое высказавшееся о нём правило — верхнее поставит
+                  категорию, нижнее ещё допишет комментарий. Двигать — стрелками
+                  в колонке «№».
+                </p>
+                <p>
+                  Записанное становится обычной правкой операции: откатывается
+                  построчно в списке изменений, а не выключением правила.
+                </p>
+              </div>
+            </Popover>
           </div>
 
           <span className="flex-1 min-w-2" />
@@ -518,31 +581,32 @@ export function RulesPage() {
                       приём для авторазметки таблицы: колонка забирает ВЕСЬ
                       остаток. Название правила бывает длинной фразой из его же
                       условий, и место нужно именно ему. */}
-                  {/* Галочка в шапке — это и есть «Отметить все» / «Снять
-                      все»: отдельные кнопки заняли бы место в панели ради того,
-                      что в таблицах и так делают шапкой. */}
+                  {/* Колонка без подписи: короткое слово над галочками смысла
+                      не добавляло, а объяснить нужно не одно слово, а зачем эти
+                      галочки вообще. Всё объяснение — в подсказке; галочка в
+                      шапке заодно отмечает и снимает все разом. */}
                   <th className="table-th w-12 text-center">
-                    <input
-                      type="checkbox"
-                      checked={allPicked}
-                      ref={(el) => {
-                        if (el)
-                          el.indeterminate = !allPicked && selectedIds.size > 0;
-                      }}
-                      disabled={enabledIds.length === 0}
-                      onChange={(e) =>
-                        setPicked(e.target.checked ? new Set(enabledIds) : new Set())
-                      }
-                      className="accent-accent w-4 h-4 align-middle disabled:opacity-40"
-                      title={allPicked ? "Снять все" : "Отметить все"}
-                      aria-label={allPicked ? "Снять все правила" : "Отметить все правила"}
-                    />
+                    <Tooltip content={PICK_HELP} placement="bottom">
+                      <input
+                        type="checkbox"
+                        checked={allPicked}
+                        ref={(el) => {
+                          if (el)
+                            el.indeterminate = !allPicked && selectedIds.size > 0;
+                        }}
+                        disabled={enabledIds.length === 0}
+                        onChange={(e) =>
+                          setPicked(e.target.checked ? new Set(enabledIds) : new Set())
+                        }
+                        className="accent-accent w-4 h-4 align-middle disabled:opacity-40"
+                        aria-label={allPicked ? "Снять все правила" : "Отметить все правила"}
+                      />
+                    </Tooltip>
                   </th>
                   <th className="table-th w-20">№</th>
                   <th className="table-th w-full">Правило</th>
                   <th className="table-th w-72 min-w-[18rem]">Что меняет</th>
-                  <th className="table-th w-24 text-center">Включено</th>
-                  <th className="table-th w-32 text-center">Автоприменение</th>
+                  <th className="table-th w-52 text-center">Режим</th>
                   <th className="table-th w-28 text-center">Совпадений</th>
                   <th className="table-th text-center w-24">Действия</th>
                 </tr>
@@ -578,12 +642,12 @@ export function RulesPage() {
                           className="accent-accent w-4 h-4 align-middle disabled:opacity-40"
                           title={
                             !rule.enabled
-                              ? "Правило выключено — в прогон не попадёт"
+                              ? "Режим «Выкл» — правило не сработает, прогонять нечего"
                               : checked
-                                ? "Не прогонять это правило"
-                                : "Прогнать это правило"
+                                ? "Не прогонять это правило по кнопке «Проверить и применить»"
+                                : "Прогнать это правило по кнопке «Проверить и применить»"
                           }
-                          aria-label="Правило отобрано для прогона"
+                          aria-label="Прогнать это правило"
                         />
                       </td>
                       <td className="table-td">
@@ -661,40 +725,12 @@ export function RulesPage() {
                         className="table-td text-center"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <span
-                          className="inline-flex"
-                          title={rule.enabled ? "Выключить правило" : "Включить правило"}
-                        >
-                          <Switch
-                            checked={rule.enabled}
-                            onChange={(next) =>
-                              void update(rule.id, { enabled: next }).then(reapplyRules)
-                            }
-                            label="Правило включено"
-                          />
-                        </span>
-                      </td>
-                      <td className="table-td text-center">
-                        {/* Автоприменение работает только у включённого правила —
-                            у выключенного галочка ничего не значит и потому
-                            недоступна. */}
-                        <input
-                          type="checkbox"
-                          checked={!!rule.autoApply && rule.enabled}
-                          disabled={!rule.enabled}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            void update(rule.id, { autoApply: e.target.checked })
-                          }
-                          className="accent-accent w-4 h-4 align-middle disabled:opacity-40"
-                          title={
-                            !rule.enabled
-                              ? "Сначала включите правило"
-                              : rule.autoApply
-                                ? "Не применять к новым операциям автоматически"
-                                : "Применять к новым операциям автоматически, без кнопки"
-                          }
-                          aria-label="Автоприменение к новым операциям"
+                        <Segmented
+                          size="sm"
+                          label="Режим правила"
+                          value={ruleMode(rule)}
+                          onChange={(next) => void setMode(rule.id, next)}
+                          options={MODE_OPTIONS}
                         />
                       </td>
                       <td className="table-td text-center tabular-nums">

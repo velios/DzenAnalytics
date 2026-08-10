@@ -41,10 +41,30 @@ describe("buildDigestHistory: месяцы", () => {
     expect(labels(txs, new Date(2026, 7, 5))[0]).toBe("Июль 2026");
   });
 
-  it("месяц без операций просто отсутствует и не обрывает свод", () => {
-    // Пропуск в данных — не повод потерять всё, что было раньше.
+  it("месяц без операций остаётся в ленте, а не выпадает молча", () => {
+    // Провал в данных — это факт, а не отсутствие месяца. Пропущенный июль
+    // читался как поломка: лента обрывалась на июне при данных до августа
+    // (issue #65). Август в ленту не идёт — он ещё не закончился.
     const out = labels(monthly(["2026-05", "2026-06", "2026-08"]), new Date(2026, 7, 5));
-    expect(out).toEqual(["Июнь 2026", "Май 2026"]);
+    expect(out).toEqual(["Июль 2026", "Июнь 2026", "Май 2026"]);
+  });
+
+  it("у пустого месяца нули и падение к прошлому, а не отсутствие", () => {
+    const july = buildDigestHistory(
+      monthly(["2026-06", "2026-08"]),
+      new Date(2026, 7, 5)
+    ).find((e) => e.label === "Июль 2026");
+    expect(july?.expense).toBe(0);
+    expect(july?.txCount).toBe(0);
+    // Есть с чем сравнить: июнь был не пустой.
+    expect(july?.prevExpense).toBeGreaterThan(0);
+  });
+
+  it("после последней операции пустые месяцы не выдумываются", () => {
+    // Человек перестал пользоваться сервисом — незачем показывать ему
+    // вереницу пустых месяцев до сегодняшнего дня.
+    const out = labels(monthly(["2026-01", "2026-02"]), new Date(2026, 7, 5));
+    expect(out).toEqual(["Февраль 2026", "Январь 2026"]);
   });
 
   it("первого числа последним считается предыдущий месяц", () => {
@@ -130,5 +150,50 @@ describe("вырезание отрезка двоичным поиском", ()
     // Первое и последнее число месяца внутри, соседние дни — снаружи.
     expect(d?.expense).toBe(110);
     expect(d?.prevExpense).toBe(1);
+  });
+});
+
+describe("лента месяцев не обрывается раньше ленты недель (#65)", () => {
+  const day = (iso: string) => tx({ date: iso, amount: 1000, kind: "expense" });
+
+  it("месяц с операциями не может выпасть, даже если «последняя операция» испорчена", () => {
+    // У недель верхней границы нет, у месяцев была — дата последней операции.
+    // Стоило чему-нибудь её исказить, и месяцы кончались там, где недели
+    // показывали данные. Здесь запись без даты отбрасывается, а июль остаётся.
+    const txs = [
+      day("2026-06-15"),
+      day("2026-07-15"),
+      day("2026-07-22"),
+      tx({ date: undefined as unknown as string, amount: 1000, kind: "expense" }),
+    ];
+    const hist = buildDigestHistory(txs, new Date(2026, 7, 7));
+    const months = hist.filter((e) => e.period === "month").map((e) => e.label);
+    const weeks = hist.filter((e) => e.period === "week").map((e) => e.label);
+    expect(months).toContain("Июль 2026");
+    // Ровно тот же набор месяцев, что и у недель: раз есть неделя целиком
+    // внутри месяца — есть и месяц.
+    expect(weeks.some((w) => w.includes("июл"))).toBe(true);
+  });
+
+  it("операции с негодной датой не ломают порядок и поиск", () => {
+    const txs = [
+      day("2026-05-10"),
+      tx({ date: "" as string, amount: 1000, kind: "expense" }),
+      day("2026-06-10"),
+      tx({ date: null as unknown as string, amount: 1000, kind: "expense" }),
+      day("2026-07-10"),
+    ];
+    const hist = buildDigestHistory(txs, new Date(2026, 7, 7));
+    expect(hist.filter((e) => e.period === "month").map((e) => e.label)).toEqual([
+      "Июль 2026",
+      "Июнь 2026",
+      "Май 2026",
+    ]);
+  });
+
+  it("одни негодные записи — свод пустой, а не падение", () => {
+    expect(
+      buildDigestHistory([tx({ date: undefined as unknown as string, amount: 1 })])
+    ).toEqual([]);
   });
 });
