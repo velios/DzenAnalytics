@@ -111,8 +111,16 @@ describe("stackedBalanceByAccount — real-balance anchoring", () => {
       tx({ kind: "expense", amount: 999_000, outcomeAccount: "C", date: "2026-01-02" }),
       tx({ kind: "income", amount: 100, incomeAccount: "A", date: "2026-01-01" }),
       tx({ kind: "income", amount: 100, incomeAccount: "B", date: "2026-01-01" }),
+      // D — второй «лишний» счёт: с одним «Прочих» не бывает, он вышел бы
+      // отдельным слоем и правило ранжирования проверить было бы нечем.
+      tx({ kind: "income", amount: 100, incomeAccount: "D", date: "2026-01-01" }),
     ];
-    const { accounts } = stackedBalanceByAccount(t, 2, { A: 900_000, B: 800_000, C: 1000 });
+    const { accounts } = stackedBalanceByAccount(t, 2, {
+      A: 900_000,
+      B: 800_000,
+      C: 1000,
+      D: 500,
+    });
     expect(accounts).toEqual(expect.arrayContaining(["A", "B", "Прочие"]));
     expect(accounts).not.toContain("C"); // small balance → folded into «Прочие»
   });
@@ -246,10 +254,10 @@ describe("netWorthSeries — openings & account membership (issue #3)", () => {
 describe("netWorthBasis (issue #3)", () => {
   const RUB: CurrencyRates = { base: "RUB", rates: { RUB: 1 } };
   const acc = (over: Partial<Parameters<typeof netWorthBasis>[0][number]>) => ({
-    title: "X", currency: "RUB", startBalance: 0, startDate: null, archive: false, inBalance: true, ...over,
+    title: "X", currency: "RUB", startBalance: 0, startDate: null, archive: false, inBalance: true, balance: 0, ...over,
   });
 
-  it("includes only non-archived in-balance accounts and dates openings", () => {
+  it("берёт счета в балансе, включая закрытые, и датирует стартовые остатки", () => {
     const live = [
       acc({ title: "A", startBalance: 100000, startDate: "2020-01-01" }),
       acc({ title: "B", startBalance: 5000, startDate: null }), // no startDate → earliest tx
@@ -258,9 +266,35 @@ describe("netWorthBasis (issue #3)", () => {
     ];
     const txs = [tx({ account: "B", outcomeAccount: "B", date: "2021-03-01" })];
     const { accounts, openings } = netWorthBasis(live, txs, RUB, false);
-    expect([...accounts].sort()).toEqual(["A", "B"]);
+    // Закрытый счёт остаётся: в прошлом на нём лежали настоящие деньги, и без
+    // него кривая совокупного баланса занижала всю историю.
+    expect([...accounts].sort()).toEqual(["A", "B", "Old"]);
+    expect(accounts.has("Off")).toBe(false);
     expect(openings).toContainEqual({ date: "2020-01-01", amount: 100000 });
     expect(openings).toContainEqual({ date: "2021-03-01", amount: 5000 }); // fell back to first tx
+  });
+
+  it("сумма остатков возвращается вместе с базисом", () => {
+    const live = [
+      acc({ title: "A", balance: 100 }),
+      acc({ title: "Б", balance: 250 }),
+      acc({ title: "Вне", balance: 999, inBalance: false }),
+    ];
+    expect(netWorthBasis(live, [], RUB, false).total).toBe(350);
+    expect(netWorthBasis(live, [], RUB, true).total).toBe(1349);
+  });
+
+  it("история закрытого счёта не пропадает из совокупного баланса", () => {
+    // Тот самый случай: счёт закрыли в этом году, но в прошлые годы на нём
+    // были деньги. Раньше из 32 счетов в расчёт попадали 12, и максимум за всю
+    // историю выходил на миллион меньше, чем в самом Дзен-мани.
+    const live = [
+      acc({ title: "Живой", startBalance: 1000, startDate: "2020-01-01" }),
+      acc({ title: "Закрытый", startBalance: 500000, startDate: "2020-01-01", archive: true }),
+    ];
+    const { accounts, openings } = netWorthBasis(live, [], RUB, false);
+    expect(accounts.has("Закрытый")).toBe(true);
+    expect(openings).toContainEqual({ date: "2020-01-01", amount: 500000 });
   });
 
   it("includes off-balance accounts when the toggle is on", () => {
@@ -934,6 +968,90 @@ describe("stackedBalanceByAccount — issue #59", () => {
   });
 });
 
+describe("stackedBalanceByAccount — отбор счетов для графика", () => {
+  const last = (r: { series: StackedBalancePoint[] }) => r.series[r.series.length - 1];
+  const real = { Карта: 7000, Наличные: 3000, Вклад: 50_000, Копилка: 1000 };
+  const txs = [
+    tx({ date: "2026-01-10", kind: "income", incomeAccount: "Карта", amount: 1000 }),
+    tx({ date: "2026-02-10", kind: "income", incomeAccount: "Наличные", amount: 2000 }),
+    tx({ date: "2026-03-10", kind: "income", incomeAccount: "Вклад", amount: 5000 }),
+    tx({ date: "2026-03-11", kind: "income", incomeAccount: "Копилка", amount: 500 }),
+  ];
+
+  it("без отбора — прежнее поведение: топ-N и «Прочие»", () => {
+    const r = stackedBalanceByAccount(txs, 2, real);
+    expect(r.accounts).toEqual(["Вклад", "Карта", "Прочие"]);
+    expect(last(r).total).toBe(61_000);
+  });
+
+  it("пустой список считается как «без отбора»", () => {
+    const r = stackedBalanceByAccount(txs, 2, real, null, []);
+    expect(r.accounts).toEqual(["Вклад", "Карта", "Прочие"]);
+  });
+
+  it("с отбором — ровно выбранные счета, без «Прочих»", () => {
+    const r = stackedBalanceByAccount(txs, 8, real, null, ["Карта", "Наличные"]);
+    expect(r.accounts).toEqual(["Карта", "Наличные"]);
+    expect(r.accounts).not.toContain("Прочие");
+    // «Итого» — сумма выбранных, а НЕ совокупный баланс: 50 000 «Вклада» в
+    // стопку не попали ни слоем, ни в «Прочие».
+    expect(last(r).total).toBe(10_000);
+    expect(last(r)["Карта"]).toBe(7000);
+    expect(last(r)["Наличные"]).toBe(3000);
+  });
+
+  it("слои идут по весу счёта, а не в порядке выбора", () => {
+    const r = stackedBalanceByAccount(txs, 8, real, null, ["Наличные", "Вклад"]);
+    expect(r.accounts).toEqual(["Вклад", "Наличные"]);
+  });
+
+  it("«Прочие» из одного счёта не собираем — показываем его своим слоем", () => {
+    // Счетов ровно на один больше, чем слоёв: свалка из одного счёта ничего не
+    // обобщает, только прячет его название.
+    const r = stackedBalanceByAccount(txs, 3, real);
+    expect(r.accounts).toEqual(["Вклад", "Карта", "Наличные", "Копилка"]);
+    expect(r.accounts).not.toContain("Прочие");
+    expect(last(r).total).toBe(61_000);
+  });
+
+  it("счёт без операций тоже считается «лишним» — «Прочие» из него не делаем", () => {
+    // «Копилка» есть только в остатках: правило должно видеть и такие счета,
+    // иначе рядом с тремя слоями встали бы «Прочие» с одной «Копилкой».
+    const noOps = txs.filter((t) => t.incomeAccount !== "Копилка");
+    const r = stackedBalanceByAccount(noOps, 3, real);
+    expect(r.accounts).toContain("Копилка");
+    expect(r.accounts).not.toContain("Прочие");
+    expect(last(r)["Копилка"]).toBe(1000);
+  });
+
+  it("дни чужих операций остаются на оси — линия не рвётся", () => {
+    // Выбрана одна «Карта», а операции есть и по другим счетам. Без сохранения
+    // дней ось схлопнулась бы до одной точки 10 января.
+    const r = stackedBalanceByAccount(txs, 8, real, null, ["Карта"]);
+    expect(r.series.map((s) => s.date)).toEqual([
+      "2026-01-10",
+      "2026-02-10",
+      "2026-03-10",
+      "2026-03-11",
+    ]);
+    // Остаток «Карты» на чужих днях не меняется.
+    expect(r.series.map((s) => s["Карта"])).toEqual([7000, 7000, 7000, 7000]);
+  });
+
+  it("выбранный счёт без операций рисуется своим остатком, а не пропадает", () => {
+    const r = stackedBalanceByAccount(
+      txs,
+      8,
+      { ...real, Брокерский: 12_000 },
+      null,
+      ["Карта", "Брокерский"]
+    );
+    expect(r.accounts).toEqual(["Брокерский", "Карта"]);
+    expect(last(r)["Брокерский"]).toBe(12_000);
+    expect(last(r).total).toBe(19_000);
+  });
+});
+
 describe("дубли: разные покупки в одном магазине", () => {
   const buy = (p: Parameters<typeof tx>[0]) =>
     tx({ date: "2026-06-30", kind: "expense", amount: 500, amountBase: 500,
@@ -1028,5 +1146,44 @@ describe("дубли: копейки", () => {
 
   it("рубли не склеиваются с соседними", () => {
     expect(detectDuplicates([fee(100.4), fee(99.6)])).toHaveLength(0);
+  });
+});
+
+describe("привязка кривой к реальным остаткам", () => {
+  it("конец кривой садится ровно на сумму остатков, форма не меняется", () => {
+    // Операции объясняют только 300 из 500: остальное — курсовая переоценка и
+    // прочее, чего в потоках нет. Раньше кривая на этом и заканчивалась.
+    const txs = [
+      tx({ kind: "income", incomeAccount: "A", amountBase: 100, date: "2024-01-01" }),
+      tx({ kind: "income", incomeAccount: "A", amountBase: 200, date: "2024-02-01" }),
+    ];
+    const opts = { accounts: new Set(["A"]), anchorTo: 500 };
+    const s = netWorthSeries(txs, null, opts);
+    expect(s[s.length - 1].net).toBe(500);
+    // Сдвиг общий, поэтому расстояние между точками осталось прежним.
+    expect(s[1].net - s[0].net).toBe(200);
+  });
+
+  it("без привязки всё как было", () => {
+    const txs = [tx({ kind: "income", incomeAccount: "A", amountBase: 100, date: "2024-01-01" })];
+    const s = netWorthSeries(txs, null, { accounts: new Set(["A"]) });
+    expect(s[s.length - 1].net).toBe(100);
+  });
+
+  it("ручная калибровка сильнее привязки", () => {
+    // Калибровка — заявление человека «на эту дату у меня было столько».
+    const txs = [
+      tx({ kind: "income", incomeAccount: "A", amountBase: 100, date: "2024-01-01" }),
+      tx({ kind: "income", incomeAccount: "A", amountBase: 100, date: "2024-02-01" }),
+    ];
+    const s = netWorthSeries(txs, { date: "2024-02-01", amount: 1000 }, {
+      accounts: new Set(["A"]),
+      anchorTo: 999999,
+    });
+    expect(s[s.length - 1].net).toBe(1000);
+  });
+
+  it("пустая история не падает и не выдумывает точку", () => {
+    expect(netWorthSeries([], null, { accounts: new Set(["A"]), anchorTo: 500 })).toEqual([]);
   });
 });

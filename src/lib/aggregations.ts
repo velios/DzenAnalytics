@@ -172,7 +172,9 @@ const EARLIEST_PLAUSIBLE_DATE = "2000-01-01";
 
 export function stackedBalanceByAccount(
   allTxs: Transaction[],
-  topN = 8,
+  /** Сколько счетов показать отдельными слоями; остальные — в «Прочие».
+   *  Счетов меньше — слоёв меньше, «Прочих» не будет вовсе. */
+  topN = 9,
   /** Real current balance per account title (base currency), API mode only.
    *  When given, each line is shifted to END at the real balance — turning the
    *  «накопленный поток с нуля» into an actual balance-over-time, so the stack
@@ -183,7 +185,16 @@ export function stackedBalanceByAccount(
    *  line SHAPE, but are excluded from the real-balance anchor reconciliation —
    *  so the line ends at the projected balance (cloud + draft) and the whole
    *  historical baseline isn't shifted down by the draft amount. Issue #18. */
-  unsyncedIds?: Set<string> | null
+  unsyncedIds?: Set<string> | null,
+  /**
+   * Счета, выбранные пользователем. Заданы — рисуем РОВНО их, каждый своим
+   * слоем: ни автоматической восьмёрки крупнейших, ни свалки «Прочие».
+   * Остальные счета в стопку не попадают вовсе, поэтому «Итого» — сумма
+   * выбранных, а не совокупный баланс; подпись у графика обязана это сказать.
+   *
+   * Пустой список / `null` — прежнее поведение (топ-N плюс «Прочие»).
+   */
+  onlyAccounts?: readonly string[] | null
 ): { series: StackedBalancePoint[]; accounts: string[] } {
   const balances = balancesByAccount(allTxs);
   // Pick the «biggest» accounts. With real balances (API mode, where the chart
@@ -194,12 +205,44 @@ export function stackedBalanceByAccount(
     realBalances
       ? Math.abs(realBalances[b.account] ?? 0)
       : Math.abs(b.balance) + b.income + b.expense;
-  const topAccounts = balances
-    .slice()
-    .sort((a, b) => score(b) - score(a))
-    .slice(0, topN)
-    .map((b) => b.account);
+  const only =
+    onlyAccounts && onlyAccounts.length > 0 ? new Set(onlyAccounts) : null;
+  // Порядок слоёв один и тот же при отборе и без него — по «весу» счёта, чтобы
+  // крупный лежал в основании стопки. Выбранный счёт без единой операции в
+  // `balances` не значится: его вес берём из реального остатка, иначе он молча
+  // выпадал бы из графика.
+  const byTitle = new Map(balances.map((b) => [b.account, b]));
+  const weight = (title: string) => {
+    const b = byTitle.get(title);
+    if (b) return score(b);
+    return realBalances ? Math.abs(realBalances[title] ?? 0) : 0;
+  };
+  const topAccounts = only
+    ? [...only].sort((a, b) => weight(b) - weight(a))
+    : balances
+        .slice()
+        .sort((a, b) => score(b) - score(a))
+        .slice(0, topN)
+        .map((b) => b.account);
   const accountSet = new Set(topAccounts);
+
+  // «Прочие» из одного счёта ничего не обобщают — только прячут его имя под
+  // безымянным слоем. Такой счёт показываем отдельно: слоёв ровно столько же,
+  // а в легенде вместо «Прочие» стоит настоящее название.
+  if (!only) {
+    const rest = new Set<string>();
+    for (const b of balances) if (!accountSet.has(b.account)) rest.add(b.account);
+    if (realBalances) {
+      for (const [acc, bal] of Object.entries(realBalances)) {
+        if (bal != null && Math.abs(bal) > 0.005 && !accountSet.has(acc)) rest.add(acc);
+      }
+    }
+    if (rest.size === 1) {
+      const [extra] = rest;
+      topAccounts.push(extra);
+      accountSet.add(extra);
+    }
+  }
 
   const days = new Map<string, Map<string, number>>();
   // Поток «эпоховых» операций (1970 год). Он НЕ выбрасывается — иначе поедут
@@ -217,16 +260,16 @@ export function stackedBalanceByAccount(
     const unsynced = unsyncedIds ? unsyncedIds.has(t.id) : false;
     const apply = (acc: string, delta: number) => {
       if (!acc) return;
-      const key = accountSet.has(acc) ? acc : "Прочие";
+      const key = accountSet.has(acc) ? acc : only ? null : "Прочие";
+      // День остаётся на оси, даже если операция прошла по невыбранному счёту:
+      // иначе при отборе пары счетов ось теряла бы почти все точки, а линии
+      // рвались на длинные прямые между редкими днями.
+      if (!tooOld && !days.has(d)) days.set(d, new Map());
+      if (key === null) return;
       if (tooOld) {
         opening.set(key, (opening.get(key) || 0) + delta);
       } else {
-        let dayMap = days.get(d);
-        if (!dayMap) {
-          dayMap = new Map();
-          days.set(d, dayMap);
-        }
-        dayMap.set(key, (dayMap.get(key) || 0) + delta);
+        days.get(d)!.set(key, (days.get(d)!.get(key) || 0) + delta);
       }
       if (unsynced) unsyncedFlow.set(key, (unsyncedFlow.get(key) || 0) + delta);
     };
@@ -242,7 +285,8 @@ export function stackedBalanceByAccount(
   }
 
   const accountList = [...topAccounts];
-  const hasOther = Array.from(days.values()).some((m) => m.has("Прочие"));
+  const hasOther =
+    !only && Array.from(days.values()).some((m) => m.has("Прочие"));
   if (hasOther) accountList.push("Прочие");
 
   const sortedDates = Array.from(days.keys()).sort();
@@ -1381,6 +1425,16 @@ export interface NetWorthOptions {
    *  in/outflow, one within the set nets to zero. Together with `openings` this
    *  makes the series end exactly at the real total of these accounts. */
   accounts?: Set<string> | null;
+  /**
+   * Куда обязан прийти КОНЕЦ кривой — сумма реальных остатков этих счетов.
+   *
+   * Без привязки кривая складывается из стартовых остатков и операций, и любая
+   * мелочь, которую эта сумма не объясняет, копится: стартовые остатки
+   * переводятся в рубли по сегодняшнему курсу, а операции — по курсу ЦБ на
+   * дату, так что валютная переоценка на кривую не попадает вовсе. Сдвигаем всю
+   * кривую на постоянную величину: форма — из операций, конец — из правды.
+   */
+  anchorTo?: number | null;
 }
 
 /** Subset of `LiveAccount` (avoids a store→lib import) needed to seed openings. */
@@ -1391,6 +1445,8 @@ export interface NetWorthAccount {
   startDate: string | null;
   archive: boolean;
   inBalance: boolean;
+  /** Текущий остаток в валюте счёта — им кривая привязывается к правде. */
+  balance: number;
 }
 
 /**
@@ -1403,7 +1459,12 @@ export function netWorthBasis(
   txs: Transaction[],
   rates: CurrencyRates,
   includeOffBalance: boolean
-): { accounts: Set<string>; openings: { date: string; amount: number }[] } {
+): {
+  accounts: Set<string>;
+  openings: { date: string; amount: number }[];
+  /** Сумма текущих остатков включённых счетов, в базовой валюте. */
+  total: number;
+} {
   const earliest = new Map<string, string>();
   let globalEarliest = "";
   for (const t of txs) {
@@ -1420,10 +1481,20 @@ export function netWorthBasis(
     currency === rates.base ? amount : amount * (rates.rates[currency] || 1);
   const accounts = new Set<string>();
   const openings: { date: string; amount: number }[] = [];
+  let total = 0;
   for (const a of liveAccounts) {
-    if (a.archive) continue;
+    // Архивные счета УЧАСТВУЮТ. Раньше они выбрасывались целиком — и вместе с
+    // ними исчезала вся их история: счёт, закрытый в этом году, в прошлые годы
+    // держал настоящие деньги, и на кривой совокупного баланса они были. У
+    // одного пользователя из 32 счетов в расчёт попадали 12, а максимум за всю
+    // историю выходил 5,87 млн против 6,57 млн в самом Дзен-мани.
+    //
+    // Сегодняшнему итогу это почти не мешает: закрытый счёт обычно с нулём, а
+    // если на нём что-то осталось, Дзен-мани эти деньги в своём балансе тоже
+    // показывает.
     if (!a.inBalance && !includeOffBalance) continue;
     accounts.add(a.title);
+    total += toBaseAmt(a.balance, a.currency);
     if (a.startBalance) {
       // Zenmoney occasionally hands back an epoch/1970 `startDate` (legacy or
       // import artifact). Such a date would plant a phantom opening balance «at
@@ -1437,7 +1508,7 @@ export function netWorthBasis(
       if (date) openings.push({ date, amount: toBaseAmt(a.startBalance, a.currency) });
     }
   }
-  return { accounts, openings };
+  return { accounts, openings, total };
 }
 
 export function netWorthSeries(
@@ -1488,7 +1559,17 @@ export function netWorthSeries(
     net += days.get(d)!;
     return { date: d, net };
   });
-  if (!calibration) return raw;
+  if (!calibration) {
+    // Привязка к реальным остаткам: сдвигаем всю кривую так, чтобы её конец
+    // совпал с суммой остатков. Ручная калибровка сильнее — она и есть заявление
+    // человека «на эту дату у меня было столько», и спорить с ней нечем.
+    const anchor = opts?.anchorTo;
+    if (anchor != null && raw.length > 0) {
+      const shift = anchor - raw[raw.length - 1].net;
+      if (shift !== 0) return raw.map((p) => ({ date: p.date, net: p.net + shift }));
+    }
+    return raw;
+  }
 
   let rawAtCal = 0;
   for (const p of raw) {

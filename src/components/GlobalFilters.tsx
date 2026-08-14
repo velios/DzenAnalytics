@@ -51,6 +51,10 @@ const PINNED_CATEGORIES = ["Корректировка"];
 export function GlobalFilters({
   showDateRange = true,
   dateRangeHint,
+  showDataFilters = true,
+  dataFiltersHint,
+  dimmed = false,
+  dimmedHint,
   period,
 }: {
   /**
@@ -65,6 +69,31 @@ export function GlobalFilters({
   showDateRange?: boolean;
   /** Чем объяснить, почему даты недоступны. Показывается подсказкой. */
   dateRangeHint?: string;
+  /**
+   * Работают ли отборы ДАННЫХ: сохранённый фильтр, «Дополнительно», счета,
+   * категории, валюта, поиск. `false` — они остаются на месте, но гаснут и не
+   * нажимаются, а период при этом живой. Зеркало `showDateRange`, только с
+   * другой стороны панели.
+   *
+   * Нужно там, где страница считает по всей истории и слушает только период
+   * («Счета» → «Капитал»): без этого рядом стоят два отбора «Счета» — общий,
+   * который на остатки не влияет, и свой у графика, — и понять, какой чем
+   * управляет, нельзя.
+   */
+  showDataFilters?: boolean;
+  /** Чем объяснить, почему отборы данных недоступны. Подсказкой и строкой под панелью. */
+  dataFiltersHint?: string;
+  /**
+   * Панель целиком не действует на то, что сейчас на экране: гасим её и не даём
+   * трогать. Тот же приём, что и с датами выше, только на всю панель.
+   *
+   * Убирать панель совсем нельзя: она общая для всего приложения, и её пропажа
+   * читалась бы как «фильтров тут не бывает». Погашенная панель на месте
+   * говорит правду: они есть, но этим данным не указ.
+   */
+  dimmed?: boolean;
+  /** Чем объяснить, почему панель погашена. Строкой под ней. */
+  dimmedHint?: string;
   /** Controlled period — when provided, ALL period controls (presets, month
    *  picker, custom range) drive this page-local controller instead of the
    *  global filter store, without touching the global «месяц». Used by history
@@ -281,9 +310,33 @@ export function GlobalFilters({
   if (transactions.length === 0) return null;
 
   return (
-    <div className="card p-3 md:card-pad md:p-4 mb-4 md:mb-6">
+    <div className="mb-4 md:mb-6">
+      <div
+        className={clsx(
+          "card p-3 md:card-pad md:p-4",
+          // `inert` снимает и клики, и обход с клавиатуры, и внимание читалок —
+          // одним атрибутом, без перебора всех контролов внутри.
+          dimmed && "opacity-45 grayscale select-none"
+        )}
+        inert={dimmed || undefined}
+        aria-disabled={dimmed || undefined}
+      >
       <div className="flex flex-wrap items-center gap-2">
         {/* ── Row 1: saved filter · «Дополнительно» │ period │ reset ── */}
+        {/* Обёртка НЕ инертна — на ней подсказка, почему отборы погашены;
+            инертен внутренний слой. Тот же приём, что у дат ниже. */}
+        <div
+          className={clsx(
+            "flex items-center gap-2",
+            !showDataFilters && "opacity-45"
+          )}
+          title={!showDataFilters ? dataFiltersHint : undefined}
+          aria-disabled={!showDataFilters || undefined}
+        >
+        <div
+          className={clsx("contents", !showDataFilters && "pointer-events-none")}
+          inert={!showDataFilters}
+        >
         <FiltersMenu />
 
         {/* «Дополнительно» — right next to the filter button */}
@@ -395,6 +448,8 @@ export function GlobalFilters({
             </>
           )}
         </div>
+        </div>
+        </div>
 
         {
           <>
@@ -480,8 +535,14 @@ export function GlobalFilters({
 
         <button
           onClick={f.reset}
-          disabled={!hasFilters}
-          title={hasFilters ? "Сбросить все фильтры" : "Фильтры не заданы"}
+          disabled={!hasFilters || !showDataFilters}
+          title={
+            !showDataFilters
+              ? dataFiltersHint
+              : hasFilters
+                ? "Сбросить все фильтры"
+                : "Фильтры не заданы"
+          }
           aria-label="Сбросить все фильтры"
           // `ml-auto` pins it to the right edge of the row. When the inline date
           // controls are shown they already grow to fill the row (flex-1), so
@@ -494,6 +555,18 @@ export function GlobalFilters({
         {/* Break → row 2 with the data controls, filling the full width. */}
         <div className="basis-full h-0" />
 
+        <div
+          className={clsx(
+            "basis-full flex flex-wrap items-center gap-2",
+            !showDataFilters && "opacity-45"
+          )}
+          title={!showDataFilters ? dataFiltersHint : undefined}
+          aria-disabled={!showDataFilters || undefined}
+        >
+        <div
+          className={clsx("contents", !showDataFilters && "pointer-events-none")}
+          inert={!showDataFilters}
+        >
         <MultiSelect
           className="w-52 shrink-0"
           label="Счета"
@@ -554,7 +627,17 @@ export function GlobalFilters({
             </button>
           )}
         </div>
+        </div>
+        </div>
       </div>
+      </div>
+      {/* Строка-объяснение под панелью. Погашенная панель без слов читается как
+          поломка, поэтому причина всегда рядом. */}
+      {(dimmed && dimmedHint) || (!showDataFilters && dataFiltersHint) ? (
+        <div className="text-xs text-muted mt-1.5 px-1">
+          {dimmed ? dimmedHint : dataFiltersHint}
+        </div>
+      ) : null}
     </div>
   );
 }
