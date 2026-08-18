@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildBudgetYear, yearDiff } from "./budgetYear";
+import { buildBudgetYear, categoryPathKey, rowIsLive, yearDiff } from "./budgetYear";
 import type { BudgetLine } from "./budgets";
 import type { Transaction } from "../types";
 
@@ -512,5 +512,138 @@ describe("свод — невидимая разница в имени стат�
     const bank = report.income.groups.find((g) => g.category === "Банк")!;
     expect(bank.subs).toHaveLength(1);
     expect(bank.subs[0].cells[7]).toEqual({ plan: 4000, fact: 1000 });
+  });
+});
+
+describe("статьи переименованных категорий (#77)", () => {
+  const live = (...paths: [string, string | null][]) =>
+    new Set(paths.map(([c, s]) => categoryPathKey(c, s)));
+  const names = (report: ReturnType<typeof buildBudgetYear>) =>
+    [...report.expense.groups, ...report.income.groups].map((g) => g.category);
+
+  it("КЛЮЧЕВОЕ: статья с планом, но с именем, которого больше нет, из отчёта уходит", () => {
+    // Категорию переименовали в Дзен-мани: факт уехал на новое имя, а строка
+    // со старым осталась с планом — и висела в отчёте с нулём.
+    const report = buildBudgetYear(
+      [line({ category: "Еда", overrides: { "2026-01": 10_000 } })],
+      [],
+      2026,
+      undefined,
+      undefined,
+      [],
+      live(["Питание", null])
+    );
+    expect(names(report)).not.toContain("Еда");
+  });
+
+  it("КЛЮЧЕВОЕ: живая статья с планом и без трат остаётся", () => {
+    // В этом весь смысл плана: показать, что деньги заложены, а не потрачены.
+    const report = buildBudgetYear(
+      [line({ category: "Еда", overrides: { "2026-01": 10_000 } })],
+      [],
+      2026,
+      undefined,
+      undefined,
+      [],
+      live(["Еда", null])
+    );
+    expect(names(report)).toContain("Еда");
+  });
+
+  it("история удалённой категории с тратами остаётся", () => {
+    // Из прошлого статьи не вычёркивают: деньги были потрачены.
+    const report = buildBudgetYear(
+      [],
+      [tx({ category: "Хобби", amountBase: 500 })],
+      2026,
+      undefined,
+      undefined,
+      [],
+      live(["Еда", null])
+    );
+    expect(names(report)).toContain("Хобби");
+  });
+
+  it("без справочника (режим CSV) не отсеиваем ничего", () => {
+    const report = buildBudgetYear(
+      [line({ category: "Еда", overrides: { "2026-01": 10_000 } })],
+      [],
+      2026
+    );
+    expect(names(report)).toContain("Еда");
+  });
+
+  it("под-статья переименованного родителя тоже уходит", () => {
+    const report = buildBudgetYear(
+      [line({ category: "Еда", subcategory: "Кафе", overrides: { "2026-01": 3000 } })],
+      [],
+      2026,
+      undefined,
+      undefined,
+      [],
+      live(["Питание", null], ["Питание", "Кафе"])
+    );
+    expect(names(report)).not.toContain("Еда");
+  });
+});
+
+describe("статья с назначенной операцией", () => {
+  const planned = (over: Record<string, unknown> = {}) => ({
+    kind: "expense" as const,
+    category: "Госуслуги",
+    subcategory: "Налог на имущество",
+    ym: "2026-10",
+    amount: 3000,
+    ahead: 3000,
+    aheadOps: [],
+    ...over,
+  });
+
+  it("КЛЮЧЕВОЕ: под-статья, у которой только назначенная оплата, видна наравне с категорией", () => {
+    // Жалоба пользователя: «статья не вывелась с суммой, но в общем итоге
+    // есть». Под-категории отбирались только по факту, а назначенная оплата
+    // фактом ещё не стала — строка исчезала, хотя её сумма входила в план
+    // категории.
+    const report = buildBudgetYear([], [], 2026, undefined, undefined, [planned()]);
+    const group = report.expense.groups.find((g) => g.category === "Госуслуги")!;
+    const sub = group.subs.find((s) => s.subcategory === "Налог на имущество")!;
+    expect(sub.plan).toBe(3000);
+    expect(sub.scheduled).toBe(true);
+    expect(rowIsLive(sub)).toBe(true);
+    // И сама категория тоже: иначе строку негде было бы раскрыть.
+    expect(rowIsLive(group.total)).toBe(true);
+  });
+
+  it("сумма назначенной операции входит в план категории", () => {
+    const report = buildBudgetYear(
+      [],
+      [],
+      2026,
+      undefined,
+      undefined,
+      [planned(), planned({ subcategory: "Налог самозанятого", amount: 2920, ahead: 2920 })]
+    );
+    const group = report.expense.groups.find((g) => g.category === "Госуслуги")!;
+    expect(group.total.plan).toBe(5920);
+    expect(group.subs.map((s) => s.subcategory).sort()).toEqual([
+      "Налог на имущество",
+      "Налог самозанятого",
+    ]);
+  });
+});
+
+describe("rowIsLive — одно правило для категорий и под-категорий", () => {
+  it("назначенная операция делает строку живой без единой траты", () => {
+    expect(rowIsLive({ fact: 0, scheduled: true })).toBe(true);
+  });
+
+  it("пустая строка живой не считается", () => {
+    expect(rowIsLive({ fact: 0 })).toBe(false);
+  });
+
+  it("копеечный хвост от пересчёта курса — это ноль", () => {
+    // На экране такая строка всё равно «0», и «движением» её считать нельзя.
+    expect(rowIsLive({ fact: 0.004 })).toBe(false);
+    expect(rowIsLive({ fact: 0.005 })).toBe(true);
   });
 });

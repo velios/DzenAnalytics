@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Coins, HelpCircle, Scale, Target } from "lucide-react";
 import {
   hasTransfers,
@@ -8,6 +8,7 @@ import {
   type YearGroup,
   type YearRow,
   type YearSection,
+  rowIsLive,
 } from "../lib/budgetYear";
 import type { BudgetKind } from "../lib/budgets";
 import { formatMoney, formatNum, monthLabel, monthLabelFull } from "../lib/format";
@@ -134,6 +135,62 @@ export function BudgetYearTable({
   const [colWidths, setColWidths] = useState<number[]>([]);
   const [tableWidth, setTableWidth] = useState(0);
   const [cloneHeight, setCloneHeight] = useState(0);
+  /**
+   * Раздел, чьи статьи сейчас под закреплённой шапкой.
+   *
+   * У людей со ста статьями «Расходы» уезжают вверх на первом же экране, и
+   * дальше непонятно, к чему относится строка. Прилепить сам заголовок раздела
+   * нельзя: таблица живёт внутри обёртки с горизонтальной прокруткой, а для
+   * `position: sticky` ближайшим прокручиваемым предком оказывается именно она
+   * — по вертикали она не прокручивается, и прилипать не к чему (ровно поэтому
+   * шапка колонок нарисована двойником). Поэтому название раздела показываем в
+   * самом двойнике, в колонке «Статья», и меняем по мере прокрутки.
+   */
+  const [activeSection, setActiveSection] = useState<BudgetKind | null>(null);
+  const expenseMark = useRef<HTMLSpanElement | null>(null);
+  const incomeMark = useRef<HTMLSpanElement | null>(null);
+  const endMark = useRef<HTMLSpanElement | null>(null);
+
+  /**
+   * Слежение за разделами: маячок в начале каждого и один в конце таблицы.
+   *
+   * Наблюдатель, а не обработчик прокрутки: он не будит отрисовку на каждый
+   * пиксель и сам знает про верхнюю границу — её задаёт `rootMargin`, отступ
+   * ровно на высоту закреплённой шапки.
+   */
+  useEffect(() => {
+    const marks: [BudgetKind | null, HTMLSpanElement | null][] = [
+      ["expense", expenseMark.current],
+      ["income", incomeMark.current],
+      [null, endMark.current],
+    ];
+    const nodes = marks.filter((m) => m[1]);
+    if (nodes.length === 0) return;
+    const above = new Map<HTMLElement, boolean>();
+    const headerPx = () => {
+      const app = getComputedStyle(document.documentElement).getPropertyValue("--app-header-h");
+      return (parseFloat(app) || 0) + cloneHeight;
+    };
+    const recompute = () => {
+      let current: BudgetKind | null = null;
+      for (const [kind, el] of nodes) {
+        if (el && above.get(el)) current = kind;
+      }
+      setActiveSection(current);
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          above.set(e.target as HTMLElement, e.boundingClientRect.top <= headerPx() + 1);
+        }
+        recompute();
+      },
+      { rootMargin: `-${Math.round(headerPx())}px 0px 0px 0px`, threshold: [0, 1] }
+    );
+    for (const [, el] of nodes) if (el) io.observe(el);
+    return () => io.disconnect();
+  }, [cloneHeight, report]);
+
 
   const copyScroll = (from: HTMLElement | null, to: HTMLElement | null) => {
     if (from && to && to.scrollLeft !== from.scrollLeft) to.scrollLeft = from.scrollLeft;
@@ -361,22 +418,13 @@ export function BudgetYearTable({
   );
 
   /**
-   * Было ли по строке движение за год.
-   *
-   * С допуском в половину копейки: суммы приходят в базовой валюте, после
-   * пересчёта по курсу дня в них остаются хвосты вроде 0,004 — на экране это
-   * всё равно «0», и строка из нулей считалась бы «с движением».
-   */
-  const moved = (row: YearRow) => Math.abs(row.fact) >= 0.005;
-
-  /**
    * Статьи с движением за год и статьи без него — в списке они идут порознь.
    *
    * Статья с НАЗНАЧЕННОЙ операцией считается живой: операции ещё не было по
    * определению, но дата и сумма известны — прятать её значит прятать ровно то,
    * ради чего строка и появилась.
    */
-  const shows = (g: YearGroup) => moved(g.total) || !!g.total.scheduled;
+  const shows = (g: YearGroup) => rowIsLive(g.total);
   const liveGroups = (section: YearSection) => section.groups.filter(shows);
   const emptyGroups = (section: YearSection) => section.groups.filter((g) => !shows(g));
   const visibleGroups = (section: YearSection) =>
@@ -391,9 +439,14 @@ export function BudgetYearTable({
    * Прятать только категории целиком мало: у живой категории под-категория без
    * единой операции за год — та же строка из прочерков, просто на уровень
    * ниже. Открывается тем же переключателем «Статьи без операций».
+   *
+   * Отбор ТОТ ЖЕ, что у категорий, — вместе с назначенными операциями. Раньше
+   * под-категории отбирались только по факту, и статья, у которой на месяц
+   * назначена оплата и больше ничего, пропадала со страницы, хотя её сумма
+   * входила в план категории: «статья не вывелась, а в общем итоге есть».
    */
   const subsOf = (g: YearGroup) =>
-    emptyShown(g.total.kind) ? g.subs : g.subs.filter(moved);
+    emptyShown(g.total.kind) ? g.subs : g.subs.filter(rowIsLive);
 
   /** Строка категории и, если раскрыта, её под-категории. */
   const groupRows = (g: YearGroup) => {
@@ -419,6 +472,13 @@ export function BudgetYearTable({
           colSpan={COLS}
           className="sticky left-0 text-left px-2 pt-4 pb-1 font-semibold bg-panel"
         >
+          {/* Маячок начала раздела — по нему шапка узнаёт, чьи статьи сейчас
+              под ней. Пустой и невидимый: рисовать нечего, важно только место. */}
+          <span
+            ref={section.kind === "expense" ? expenseMark : incomeMark}
+            aria-hidden
+            className="block h-0"
+          />
           {/* Шеврон раскрывает под-категории всего раздела. Если раскрывать
               нечего — ни у одной категории нет под-категорий, — кнопки нет
               вовсе, а не висит неработающей. */}
@@ -590,6 +650,19 @@ export function BudgetYearTable({
               читают его один раз, а место оно занимало всегда. */}
           <span className="inline-flex items-center gap-1.5">
             Статья
+            {/* Какой раздел сейчас под шапкой. Только в двойнике: он и есть та
+                полоса, что остаётся на экране, когда «Расходы» уехали вверх. */}
+            {forClone && activeSection && (
+              <span
+                className={`text-[11px] font-normal px-1.5 py-0.5 rounded-full ${
+                  activeSection === "income"
+                    ? "bg-income/10 text-income"
+                    : "bg-expense/10 text-expense"
+                }`}
+              >
+                {activeSection === "income" ? "Доходы" : "Расходы"}
+              </span>
+            )}
             <Tooltip
               content={
                 <>
@@ -708,6 +781,11 @@ export function BudgetYearTable({
                 «Доходы − расходы» читается без легенды и совпадает по смыслу с
                 карточкой месяца и показателем дашборда. */}
             <th scope="row" className="sticky left-0 bg-panel text-left px-2 py-1.5 font-medium">
+              {/* Конец статей: ниже него подпись раздела в шапке уже не нужна.
+                  Маячок ВНУТРИ ячейки: голый span между <tr> и <th> — это
+                  недопустимая разметка, браузер выносит его из таблицы, и
+                  ширины колонок разъезжаются с закреплённой шапкой. */}
+              <span ref={endMark} aria-hidden className="block h-0" />
               Доходы − расходы
             </th>
             {report.delta.map((c, i) => deltaCells(c, report.months[i]))}

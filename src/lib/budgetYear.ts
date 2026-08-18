@@ -9,7 +9,35 @@ import {
 } from "./budgets";
 import { ALL_ACCOUNTS, budgetHits, TRANSFER_CATEGORY, type BudgetScope } from "./budgetScope";
 import type { PlannedPlan } from "./plannedPlans";
-import { nameKey } from "./budgetLines";
+import { nameKey, normalizeTagName } from "./budgetLines";
+
+/**
+ * Есть ли по строке что показывать: движение за год ИЛИ назначенная операция.
+ *
+ * Одна на всех: категории и под-категории отбираются одним правилом. Пока
+ * правил было два — у категорий с оглядкой на назначенные операции, у
+ * под-категорий только по факту, — под-категория, у которой на месяц назначена
+ * оплата и больше ничего, пропадала со страницы, хотя её сумма входила в план
+ * категории.
+ *
+ * Допуск в половину копейки: суммы приходят в базовой валюте, после пересчёта
+ * по курсу дня в них остаются хвосты вроде 0,004 — на экране это всё равно
+ * «0», и строка из нулей считалась бы «с движением».
+ */
+export function rowIsLive(row: { fact: number; scheduled?: boolean }): boolean {
+  return Math.abs(row.fact) >= 0.005 || !!row.scheduled;
+}
+
+/**
+ * Ключ пути статьи для сверки с живым справочником. Нормализация та же, что у
+ * склейки строк: регистр и пробелы категорию не различают.
+ */
+export function categoryPathKey(
+  category: string,
+  subcategory: string | null | undefined
+): string {
+  return `${normalizeTagName(category)}\u0000${normalizeTagName(subcategory)}`;
+}
 
 /**
  * Годовой свод бюджета: двенадцать месяцев плана и факта по статьям, с итогами
@@ -154,7 +182,21 @@ export function buildBudgetYear(
    * прибавил к нему запланированные операции сам, и второй раз их считать
    * нельзя (см. `plannedPlans`).
    */
-  planned: PlannedPlan[] = []
+  planned: PlannedPlan[] = [],
+  /**
+   * Пути живых категорий («Еда» / «Еда\u0000Кафе») — если известны.
+   *
+   * Строка бюджета хранит категорию текстом, и категорию, переименованную в
+   * Дзен-мани, из старых строк никто не вычищает. Такая строка держит план,
+   * факта у неё нет и быть не может — весь факт уехал на новое имя, — и она
+   * висит в отчёте призраком (#77). Здесь такие и отсекаются: НУЛЕВОЙ ФАКТ ЗА
+   * ВЕСЬ ГОД плюс имени нет среди живых. Живая статья с планом и без трат
+   * остаётся: показать её и есть смысл плана. История удалённой категории с
+   * фактом тоже остаётся — из отчёта прошлое не вычёркивают.
+   *
+   * Не передали (режим CSV, где живого справочника нет) — ничего не режем.
+   */
+  knownPaths?: Set<string>
 ): BudgetYearReport {
   const months = Array.from(
     { length: MONTHS },
@@ -220,6 +262,15 @@ export function buildBudgetYear(
       if (r.kind !== kind) continue;
       // Пустая строка — ни плана, ни факта за весь год — в отчёте лишняя.
       if (r.plan === 0 && r.fact === 0) continue;
+      // Призрак переименования: плана хватило, чтобы пройти отсев выше, но
+      // факта нет и имени в справочнике больше нет.
+      if (
+        r.fact === 0 &&
+        knownPaths &&
+        r.category !== TRANSFER_CATEGORY &&
+        !knownPaths.has(categoryPathKey(r.category, r.subcategory))
+      )
+        continue;
       let g = byCat.get(r.category);
       if (!g) {
         g = { subs: [] };
