@@ -43,9 +43,10 @@ import { SettingsSectionHeader } from "../components/SettingsSectionHeader";
 import { PendingChangesModal } from "../components/PendingChangesModal";
 import { SlicesSettings } from "../components/SlicesSettings";
 import { SettingRow } from "../components/SettingRow";
-import { InfoTerm } from "../components/InfoPopover";
+import { InfoPopover, InfoTerm } from "../components/InfoPopover";
 import { Switch } from "../components/Switch";
 import { Segmented } from "../components/Segmented";
+import { Select } from "../components/Select";
 import { useDeletedStore } from "../store/useDeletedStore";
 import { useDataStore } from "../store/useDataStore";
 import { useZenmoneyStore, recalcBalanceCalibration } from "../store/useZenmoneyStore";
@@ -64,7 +65,7 @@ import { PageHeader } from "../components/PageHeader";
 import { formatNum, formatDate, formatMoney } from "../lib/format";
 import { useDisplayStore, type TableFontLevel } from "../store/useDisplayStore";
 import { useThemeStore } from "../store/useThemeStore";
-import { parseAndValidateBackup, buildBackupPayload, restoreBackupPayload } from "../lib/backup";
+import { parseAndValidateBackup, restoreBackupPayload } from "../lib/backup";
 import { useTagEditsStore } from "../store/useTagEditsStore";
 import { useNewCategoriesStore } from "../store/useNewCategoriesStore";
 import { useTagDeletionsStore } from "../store/useTagDeletionsStore";
@@ -74,6 +75,7 @@ import {
   countCounterpartyPending,
 } from "../store/useCounterpartyEditsStore";
 import * as db from "../lib/db";
+import { ImportXlsxCard } from "../components/ImportXlsxCard";
 
 type Mode = "replace" | "merge";
 
@@ -639,15 +641,6 @@ export function ImportPage() {
   useEffect(() => {
     if (!backupLoaded) backupHydrate();
   }, [backupLoaded, backupHydrate]);
-  const [scheduledMsg, setScheduledMsg] = useState<string | null>(null);
-  async function triggerScheduledNow() {
-    try {
-      const r = await runBackupNow();
-      setScheduledMsg(`Скачано ${r.fileName} (${Math.round(r.size / 1024)} КБ)`);
-    } catch (e) {
-      setScheduledMsg(e instanceof Error ? e.message : "Ошибка");
-    }
-  }
 
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -660,23 +653,21 @@ export function ImportPage() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
 
+  /**
+   * Скачать бэкап руками.
+   *
+   * Тот же путь, что у расписания (`runNow`), — раньше рядом жили две кнопки,
+   * скачивавшие ОДИН И ТОТ ЖЕ файл, и разница между «Скачать бэкап» и
+   * «Скачать сейчас» была понятна только по коду. Теперь кнопка одна, и она
+   * же двигает отсчёт расписания: свежая копия только что скачана, повторять
+   * её через час незачем.
+   */
   async function exportBackup() {
     setBackupBusy(true);
     setBackupMsg(null);
     try {
-      // Single shared builder (lib/backup) so the manual export and the
-      // scheduled auto-backup always include the exact same sections.
-      const dump = await buildBackupPayload();
-      const json = JSON.stringify(dump, null, 2);
-      const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `dzenanalytics-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      const txCount = Array.isArray(dump.transactions) ? dump.transactions.length : 0;
-      setBackupMsg(`Экспортировано: ${formatNum(txCount)} операций + настройки`);
+      const res = await runBackupNow();
+      setBackupMsg(`Скачано: ${res.fileName} (${Math.round(res.size / 1024)} КБ)`);
     } catch (e) {
       setBackupMsg(e instanceof Error ? `Ошибка: ${e.message}` : "Ошибка экспорта");
     } finally {
@@ -897,20 +888,79 @@ export function ImportPage() {
 
         {/* ── API panel ────────────────────────────────────────── */}
         {sourceTab === "api" && (
-          <div className="rounded-lg border border-border bg-panel2/30 p-4">
-            <div className="mb-3">
-              <div className="font-medium text-sm flex items-center gap-2">
+          <div className="rounded-lg border border-border bg-panel2/30 p-4 space-y-3">
+            {/* Заголовок, а справа — состояние и расписание. Описание уехало под
+                знак вопроса: читают его один раз, а место занимало всегда. */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="font-medium text-sm flex items-center gap-2 min-w-0">
                 <Cloud className="w-4 h-4 text-accent" />
                 Дзен-мани API{" "}
                 <span className="text-muted text-xs font-normal">
                   (онлайн-синхронизация)
                 </span>
+                <InfoPopover label="Что даёт синхронизация">
+                  <p>
+                    Качает данные напрямую из вашего аккаунта Дзен-мани. Кроме
+                    операций получим курсы валют, баланс счетов, регулярные
+                    платежи и иерархию категорий — без выгрузки CSV.
+                  </p>
+                  <p>
+                    <InfoTerm>Токен</InfoTerm> хранится только в этом браузере и
+                    никуда не отправляется, кроме самого Дзен-мани.{" "}
+                    <InfoTerm>Полная синхронизация</InfoTerm> сбрасывает локальный
+                    кэш и качает всё заново — нужна, если данные разошлись.
+                  </p>
+                </InfoPopover>
               </div>
-              <p className="text-xs text-muted mt-1">
-                Качает данные напрямую из вашего аккаунта Дзен-мани. Кроме
-                операций получим также курсы валют, баланс счетов, регулярные
-                платежи и иерархию категорий — без выгрузки CSV.
-              </p>
+              {zenToken && (
+                <div className="flex items-center gap-3 flex-wrap text-xs text-muted">
+                  <span className="flex items-center gap-1.5 text-text">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-income shrink-0" />
+                    Подключено
+                  </span>
+                  {/* Расписание рядом с состоянием: «Подключено · каждые 30 мин»
+                      читается одной строкой. */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoSyncEnabled}
+                      onChange={(e) =>
+                        setAutoSync(e.target.checked, autoSyncValue, autoSyncUnit)
+                      }
+                      className="accent-accent w-3.5 h-3.5"
+                    />
+                    <span>Авто-синхронизация каждые</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={999}
+                      value={autoSyncValue}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        if (Number.isFinite(n) && n > 0) {
+                          setAutoSync(autoSyncEnabled, n, autoSyncUnit);
+                        }
+                      }}
+                      className="input text-xs !py-1 !px-2 w-14 tabular-nums"
+                    />
+                    <select
+                      value={autoSyncUnit}
+                      onChange={(e) =>
+                        setAutoSync(
+                          autoSyncEnabled,
+                          autoSyncValue,
+                          e.target.value as typeof autoSyncUnit
+                        )
+                      }
+                      className="input text-xs !py-1 !px-2 !w-auto"
+                    >
+                      <option value="min">мин</option>
+                      <option value="hour">час</option>
+                      <option value="day">день</option>
+                    </select>
+                  </label>
+                </div>
+              )}
             </div>
 
         {!zenToken ? (
@@ -931,7 +981,7 @@ export function ImportPage() {
             )}
             <div className="text-xs text-muted">
               <KeyRound className="w-3.5 h-3.5 inline align-text-bottom mr-1" />
-              Личный токен — это длинная строка из букв и цифр. Получить можно в{" "}
+              Личный токен получите в{" "}
               <a
                 href="https://zerro.app/token"
                 target="_blank"
@@ -940,8 +990,7 @@ export function ImportPage() {
               >
                 zerro.app/token <ExternalLink className="w-3 h-3" />
               </a>{" "}
-              (войдите своим логином от Дзен-мани, скопируйте токен). Хранится только в этом
-              браузере — никуда не отправляется.
+              — войдите своим логином от Дзен-мани и скопируйте строку.
             </div>
             <div className="flex items-center gap-2">
               <div className="relative flex-1 min-w-0">
@@ -1094,57 +1143,6 @@ export function ImportPage() {
               )}
             </div>
 
-            {/* Row 2: status info + auto-sync schedule. */}
-            <div className="flex items-center gap-3 text-sm min-w-0 flex-wrap">
-              <div className="flex items-center gap-2 min-w-0">
-                <CheckCircle2 className="w-4 h-4 text-income shrink-0" />
-                <span className="text-text">Подключено</span>
-              </div>
-
-              {/* Schedule control. Lives in the same row as status so
-                  the user reads "Подключено · автосинк каждые 30 мин"
-                  at a glance. Lays out as: checkbox + number input +
-                  unit select, all inline. */}
-              <label className="flex items-center gap-2 text-xs text-muted cursor-pointer ml-auto">
-                <input
-                  type="checkbox"
-                  checked={autoSyncEnabled}
-                  onChange={(e) =>
-                    setAutoSync(e.target.checked, autoSyncValue, autoSyncUnit)
-                  }
-                  className="accent-accent w-3.5 h-3.5"
-                />
-                <span>Авто-синхронизация каждые</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={999}
-                  value={autoSyncValue}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    if (Number.isFinite(n) && n > 0) {
-                      setAutoSync(autoSyncEnabled, n, autoSyncUnit);
-                    }
-                  }}
-                  className="input text-xs !py-1 !px-2 w-16 tabular-nums"
-                />
-                <select
-                  value={autoSyncUnit}
-                  onChange={(e) =>
-                    setAutoSync(
-                      autoSyncEnabled,
-                      autoSyncValue,
-                      e.target.value as typeof autoSyncUnit
-                    )
-                  }
-                  className="input text-xs !py-1 !px-2 !w-auto"
-                >
-                  <option value="min">мин</option>
-                  <option value="hour">час</option>
-                  <option value="day">день</option>
-                </select>
-              </label>
-            </div>
           </div>
         )}
 
@@ -1165,27 +1163,64 @@ export function ImportPage() {
 
         {/* ── CSV panel ────────────────────────────────────────── */}
         {sourceTab === "csv" && (
-          <div className="rounded-lg border border-border bg-panel2/30 p-4 space-y-4">
-            {/* Header + description, full width. */}
-            <div>
-              <div className="font-medium text-sm flex items-center gap-2">
+          <div className="rounded-lg border border-border bg-panel2/30 p-4 space-y-3">
+            {/* Заголовок, а справа — режим и сколько уже в базе. Пояснения про
+                формат и про то, чем «Дополнить» отличается от «Заменить», ушли
+                под знак вопроса и в подсказки самих кнопок. */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="font-medium text-sm flex items-center gap-2 min-w-0">
                 <Upload className="w-4 h-4 text-accent" />
                 Импорт CSV-выгрузки{" "}
                 <span className="text-muted text-xs font-normal">
                   (офлайн-синхронизация)
                 </span>
+                <InfoPopover label="Как это работает">
+                  <p>
+                    Офлайн-путь для тех, кому не нужен токен: берём CSV-выгрузку
+                    из приложения Дзен-мани. Файл разбирается прямо в браузере и
+                    никуда не отправляется — ни к нам, ни в Дзен-мани.
+                  </p>
+                  <p>
+                    <InfoTerm>Что за файл.</InfoTerm> CSV с шапкой, разделитель —
+                    точка с запятой. Колонки читаются по названиям:{" "}
+                    <code className="pill">date</code>,{" "}
+                    <code className="pill">categoryName</code>,{" "}
+                    <code className="pill">payee</code>,{" "}
+                    <code className="pill">outcome</code> /{" "}
+                    <code className="pill">income</code>,{" "}
+                    <code className="pill">outcomeAccountName</code> /{" "}
+                    <code className="pill">incomeAccountName</code> и валюты этих
+                    счетов. Строки без даты и без сумм пропускаются.
+                  </p>
+                  <p>
+                    <InfoTerm>Дополнить</InfoTerm> — возьмёт из файла только те
+                    строки, которых ещё нет. Своих номеров у операций в выгрузке
+                    нет, поэтому строка узнаётся по дате, месту в файле и
+                    получателю: повторная загрузка того же файла ничего не
+                    задвоит, а вот та же операция из ДРУГОЙ выгрузки приедет
+                    второй раз.
+                  </p>
+                  <p>
+                    <InfoTerm>Заменить</InfoTerm> — сотрёт загруженные операции и
+                    положит вместо них файл целиком. Настройки, правила и бюджеты
+                    останутся; локальные правки операций держатся за их номера,
+                    поэтому часть из них после замены может остаться без своей
+                    операции.
+                  </p>
+                  <p>
+                    Если подключена онлайн-синхронизация, класть CSV поверх неё не
+                    стоит — приложение переспросит перед загрузкой.
+                  </p>
+                </InfoPopover>
               </div>
-              <p className="text-xs text-muted mt-1">
-                Загрузите CSV из мобильного приложения Дзен-мани. Файл
-                обрабатывается локально в браузере — никуда не отправляется.
-              </p>
-            </div>
-
-            {/* REGIME (only when there's existing data to merge with). */}
-            {transactions.length > 0 ? (
-              <div className="space-y-2">
-                <div>
-                  <div className="label mb-1.5">Режим</div>
+              {transactions.length > 0 && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs text-muted">
+                    Записей в базе:{" "}
+                    <strong className="text-text tabular-nums">
+                      {formatNum(transactions.length)}
+                    </strong>
+                  </span>
                   <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5">
                     <button
                       onClick={() => setMode("merge")}
@@ -1213,20 +1248,8 @@ export function ImportPage() {
                     </button>
                   </div>
                 </div>
-                <div className="text-xs text-muted">
-                  В базе: <strong className="text-text">{formatNum(transactions.length)}</strong>{" "}
-                  операций.{" "}
-                  {mode === "merge"
-                    ? "Новый файл добавит свежие операции, дубликаты по id будут отброшены."
-                    : "Новый файл полностью заменит текущие данные."}
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs text-muted">
-                Поддерживается любая CSV-выгрузка из Дзен-мани (формат:{" "}
-                <code className="pill">date;categoryName;…</code>).
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Dropzone — full-width bar styled like the API token
                 input. Click anywhere on the bar opens the file picker;
@@ -1279,6 +1302,10 @@ export function ImportPage() {
             )}
           </div>
         )}
+
+        {/* Импорт из Excel — отдельной карточкой, а не внутри переключателя
+            источника: он ничего не заменяет, а добавляет новые операции. */}
+        <ImportXlsxCard />
 
         {/* ── Current data footer ─────────────────────────────────
             Shows what's already in the local IndexedDB plus the
@@ -1579,7 +1606,8 @@ export function ImportPage() {
             </>
           }
           control={
-            <div className="w-32">
+            /* Код валюты — всегда три буквы: поле шире только съедает строку. */
+            <div className="w-24">
               <Combobox
                 value={rates.base}
                 options={Object.keys(rates.rates).sort()}
@@ -1630,7 +1658,9 @@ export function ImportPage() {
                 if (Number.isFinite(n)) setMonthStartDay(n);
               }}
               aria-label="День начала расчётного месяца"
-              className="input text-sm w-20 tabular-nums"
+              /* Значение — 1–28, то есть максимум два знака; по центру, чтобы
+                 однозначное число не висело у левого края. */
+              className="input text-sm w-16 tabular-nums text-center"
             />
           }
         />
@@ -1962,11 +1992,13 @@ export function ImportPage() {
           </div>
         <p className="text-xs text-muted mb-3">
           Экспортирует JSON со всем, что живёт только здесь: операции, бюджеты и их
-          настройки, цели, калибровка, виды, разрезы данных, оформление, правила
-          категоризации, иконки и цвета категорий, курсы валют по датам и{" "}
-          <strong>несинхронизированные правки</strong> — операций, счетов,
-          контрагентов, категорий и планов. Токен Дзен-мани в файл не попадает.
-          Импорт восстанавливает всё одним файлом и обновляет страницу.
+          настройки, цели, калибровка, виды, разрезы данных, оформление и тема,
+          правила категоризации, иконки и цвета категорий, курсы валют по датам,
+          настройки страниц — и <strong>несинхронизированные изменения</strong>:
+          правки операций, счетов, контрагентов, категорий и планов, созданные
+          операции, заведённые контрагенты и категории, удаления. Токен Дзен-мани
+          и кэш облака в файл не попадают. Восстановление возвращает всё одним
+          файлом и обновляет страницу.
         </p>
         <div className="flex flex-wrap gap-2">
           <button
@@ -2002,59 +2034,52 @@ export function ImportPage() {
         </div>
       </div>
 
-      {/* Scheduled backup */}
-      <div className="rounded-lg border border-border bg-panel2/30 p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="w-5 h-5 text-accent" />
-          <span className="font-medium">Бэкап по расписанию</span>
-        </div>
-        <p className="text-xs text-muted mb-3">
-          Автоматически скачивает JSON-бэкап с указанной периодичностью. Проверка
-          запускается при открытии приложения и каждые ~10 минут. Файл уходит в
-          стандартную папку загрузок браузера.
-          <br />
-          <strong>Важно:</strong> работает только пока вкладка открыта. Браузер
-          может показать уведомление о скачивании — это нормально.
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-          {(["off", "hour", "day", "week"] as BackupInterval[]).map((i) => {
-            const label = {
-              off: "Выключен",
-              hour: "Каждый час",
-              day: "Каждый день",
-              week: "Каждую неделю",
-            }[i];
-            const active = backupInterval === i;
-            return (
-              <button
-                key={i}
-                onClick={() => setBackupInterval(i)}
-                className={`p-2 rounded-lg border text-xs text-left transition-colors ${
-                  active
-                    ? "bg-accent/10 border-accent text-accent"
-                    : "bg-panel2 border-border hover:border-accent/50"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <button
-            onClick={triggerScheduledNow}
-            disabled={transactions.length === 0}
-            className="btn-ghost"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Скачать сейчас
-          </button>
-          <span className="text-muted">
-            {backupLastAt
-              ? `Последний бэкап: ${new Date(backupLastAt).toLocaleString("ru-RU")}`
-              : "Бэкапов ещё не было"}
-          </span>
-          {scheduledMsg && <span className="text-income">{scheduledMsg}</span>}
+      {/* Scheduled backup. Заголовок, периодичность и кнопка — в одну строку:
+          четыре кнопки во всю ширину занимали ряд ради выбора из четырёх слов,
+          а объяснение читают один раз и убирают под знак вопроса. */}
+      <div className="rounded-lg border border-border bg-panel2/30 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <Clock className="w-5 h-5 text-accent shrink-0" />
+            <span className="font-medium">Бэкап по расписанию</span>
+            <InfoPopover label="Как работает расписание">
+              <p>
+                Автоматически скачивает тот же JSON-бэкап с выбранной
+                периодичностью. Проверка запускается при открытии приложения и
+                каждые ~10 минут. Файл уходит в стандартную папку загрузок
+                браузера, к имени добавляется «-auto».
+              </p>
+              <p>
+                Срок считается от <InfoTerm>последней копии</InfoTerm>, включая
+                скачанную руками кнопкой «Скачать бэкап»: если копия только что
+                сделана, повторять её через час незачем.
+              </p>
+              <p>
+                <InfoTerm>Важно:</InfoTerm> работает, только пока вкладка открыта
+                — браузер не умеет запускать нас по будильнику. Уведомление о
+                скачивании при этом нормально, его показывает сам браузер.
+              </p>
+            </InfoPopover>
+            <span className="text-xs text-muted">
+              {backupLastAt
+                ? `Последняя копия: ${new Date(backupLastAt).toLocaleString("ru-RU")}`
+                : "Копий ещё не было"}
+            </span>
+          </div>
+          <div className="w-44 shrink-0">
+            <Select
+              size="sm"
+              ariaLabel="Как часто делать бэкап"
+              value={backupInterval}
+              onChange={(v) => setBackupInterval(v)}
+              options={[
+                { value: "off" as BackupInterval, label: "Не делать" },
+                { value: "hour" as BackupInterval, label: "Каждый час" },
+                { value: "day" as BackupInterval, label: "Каждый день" },
+                { value: "week" as BackupInterval, label: "Каждую неделю" },
+              ]}
+            />
+          </div>
         </div>
       </div>
         </>)}

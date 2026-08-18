@@ -254,11 +254,31 @@ export function CounterpartyManager() {
   // Список показываем порциями по мере прокрутки страницы: контрагентов бывают
   // сотни, а собственная прокрутка внутри карточки означала бы две полосы
   // прокрутки сразу.
-  const lazy = useLazyList(rows, 100);
+  // Разбираем результат сразу: правило про ссылки считает обращением к ссылке
+  // любое чтение поля у объекта, в котором есть функция-ссылка.
+  const {
+    visible: visibleRows,
+    shown: shownRows,
+    total: totalRows,
+    hasMore: hasMoreRows,
+    attachSentinel: attachRowsSentinel,
+  } = useLazyList(rows, 100);
   // Те же порции у вспомогательных видов: дублей и «без контрагента» тоже
   // бывают сотни.
-  const lazyDups = useLazyList(dupGroups, 60);
-  const lazyOrphans = useLazyList(orphanPayees, 100);
+  const {
+    visible: visibleDups,
+    shown: shownDups,
+    total: totalDups,
+    hasMore: hasMoreDups,
+    attachSentinel: attachDupsSentinel,
+  } = useLazyList(dupGroups, 60);
+  const {
+    visible: visibleOrphans,
+    shown: shownOrphans,
+    total: totalOrphans,
+    hasMore: hasMoreOrphans,
+    attachSentinel: attachOrphansSentinel,
+  } = useLazyList(orphanPayees, 100);
 
   const visibleIds = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
   const selectedVisible = useMemo(
@@ -501,7 +521,7 @@ export function CounterpartyManager() {
               setDupOnly(false);
             }}
             aria-pressed={orphanOnly}
-            title="Получатели, которые есть в операциях, но записи в справочнике под собой не имеют"
+            title="Получатели из выписок, под которых нет записи в справочнике. Число — сколько таких получателей, а не операций"
             className={clsx(
               "text-sm flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border shrink-0",
               orphanOnly
@@ -613,7 +633,7 @@ export function CounterpartyManager() {
               <span className="w-36 shrink-0 text-right">Действия</span>
             </div>
             <div className="divide-y divide-border/60">
-            {lazyDups.visible.map((g) => (
+            {visibleDups.map((g) => (
               <div key={g.key} className="px-3 py-2 flex items-start gap-3">
                 {/* Survivor first, then the copies — each on its own line with
                     its own operations count, so it's obvious what moves where. */}
@@ -666,6 +686,15 @@ export function CounterpartyManager() {
               </div>
             ))}
             </div>
+            {hasMoreDups && (
+              <div
+                ref={attachDupsSentinel}
+                className="px-3 py-3 text-center text-xs text-muted border-t border-border/60"
+              >
+                Показано {shownDups} из {totalDups} — прокрутите дальше,
+                чтобы загрузить ещё
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -676,14 +705,23 @@ export function CounterpartyManager() {
             {/* Объяснение прямо тут, а не только под «?»: вопрос «а что это
                 вообще такое» возникает ровно на этом экране. */}
             <div className="text-sm min-w-0">
+              {/* Обе цифры сразу и подписанные. Раньше на кнопке-отборе стояло
+                  число ПОЛУЧАТЕЛЕЙ, а здесь — число ОПЕРАЦИЙ, и рядом они
+                  читались как противоречие: «1 057» против «3 590» без единого
+                  слова о том, что это разные вещи. */}
               <div>
-                Операций без контрагента:{" "}
-                <strong className="tabular-nums">
-                  {formatNum(orphanPayees.reduce((n, o) => n + o.count, 0))}
-                </strong>
+                Получателей без контрагента:{" "}
+                <strong className="tabular-nums">{formatNum(orphanPayees.length)}</strong>
+                <span className="text-muted">
+                  {" "}· операций с ними:{" "}
+                  <strong className="tabular-nums text-text">
+                    {formatNum(orphanPayees.reduce((n, o) => n + o.count, 0))}
+                  </strong>
+                </span>
               </div>
               <div className="text-xs text-muted">
-                Получатель у них — текст от банка, а не запись справочника
+                Получатель у них — текст от банка, а не запись справочника. В
+                строке ниже — сколько операций у каждого.
               </div>
             </div>
             <button
@@ -728,7 +766,7 @@ export function CounterpartyManager() {
               <span className="w-20 shrink-0 text-center whitespace-nowrap">Действия</span>
             </div>
             <div className="divide-y divide-border/60">
-              {lazyOrphans.visible.map((o) => {
+              {visibleOrphans.map((o) => {
                 const key = dupKey(o.title);
                 return (
                   <div key={key} className="px-3 py-2 flex items-center gap-3">
@@ -803,6 +841,19 @@ export function CounterpartyManager() {
                 );
               })}
             </div>
+            {/* Маячок подгрузки. Без него список останавливался ровно на первой
+                сотне: строки рисовались порциями, но догружать их было нечему —
+                и человек видел 100 получателей из тысячи, не подозревая об
+                остальных. */}
+            {hasMoreOrphans && (
+              <div
+                ref={attachOrphansSentinel}
+                className="px-3 py-3 text-center text-xs text-muted border-t border-border/60"
+              >
+                Показано {shownOrphans} из {totalOrphans} — прокрутите
+                дальше, чтобы загрузить ещё
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -835,7 +886,7 @@ export function CounterpartyManager() {
             </div>
           ) : (
             <div className="divide-y divide-border/60">
-              {lazy.visible.map((row) => {
+              {visibleRows.map((row) => {
                 // A merged row is on its way out too — same struck-through
                 // treatment as a delete, but it says where the operations went.
                 const gone = row.isDeleted || row.mergedInto !== undefined;
@@ -931,12 +982,12 @@ export function CounterpartyManager() {
                 </div>
                 );
               })}
-              {lazy.hasMore && (
+              {hasMoreRows && (
                 <div
-                  ref={lazy.sentinelRef}
+                  ref={attachRowsSentinel}
                   className="px-3 py-3 text-center text-xs text-muted"
                 >
-                  Показано {lazy.shown} из {lazy.total} — прокрутите дальше, чтобы
+                  Показано {shownRows} из {totalRows} — прокрутите дальше, чтобы
                   загрузить ещё
                 </div>
               )}
