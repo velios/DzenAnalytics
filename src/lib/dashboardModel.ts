@@ -126,41 +126,37 @@ export function upcomingTotal(payments: UpcomingPayment[]): number {
 }
 
 export interface FreeMoney {
-  /** Сколько остаётся к концу периода. Отрицательное — не хватает. */
+  /** Доход периода минус расход. Отрицательное — потрачено больше, чем пришло. */
   value: number;
   /** Фактический доход периода. */
   income: number;
   /** Фактически потрачено с начала периода. */
   spent: number;
-  /** Обязательные платежи, которые ещё впереди. */
-  ahead: number;
 }
 
 /**
- * Сколько денег остаётся до конца месяца.
+ * Сальдо месяца: доход минус расход, и только ФАКТ.
  *
- * Все три слагаемых — ФАКТ, ничего не экстраполируется. Прогнозировать доход
- * по темпу нельзя: зарплата приходит одним днём, и линейная экстраполяция даёт
- * то тридцатикратное завышение, то ноль (этот же разбор есть в
- * `buildMonthCashflow`). Подставлять вместо факта среднее за прошлые месяцы
- * тоже нельзя: на экране появлялся «прогноз дохода 543 800 ₽» там, где месяц
- * принёс 158 994 ₽, и цифры на главной расходились с «Бюджетом».
+ * Будущих списаний здесь нет намеренно. Раньше из суммы вычитались регулярные
+ * платежи, которые DzenAnalytics вычисляет по истории, — но у Дзен-мани есть
+ * ещё и свои планы, и какие из двух имел в виду человек, неизвестно. Число,
+ * собранное из факта и одной из двух догадок, невозможно ни проверить, ни
+ * объяснить: на экране стоят доход и расход, а итог с ними не сходится.
+ * Запланированные операции живут своим виджетом, там их и видно — обоими
+ * способами, на выбор.
+ *
+ * Прогнозировать доход по темпу тоже нельзя: зарплата приходит одним днём, и
+ * линейная экстраполяция даёт то тридцатикратное завышение, то ноль (этот же
+ * разбор есть в `buildMonthCashflow`). Подставлять вместо факта среднее за
+ * прошлые месяцы нельзя по той же причине: на экране появлялся «прогноз дохода
+ * 543 800 ₽» там, где месяц принёс 158 994 ₽.
  *
  * Плановые суммы, если они у пользователя заведены, показываются отдельной
  * строкой и не смешиваются с фактом.
  */
-export function freeMoney(opts: {
-  factIncome: number;
-  factExpense: number;
-  aheadObligatory: number;
-}): FreeMoney {
-  const { factIncome, factExpense, aheadObligatory } = opts;
-  return {
-    value: factIncome - factExpense - aheadObligatory,
-    income: factIncome,
-    spent: factExpense,
-    ahead: aheadObligatory,
-  };
+export function freeMoney(opts: { factIncome: number; factExpense: number }): FreeMoney {
+  const { factIncome, factExpense } = opts;
+  return { value: factIncome - factExpense, income: factIncome, spent: factExpense };
 }
 
 /**
@@ -249,7 +245,18 @@ export interface ForecastMonth {
 export function forecastMonths(
   complete: { ym: string; income: number; expense: number }[],
   monthsAhead = 3,
-  lookback = 6
+  lookback = 6,
+  /**
+   * С какого месяца отсчитывать прогноз — первый прогнозный будет следующим за
+   * ним. По умолчанию это последний завершённый месяц из `complete`.
+   *
+   * Разделено намеренно: считать «обычный месяц» надо по завершённым, иначе
+   * половина текущего занизила бы медиану, — а РИСОВАТЬ прогноз надо после
+   * последнего показанного месяца. Пока это было одно и то же значение, текущий
+   * месяц попадал на график дважды: столбцом факта и столбцом прогноза, и на
+   * оси стояли две одинаковые подписи подряд.
+   */
+  startAfter?: string
 ): ForecastMonth[] {
   if (complete.length === 0) return [];
 
@@ -277,7 +284,7 @@ export function forecastMonths(
     return Math.max(0.6, Math.min(1.4, median(arr) / overall));
   };
 
-  const last = complete[complete.length - 1].ym;
+  const last = startAfter || complete[complete.length - 1].ym;
   const ly = Number(last.slice(0, 4));
   const lm = Number(last.slice(5, 7));
 

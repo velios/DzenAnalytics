@@ -29,6 +29,8 @@ export const WIDGET_KINDS = [
   "categories",
   "activity",
   "observations",
+  "donutExpense",
+  "donutIncome",
 ] as const;
 
 export type WidgetKind = (typeof WIDGET_KINDS)[number];
@@ -137,9 +139,21 @@ export const WIDGETS: readonly WidgetMeta[] = [
   },
   {
     kind: "upcoming",
-    title: "Запланированные платежи",
-    hint: "Что спишется до конца месяца",
+    title: "Запланированные операции",
+    hint: "Что спишется и что придёт до конца месяца",
     span: 1,
+    views: [
+      {
+        id: "own",
+        title: "Свои",
+        hint: "Регулярные платежи, вычисленные по вашей истории операций",
+      },
+      {
+        id: "zen",
+        title: "Из Дзен-мани",
+        hint: "Расходные планы и прогнозы, заведённые в самом Дзен-мани",
+      },
+    ],
   },
   {
     kind: "links",
@@ -175,6 +189,18 @@ export const WIDGETS: readonly WidgetMeta[] = [
     kind: "observations",
     title: "Авто-наблюдения",
     hint: "Что выбилось из обычного: перерасход, подписки, пропуски",
+    span: 1,
+  },
+  {
+    kind: "donutExpense",
+    title: "Кольцо расходов",
+    hint: "Доли статей друг относительно друга, как на «Категориях»",
+    span: 1,
+  },
+  {
+    kind: "donutIncome",
+    title: "Кольцо доходов",
+    hint: "Откуда приходят деньги, теми же кольцами",
     span: 1,
   },
 ];
@@ -456,20 +482,36 @@ export function shiftWidget(
 
 /* ─────────────────────────────  состав  ───────────────────────────── */
 
-/** Убрать виджет с главной или вернуть его на прежнее место. */
+/**
+ * Убрать виджет с главной или вернуть его обратно.
+ *
+ * Возвращается он В КОНЕЦ, а не на прежнее место. Прежнее место к этому времени
+ * уже занято — соседи сомкнулись, — и виджет, всплывающий посреди собранной
+ * раскладки, читается сбоем: человек нажал «вернуть», а поменялось что-то в
+ * середине экрана. В конце его видно сразу, и оттуда он переносится куда нужно.
+ */
 export function setWidgetHidden(
   layout: readonly WidgetPlacement[],
   key: string,
   hidden: boolean
 ): WidgetPlacement[] {
-  return layout.map((p) => {
-    if (p.key !== key) return p;
-    const next: WidgetPlacement = { key: p.key, kind: p.kind };
-    if (p.view) next.view = p.view;
-    if (p.links) next.links = p.links;
-    if (hidden) next.hidden = true;
-    return next;
-  });
+  const at = layout.findIndex((p) => p.key === key);
+  if (at === -1) return layout.slice();
+  const p = layout[at];
+  const next: WidgetPlacement = { key: p.key, kind: p.kind };
+  if (p.view) next.view = p.view;
+  if (p.links) next.links = p.links;
+  if (hidden) next.hidden = true;
+
+  const rest = layout.filter((x) => x.key !== key);
+  // Убираем — оставляем на месте: пока виджет на полке, его порядок никому не
+  // мешает, зато сравнивать раскладку со стандартной становится нечестно.
+  if (hidden) {
+    const out = rest.slice();
+    out.splice(at, 0, next);
+    return out;
+  }
+  return [...rest, next];
 }
 
 /**

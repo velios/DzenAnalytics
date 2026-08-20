@@ -33,7 +33,6 @@ import {
   Scale, Target, TrendingUp, ArrowUpRight, Clock, Lightbulb, Sigma,
 } from "lucide-react";
 import { CategoryDot } from "../CategoryDot";
-import { pluralRu } from "../../lib/plural";
 import { ChartTooltipCard, TooltipFacts, type TooltipFact } from "../TooltipFacts";
 import { InfoPopover } from "../InfoPopover";
 import { AccountLogo } from "../AccountLogo";
@@ -56,6 +55,7 @@ const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн",
   "июл", "авг", "сен", "окт", "ноя", "дек"];
 import type { DashboardModel } from "../../hooks/useDashboardModel";
+import type { PlannedOp } from "../../lib/plannedOps";
 
 /* ─────────────────────────────  мелочи  ───────────────────────────── */
 
@@ -107,188 +107,6 @@ export function BlockTitle({
           <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
         </Link>
       )}
-    </div>
-  );
-}
-
-/* ─────────────────────────────  герой месяца  ───────────────────────────── */
-
-/**
- * Сколько денег останется свободными и каким темпом мы к этому идём.
- *
- * `size` меняет только масштаб числа: в «Сводке» оно работает заголовком
- * страницы, в плиточных вариантах — обычным показателем.
- */
-export function FreeMoneyHero({
-  m,
-  size = "lg",
-}: {
-  m: DashboardModel;
-  size?: "lg" | "xl" | "md";
-}) {
-  const numClass =
-    size === "xl"
-      ? "text-5xl 3xl:text-6xl"
-      : size === "lg"
-        ? "text-4xl 3xl:text-5xl"
-        : "text-3xl";
-  const spentPct = Math.min(100, m.month.progress * 100);
-  // База для доли «впереди» — план месяца, если он есть, иначе ожидаемый расход
-  // по темпу. Раньше базой был выдуманный прогноз дохода, и полоса врала вместе
-  // с ним.
-  const aheadBase = m.planExpense ?? m.projExpense;
-  const aheadPct =
-    aheadBase > 0 ? Math.min(100 - spentPct, (m.upcomingTotalBase / aheadBase) * 100) : 0;
-
-  // Период пуст, а история есть — значит операции вычистил отбор. Показать
-  // здесь бодрое число нельзя: оно будет посчитано из среднего и выдано за
-  // факт. Честнее назвать причину и подсказать, где её снять.
-  if (!m.hasCurrentData) {
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="label">Свободно до конца месяца</div>
-        <div className="text-2xl font-semibold tracking-tight">Пока нечего считать</div>
-        <div className="text-[14px] text-muted leading-relaxed max-w-[52ch]">
-          За {monthLabel(m.ym)} в аналитику не попало ни одной операции. Обычно это отбор:
-          активный разрез данных или выключённые внебалансовые счета — они убирают операции
-          везде, кроме списка счетов.
-        </div>
-      </div>
-    );
-  }
-
-  const short = m.free.value < 0;
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="label">
-        {short ? "Не хватает до конца месяца" : "Свободно до конца месяца"}
-      </div>
-      <div
-        className={`font-mono font-semibold tabular-nums tracking-tight leading-none ${numClass} ${
-          short ? "text-expense" : ""
-        }`}
-        style={{ wordSpacing: "-0.22em" }}
-      >
-        {formatMoney(Math.abs(m.free.value), m.base)}
-      </div>
-      {/* Формула целиком: по ней видно, из чего сложился итог, и её можно
-          сверить с разделом «Бюджет» — там ровно эти же доход и расход. */}
-      <div className="text-[14px] text-muted leading-relaxed max-w-[54ch]">
-        Доход {monthLabel(m.ym)}{" "}
-        <span className="font-mono tabular-nums text-income">
-          {formatMoney(m.free.income, m.base)}
-        </span>{" "}
-        − потрачено{" "}
-        <span className="font-mono tabular-nums text-expense">
-          {formatMoney(m.free.spent, m.base)}
-        </span>
-        {m.free.ahead > 0 && (
-          <>
-            {" "}
-            − впереди{" "}
-            <span className="font-mono tabular-nums text-expense">
-              {formatMoney(m.free.ahead, m.base)}
-            </span>
-          </>
-        )}
-      </div>
-      {(m.planIncome !== null || m.month.running) && (
-        <div className="text-[12.5px] text-muted">
-          {m.planIncome !== null && m.planExpense !== null ? (
-            <>
-              План месяца:{" "}
-              <span className="font-mono tabular-nums">
-                {formatMoney(m.planIncome, m.base)}
-              </span>{" "}
-              дохода и{" "}
-              <span className="font-mono tabular-nums">
-                {formatMoney(m.planExpense, m.base)}
-              </span>{" "}
-              расхода
-            </>
-          ) : (
-            <>
-              Если темп не изменится, расход месяца составит{" "}
-              <span className="font-mono tabular-nums">
-                {formatMoney(m.projExpense, m.base)}
-              </span>
-            </>
-          )}
-        </div>
-      )}
-      <div className="mt-1">
-        <div className="h-2 rounded-full bg-panel2 relative overflow-hidden">
-          <i
-            className="absolute inset-y-0 left-0 bg-expense/75 rounded-full"
-            style={{ width: `${spentPct}%` }}
-          />
-          <i
-            className="absolute inset-y-0 bg-warn/80"
-            style={{ left: `${spentPct}%`, width: `${Math.max(0, aheadPct)}%` }}
-          />
-        </div>
-        <div className="flex items-center justify-between pt-2 text-[12px] text-muted">
-          <span>
-            Прожито {m.month.day} из {m.month.days} дн
-            {m.free.ahead > 0 && " · жёлтым то, что ещё спишется"}
-          </span>
-          <span>осталось {m.month.left} дн</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Кольцо темпа: во сколько раз тратим быстрее обычного. */
-export function PaceRing({ m, size = 104 }: { m: DashboardModel; size?: number }) {
-  if (m.pace === null) {
-    return (
-      <div className="flex flex-col items-center text-center gap-2">
-        <div className="label">Темп трат</div>
-        <div className="text-sm text-muted py-6">Пока не с чем сравнить</div>
-      </div>
-    );
-  }
-  const over = m.pace - 1;
-  const tone = over > 0.08 ? "warn" : over < -0.08 ? "income" : "accent";
-  const stroke =
-    tone === "warn" ? "rgb(var(--c-warn))" : tone === "income" ? "rgb(var(--c-income))" : "rgb(var(--c-accent))";
-  // Длина окружности при r=40 — 251.2. Заполняем долю от обычного темпа,
-  // но не больше полного круга: при трёхкратном перерасходе кольцо просто полное.
-  const frac = Math.max(0, Math.min(1, m.pace));
-  return (
-    <div className="flex flex-col items-center text-center gap-2">
-      <div className="label">Темп трат</div>
-      <svg viewBox="0 0 100 100" width={size} height={size} aria-hidden="true">
-        <circle cx="50" cy="50" r="40" fill="none" stroke="rgb(var(--c-panel2))" strokeWidth="10" />
-        <circle
-          cx="50"
-          cy="50"
-          r="40"
-          fill="none"
-          stroke={stroke}
-          strokeWidth="10"
-          strokeLinecap="round"
-          strokeDasharray="251.2"
-          strokeDashoffset={251.2 * (1 - frac)}
-          transform="rotate(-90 50 50)"
-        />
-      </svg>
-      <div
-        className={`font-mono tabular-nums font-semibold text-xl ${
-          tone === "warn" ? "text-warn" : tone === "income" ? "text-income" : "text-accent"
-        }`}
-      >
-        {over >= 0 ? "+" : "−"}
-        {Math.abs(over * 100).toFixed(0)}%
-      </div>
-      <div className="text-[11.5px] text-muted leading-snug">
-        к обычному темпу
-        <br />
-        {m.month.day === 1
-          ? "за первый день"
-          : `за первые ${m.month.day} ${pluralRu(m.month.day, ["день", "дня", "дней"])}`}
-      </div>
     </div>
   );
 }
@@ -515,7 +333,18 @@ export function CashflowBars({
             style={{ cursor: onMonth ? "pointer" : undefined }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} vertical={false} />
-            <XAxis dataKey="month" stroke={chartAxisStroke} fontSize={11} tickLine={false} />
+            {/* Подписи через одну и без « г.»: пятнадцать полных «Окт. 25 г.»
+                в ряд не помещаются, и Recharts выбрасывал их сам — вразнобой,
+                отчего ось выглядела сбитой. Через одну шаг ровный, а год
+                остаётся при месяце и без служебного хвоста. */}
+            <XAxis
+              dataKey="month"
+              stroke={chartAxisStroke}
+              fontSize={11}
+              tickLine={false}
+              interval={1}
+              tickFormatter={(v: string) => String(v).replace(/\s*г\.$/, "")}
+            />
             <YAxis
               stroke={chartAxisStroke}
               fontSize={11}
@@ -812,6 +641,81 @@ export function UpcomingList({ m }: { m: DashboardModel }) {
  *
  * Отбор и порядок задаёт `buildNotices`; здесь только подача.
  */
+/**
+ * Планы Дзен-мани до конца месяца — второй вид «Запланированных операций».
+ *
+ * Расход и доход различаем цветом и знаком, как везде в продукте. Переводы не
+ * показываем: перекладывание денег между своими счетами не спишется и не
+ * придёт, а в списке ожидаемых операций читалось бы и тем и другим.
+ *
+ * Прогноз Дзен-мани от плана, поставленного руками, отличаем подписью: первое —
+ * догадка по регулярному платежу, второе — намерение человека.
+ */
+export function ZenPlannedList({
+  rows,
+  base,
+  today,
+}: {
+  rows: PlannedOp[] | null;
+  base: string;
+  today: string;
+}) {
+  if (rows === null) {
+    return (
+      <div className="text-sm text-muted text-center py-6">
+        Планы приезжают из Дзен-мани — подключите синхронизацию
+      </div>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="text-sm text-muted text-center py-6">
+        До конца месяца планов в Дзен-мани нет
+      </div>
+    );
+  }
+  return (
+    <div className="scroll-soft flex flex-col flex-1 min-h-0 -mx-2 px-2">
+      {rows.map((p) => {
+        const inDays = Math.max(0, Math.round((Date.parse(p.date) - Date.parse(today)) / 86400000));
+        return (
+          <div
+            key={p.id}
+            className="flex h-[56px] shrink-0 items-center justify-between gap-3 border-b border-border last:border-0"
+          >
+            <span className="flex items-center gap-2.5 min-w-0">
+              <i
+                className={`w-[3px] h-6 rounded-sm shrink-0 block ${
+                  inDays <= 1 ? "bg-warn" : "bg-border"
+                }`}
+              />
+              <span className="min-w-0">
+                <span className="block text-[14.5px] font-medium truncate">
+                  {p.payee || p.category || "Без названия"}
+                </span>
+                <span className="block text-[12px] text-muted truncate">
+                  {formatDate(p.date, "short")} ·{" "}
+                  {inDays === 0 ? "сегодня" : inDays === 1 ? "завтра" : `через ${inDays} дн`}
+                  {p.forecast ? " · прогноз" : ""}
+                  {p.comment ? ` · ${p.comment}` : ""}
+                </span>
+              </span>
+            </span>
+            <span
+              className={`block font-mono tabular-nums font-semibold text-[15px] shrink-0 ${
+                p.kind === "income" ? "text-income" : "text-expense"
+              }`}
+            >
+              {p.kind === "income" ? "+" : "−"}
+              {formatMoney(p.amountBase, base)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ObservationsList({
   m,
   limit = 5,

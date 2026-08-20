@@ -28,6 +28,7 @@ import {
   UpcomingList,
   ObservationsList,
   ActivityHeat,
+  ZenPlannedList,
 } from "./blocks";
 import { LinksRow } from "./LinksRow";
 import {
@@ -50,9 +51,14 @@ import { formatMoney, monthLabel, formatDate } from "../../lib/format";
 import { pluralRu } from "../../lib/plural";
 import { useDashboardModel, type DashboardModel } from "../../hooks/useDashboardModel";
 import { useAnalyticsTransactions } from "../../hooks/useAnalyticsTransactions";
+import { useZenPlanned } from "../../hooks/useZenPlanned";
 import { useDrillStore } from "../../store/useDrillStore";
+import { useCategoryMetaStore } from "../../store/useCategoryMetaStore";
+import { CategorySunburst } from "../CategorySunburst";
+import { buildHierarchy } from "../../lib/aggregations";
 import { useReportPeriodStore } from "../../store/useReportPeriodStore";
 import { periodKey } from "../../lib/period";
+import { monthEnd } from "../../lib/dashboardModel";
 import { affectsExpense } from "../../lib/txKindStyle";
 
 /** Название месяца отдельно от года: в пилюле год только шумит. */
@@ -65,57 +71,91 @@ function monthName(ym: string): string {
 }
 
 /**
- * Строка «ярлык — число» в колонке героя.
+ * Колонка «ярлык — число» в подвале героя.
  *
- * Именно строкой, а не плиткой в три колонки: колонка узкая, и в трёх колонках
- * «Расход прогноз» переносился на две строки, а число рядом обрезалось.
+ * Прежде это была строка «ярлык слева, число справа»: их было три, и списком
+ * они читались нормально. Осталось две, и список из двух строк выглядит
+ * обрубком — а рядом друг с другом доход и расход образуют пару, которую и
+ * хочется сравнить.
  */
-function StatRow({
+function StatCol({
   label,
   value,
   plan,
   tone,
   dense,
+  divided,
 }: {
   label: string;
   value: string;
   /** Плановая сумма месяца из «Бюджета». Стоит под фактом и не смешивается с ним. */
   plan?: string;
   tone?: "income" | "expense";
-  /** В карточке строки набраны теснее: там высота считанная, а не вся страница. */
+  /** В карточке набрано теснее: там высота считанная, а не вся страница. */
   dense?: boolean;
+  /** Волосок слева — граница между колонками. */
+  divided?: boolean;
 }) {
   return (
-    <div
-      className={clsx(
-        "flex items-baseline justify-between gap-3 border-b border-border/60 last:border-0",
-        dense ? "py-1.5" : "py-2"
-      )}
-    >
-      <span
+    <div className={clsx("min-w-0", divided && "border-l border-border pl-4", !divided && "pr-4")}>
+      <div
         className={clsx(
           "uppercase tracking-[0.1em] text-muted",
-          dense ? "text-[11.5px]" : "text-[12px]"
+          dense ? "text-[11px]" : "text-[12.5px]"
         )}
       >
         {label}
-      </span>
-      <span className="shrink-0 text-right">
-        <span
+      </div>
+      <div
+        className={clsx(
+          "font-mono tabular-nums font-semibold mt-1.5 truncate",
+          dense ? "text-[19px]" : "text-[30px]",
+          tone === "income" ? "text-income" : tone === "expense" ? "text-expense" : ""
+        )}
+      >
+        {value}
+      </div>
+      {plan && (
+        <div
           className={clsx(
-            "block font-mono tabular-nums font-semibold",
-            dense ? "text-[16.5px]" : "text-[18px]",
-            tone === "income" ? "text-income" : tone === "expense" ? "text-expense" : ""
+            "text-muted font-mono tabular-nums mt-1 truncate",
+            dense ? "text-[11.5px]" : "text-[12.5px]"
           )}
         >
-          {value}
-        </span>
-        {plan && (
-          <span className="block text-[11.5px] text-muted font-mono tabular-nums">
-            План {plan}
-          </span>
-        )}
-      </span>
+          План {plan}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Итог «Запланированных операций»: расход и приход одной строкой.
+ *
+ * Два числа рядом, а не одно: складывать их значило бы придумать «чистый
+ * остаток», а каждое здесь отвечает за свои строки списка. Знак и цвет
+ * повторяют строки, поэтому разбираться, что есть что, не нужно.
+ *
+ * Разделитель ставится только между двумя числами. Если ожидается что-то одно,
+ * точка посреди пустоты читалась бы как потерянное второе слагаемое.
+ */
+function PlannedTotals({ out, income, base }: { out: number; income: number; base: string }) {
+  const hasOut = out > 0;
+  const hasIn = income > 0;
+  const big = "font-mono tabular-nums font-semibold text-2xl 3xl:text-3xl leading-none";
+  return (
+    <div
+      className="flex items-baseline gap-2 flex-wrap pb-3 mb-1 border-b border-border"
+      style={{ wordSpacing: "-0.22em" }}
+    >
+      {/* Ничего не ожидается — показываем ноль без знака: подписывать плюсом
+          или минусом нечего. */}
+      {!hasOut && !hasIn && <span className={`${big} text-muted`}>{formatMoney(0, base)}</span>}
+      {hasOut && <span className={`${big} text-expense`}>−{formatMoney(out, base)}</span>}
+      {hasOut && hasIn && (
+        <span className="w-px h-5 bg-border shrink-0 self-center" aria-hidden="true" />
+      )}
+      {hasIn && <span className={`${big} text-income`}>+{formatMoney(income, base)}</span>}
     </div>
   );
 }
@@ -145,7 +185,15 @@ function HeroOpen({ m, sunken }: { m: DashboardModel; sunken?: boolean }) {
     // прижимать не к чему — итоги упирались в её кант. Там всё набрано на
     // ступень мельче, свободное место делится между блоками поровну, а снизу
     // карточка оставляет запас больше верхнего (см. `WidgetShell`).
-    <div className={clsx("flex flex-col h-full gap-5", sunken && "justify-between")}>
+    // Свободное место делится между блоками поровну в обоих видах. Прежде в
+    // открытом оно всё уходило в один просвет над итогами: те прижимались к
+    // низу колонки, а над ними зияла дыра под сотню пикселей.
+    //
+    // Десять пикселей снизу в открытом виде — оптическая поправка. По линейке
+    // колонка и так заканчивалась вровень с соседней карточкой, но у той
+    // содержимое отступает от канта на поля поддона, и её последняя строка
+    // стоит заметно выше. Ровно по коробке — значит ниже на глаз.
+    <div className={clsx("flex flex-col h-full gap-5 justify-between", !sunken && "pb-2.5")}>
       {/* Пилюля — она же заголовок страницы: другого h1 на экране нет, а
           оставлять главную вовсе без заголовка нельзя. Потому и набрана в
           полную силу — приглушённой десяткой она читалась как подпись к
@@ -164,7 +212,7 @@ function HeroOpen({ m, sunken }: { m: DashboardModel; sunken?: boolean }) {
       <div
         className={clsx(
           "font-mono font-semibold tabular-nums leading-none tracking-tight",
-          sunken ? "text-[40px]" : "text-5xl 3xl:text-6xl",
+          sunken ? "text-[40px]" : "text-[56px] 3xl:text-6xl",
           m.free.value < 0 && "text-expense"
         )}
         style={{ wordSpacing: "-0.22em" }}
@@ -175,18 +223,30 @@ function HeroOpen({ m, sunken }: { m: DashboardModel; sunken?: boolean }) {
       <p
         className={clsx(
           "leading-relaxed text-muted max-w-[30ch]",
-          sunken ? "text-[14.5px]" : "text-[16px]"
+          sunken ? "text-[14.5px]" : "text-[17px]"
         )}
       >
         {/* Причину нехватки называем ту, что есть на самом деле. «Расход
             обогнал доход» — утверждение о фактах месяца, и когда доход
             больше расхода, а в минус уводят ещё не списанные платежи, оно
-            просто неверно. */}
+            просто неверно.
+ 
+            Сумму будущих списаний называем ЧИСЛОМ. Из виджета ушли
+            «Запланированные платежи», и на экране остались доход с расходом —
+            по ним число героя не сходится: между ними ровно то, что ещё
+            спишется. Пока это «то, что ещё спишется» без суммы, расхождение
+            выглядит ошибкой счёта. */}
+        {/* Только факт месяца: доход минус расход.
+ 
+            Будущих списаний тут больше нет. Раньше из суммы вычитались
+            регулярные платежи, посчитанные по истории, — но у Дзен-мани есть и
+            свои планы, и какой из двух ответов человеку нужен, неизвестно.
+            Число, собранное из факта и одной из двух догадок, нельзя ни
+            проверить по экрану, ни объяснить. Запланированные операции живут
+            своим виджетом, там их и видно — обоими способами. */}
         {m.free.value < 0
-          ? m.factExpense > m.factIncome
-            ? "Столько не хватает: расход месяца уже обогнал доход"
-            : "Столько не хватает: запланированные платежи не укладываются в остаток"
-          : "Столько остаётся после уже потраченного и того, что ещё спишется"}
+          ? "Столько потрачено сверх дохода за этот месяц"
+          : "Столько осталось от дохода после всех трат месяца"}
         {/* Две фразы подряд сравнивают РАЗНОЕ: первая — расход с доходом
             внутри этого месяца, вторая — темп трат с прошлыми месяцами.
             Стоя рядом без связки, они читались противоречием: «расход
@@ -249,26 +309,28 @@ function HeroOpen({ m, sunken }: { m: DashboardModel; sunken?: boolean }) {
         </Link>
       </div>
 
-      <div className={clsx("border-t border-border pt-1", !sunken && "mt-auto pt-2")}>
-        <StatRow
-          dense={sunken}
-          label="Доход"
-          value={formatMoney(m.factIncome, m.base)}
-          plan={m.planIncome !== null ? formatMoney(m.planIncome, m.base) : undefined}
-          tone="income"
-        />
-        <StatRow
-          dense={sunken}
-          label="Расход"
-          value={formatMoney(m.factExpense, m.base)}
-          plan={m.planExpense !== null ? formatMoney(m.planExpense, m.base) : undefined}
-          tone="expense"
-        />
-        <StatRow
-          dense={sunken}
-          label="Запланированные платежи"
-          value={formatMoney(m.upcomingTotalBase, m.base)}
-        />
+      {/* Доход и расход — двумя колонками, а не строками списка.
+          Запланированные платежи отсюда ушли (у них свой виджет), и в столбик
+          осталось бы две сиротливые строки; рядом же они читаются тем, чем и
+          являются, — парой, которую сравнивают между собой. */}
+      <div className="border-t border-border pt-3">
+        <div className="grid grid-cols-2">
+          <StatCol
+            label="Доход"
+            value={formatMoney(m.factIncome, m.base)}
+            plan={m.planIncome !== null ? formatMoney(m.planIncome, m.base) : undefined}
+            tone="income"
+            dense={sunken}
+          />
+          <StatCol
+            label="Расход"
+            value={formatMoney(m.factExpense, m.base)}
+            plan={m.planExpense !== null ? formatMoney(m.planExpense, m.base) : undefined}
+            tone="expense"
+            dense={sunken}
+            divided
+          />
+        </div>
       </div>
     </div>
   );
@@ -294,7 +356,7 @@ function RailRow({ label, value, tone }: { label: string; value: string; tone?: 
  * Вариант «Разворот»: то же число, но в поддоне и с рейкой чисел справа.
  *
  * Волосок делит карточку надвое: слева типографика и два действия, справа
- * четыре числа, растянутые на всю высоту. Внизу слева — сколько месяца
+ * три числа, растянутые на всю высоту. Внизу слева — сколько месяца
  * пройдено: без неё низ колонки пустовал, а вопрос «много ли ещё впереди»
  * ровно тот, что задают, глядя на остаток.
  */
@@ -314,7 +376,9 @@ function HeroSplit({ m }: { m: DashboardModel }) {
       <div className="flex-1 min-h-0 mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1px_auto]">
         <div className="flex flex-col min-w-0">
           <span className="text-[11px] uppercase tracking-[0.1em] text-muted">
-            {short ? "Не хватает к концу месяца" : "Свободно к концу месяца"}
+            {/* «К концу месяца» больше не про это: будущие списания в сумму не
+                входят, это чистое сальдо прошедшей части месяца. */}
+            {short ? "Потрачено сверх дохода" : "Осталось от дохода"}
           </span>
           <div
             className={`font-mono font-semibold tabular-nums text-[36px] 3xl:text-[40px] leading-none tracking-tight mt-2.5 ${
@@ -329,10 +393,8 @@ function HeroSplit({ m }: { m: DashboardModel }) {
             {/* Причину нехватки называем ту, что есть на самом деле: доход может
                 быть больше расхода, а в минус уводить ещё не списанные платежи. */}
             {short
-              ? m.factExpense > m.factIncome
-                ? "Расход месяца уже обогнал доход."
-                : "Запланированные платежи не укладываются в остаток."
-              : "После потраченного и того, что ещё спишется."}
+              ? "Расход месяца обогнал доход."
+              : "Доход месяца за вычетом всего, что уже потрачено."}
             {over !== null && Math.abs(over) < 0.005 && " Тратите примерно как обычно."}
             {over !== null && Math.abs(over) >= 0.005 && (
               <>
@@ -394,8 +456,6 @@ function HeroSplit({ m }: { m: DashboardModel }) {
           <div className="hidden xl:block h-px bg-border" />
           <RailRow label="Расход" value={formatMoney(m.factExpense, m.base)} tone="expense" />
           <div className="hidden xl:block h-px bg-border" />
-          <RailRow label="Ещё спишется" value={formatMoney(m.upcomingTotalBase, m.base)} />
-          <div className="hidden xl:block h-px bg-border" />
           <RailRow label="На счетах" value={formatMoney(m.netWorth, m.base)} />
         </div>
       </div>
@@ -408,6 +468,7 @@ export function DashboardView() {
   const transactions = useAnalyticsTransactions();
   const showDrill = useDrillStore((s) => s.show);
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+  const categoryMeta = useCategoryMetaStore((s) => s.meta);
 
   const layout = useDashboardLayoutStore((s) => s.layout);
   const editing = useDashboardLayoutStore((s) => s.editing);
@@ -416,6 +477,60 @@ export function DashboardView() {
   const shift = useDashboardLayoutStore((s) => s.shift);
   const setLinks = useDashboardLayoutStore((s) => s.setLinks);
   const moveBefore = useDashboardLayoutStore((s) => s.moveBefore);
+
+  // Планы Дзен-мани — второй вид «Запланированных платежей». Отрезок тот же,
+  // что у своих регулярных: от сегодня до конца отчётного месяца.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const zenPlannedAll = useZenPlanned(todayIso, monthEnd(m.ym));
+  // Переводы не показываем: перекладывание между своими счетами ни спишется, ни
+  // придёт. Расход и доход считаем врозь — складывать их в одно число значило
+  // бы придумать «чистый остаток», которого в этом виджете никто не просил.
+  const zenPlanned = useMemo(
+    () => zenPlannedAll?.filter((p) => p.kind !== "transfer") ?? null,
+    [zenPlannedAll]
+  );
+  const zenPlannedOut = useMemo(
+    () =>
+      (zenPlanned ?? [])
+        .filter((p) => p.kind === "expense")
+        .reduce((sum, p) => sum + p.amountBase, 0),
+    [zenPlanned]
+  );
+  const zenPlannedIn = useMemo(
+    () =>
+      (zenPlanned ?? [])
+        .filter((p) => p.kind === "income")
+        .reduce((sum, p) => sum + p.amountBase, 0),
+    [zenPlanned]
+  );
+
+  // Кольца статей: те же деревья, что на «Категориях», только за текущий месяц.
+  const monthTx = useMemo(
+    () => transactions.filter((t) => periodKey(t.date, monthStartDay) === m.ym),
+    [transactions, monthStartDay, m.ym]
+  );
+  const donutExpense = useMemo(() => buildHierarchy(monthTx, "expense"), [monthTx]);
+  const donutIncome = useMemo(() => buildHierarchy(monthTx, "income"), [monthTx]);
+
+  /**
+   * Открыть список операций статьи или подстатьи — за ТЕКУЩИЙ месяц.
+   *
+   * Виджеты главной все про этот месяц: и доли в кольце, и суммы в списке
+   * статей посчитаны по нему. Открывать по ним сквозную историю значило бы
+   * показать другие числа, чем те, по которым щёлкнули.
+   */
+  const drillCategory = useMemo(() => {
+    const match = (kind: "expense" | "income", t: (typeof transactions)[number]) =>
+      kind === "expense" ? affectsExpense(t.kind) : t.kind === "income";
+    return (kind: "expense" | "income", name: string, full = false) =>
+      showDrill(
+        `${name} · ${monthLabel(m.ym)}`,
+        monthTx.filter(
+          (t) => match(kind, t) && (full ? t.categoryFull === name : t.category === name)
+        ),
+        kind === "expense" ? "Расходы по статье" : "Доходы по статье"
+      );
+  }, [monthTx, showDrill, m.ym]);
 
   const drag = useWidgetDrag(
     (dragKey, overKey) => void move(dragKey, overKey),
@@ -447,10 +562,11 @@ export function DashboardView() {
           "Месяц"
         ),
       // Возвраты тоже берём: именно они уменьшили ту сумму, по которой кликнули.
+      // Тоже за текущий месяц: проценты в виджете считаны по нему.
       onCategory: (name: string) =>
         showDrill(
-          name,
-          transactions.filter((t) => affectsExpense(t.kind) && t.category === name),
+          `${name} · ${monthLabel(m.ym)}`,
+          monthTx.filter((t) => affectsExpense(t.kind) && t.category === name),
           "Расходы по категории"
         ),
       onDay: (date: string) =>
@@ -468,7 +584,7 @@ export function DashboardView() {
           "Операции по счёту"
         ),
     }),
-    [transactions, showDrill, monthStartDay]
+    [transactions, monthTx, showDrill, monthStartDay, m.ym]
   );
 
   /** Содержимое виджета. Обойму, ширину и ручки надевает `WidgetShell`. */
@@ -500,22 +616,30 @@ export function DashboardView() {
           </>
         );
 
-      case "upcoming":
+      case "upcoming": {
+        // Два ответа на один вопрос: наш расчёт по истории и планы, заведённые
+        // в самом Дзен-мани. Итог считается по тем же строкам, что показаны,
+        // иначе сумма над списком не сошлась бы с ним.
+        const zen = widgetView(widgetMeta("upcoming"), p.view)?.id === "zen";
         return (
           <>
-            <BlockTitle title="Запланированные платежи" to="/recurring" linkLabel="Регулярные" />
+            <BlockTitle title="Запланированные операции" to="/recurring" linkLabel="Регулярные" />
             {/* Итог подан так же, как совокупный баланс у соседней карточки:
                 крупным числом под заголовком. Мелкой строчкой в шапке он
                 выбивался из ряда. */}
-            <div
-              className="font-mono tabular-nums font-semibold text-2xl 3xl:text-3xl leading-none pb-3 mb-1 border-b border-border text-expense"
-              style={{ wordSpacing: "-0.22em" }}
-            >
-              {formatMoney(m.upcomingTotalBase, m.base)}
-            </div>
-            <UpcomingList m={m} />
+            <PlannedTotals
+              out={zen ? zenPlannedOut : m.upcomingTotalBase}
+              income={zen ? zenPlannedIn : 0}
+              base={m.base}
+            />
+            {zen ? (
+              <ZenPlannedList rows={zenPlanned} base={m.base} today={todayIso} />
+            ) : (
+              <UpcomingList m={m} />
+            )}
           </>
         );
+      }
 
       case "links":
         return (
@@ -575,6 +699,38 @@ export function DashboardView() {
               linkLabel="Категории"
             />
             <CategoriesList m={m} onCategory={onCategory} />
+          </>
+        );
+
+      case "donutExpense":
+        return (
+          <>
+            <BlockTitle title="Кольцо расходов" to="/categories?kind=expense" linkLabel="Категории" />
+            <CategorySunburst
+              compact
+              data={donutExpense}
+              meta={categoryMeta}
+              base={m.base}
+              kind="expense"
+              onOpenCategory={(name) => drillCategory("expense", name)}
+              onOpenSubcategory={(full) => drillCategory("expense", full, true)}
+            />
+          </>
+        );
+
+      case "donutIncome":
+        return (
+          <>
+            <BlockTitle title="Кольцо доходов" to="/categories?kind=income" linkLabel="Категории" />
+            <CategorySunburst
+              compact
+              data={donutIncome}
+              meta={categoryMeta}
+              base={m.base}
+              kind="income"
+              onOpenCategory={(name) => drillCategory("income", name)}
+              onOpenSubcategory={(full) => drillCategory("income", full, true)}
+            />
           </>
         );
 
