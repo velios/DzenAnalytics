@@ -51,7 +51,6 @@ import {
   monthLabel,
   monthLabelFull,
   formatNum,
-  toNum,
   ymKey,
   chartTooltipProps,
   chartGridStroke,
@@ -61,6 +60,8 @@ import { Stat } from "../components/Stat";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { pluralRu } from "../lib/plural";
+import { ChartTooltipCard, TooltipFacts, SeriesTooltip } from "../components/TooltipFacts";
 import { SortableTable } from "../components/SortableTable";
 import type { MonthBucket } from "../lib/aggregations";
 
@@ -214,7 +215,7 @@ export function CashflowPage() {
       <PageHeader
         icon={LineChartIcon}
         title="Cash-flow"
-        hint="Доходы, расходы и чистый поток по месяцам."
+        hint="Доходы, расходы и чистый поток по месяцам"
       />
       <GlobalFilters period={lp} />
 
@@ -257,7 +258,7 @@ export function CashflowPage() {
 
       <InsightsPanel insights={insights} base={base} />
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <div className="font-semibold">
@@ -270,17 +271,17 @@ export function CashflowPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+            <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
               <button
                 onClick={() => setVizMode("bars")}
-                className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${vizMode === "bars" ? "bg-accent text-accent-fg" : "text-muted"}`}
+                className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${vizMode === "bars" ? "bg-accent text-accent-fg" : "text-muted"}`}
               >
                 <BarChart3 className="w-3 h-3" />
                 Бары
               </button>
               <button
                 onClick={() => setVizMode("stream")}
-                className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${vizMode === "stream" ? "bg-accent text-accent-fg" : "text-muted"}`}
+                className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${vizMode === "stream" ? "bg-accent text-accent-fg" : "text-muted"}`}
               >
                 <Layers className="w-3 h-3" />
                 Поток
@@ -324,18 +325,17 @@ export function CashflowPage() {
               />
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => formatMoney(toNum(v), base)}
-                // Прогнозные строки — всегда после фактических (Доходы,
-                // Расходы, Чистый поток), и в прошлых, и в прогнозных месяцах.
-                itemSorter={(item) =>
-                  ({
-                    income: 0,
-                    expense: 1,
-                    net: 2,
-                    netForecastTop: 3,
-                    netForecastBottom: 4,
-                    netForecastMid: 5,
-                  }[String(item.dataKey)] ?? 9)
+                content={
+                  <SeriesTooltip
+                    formatValue={(v) => formatMoney(v, base)}
+                    // Заголовок уже готов: в данных графика `month` — это
+                    // подпись месяца, а не ключ, и пропускать её через
+                    // `monthLabel` значило получить «Invalid Date».
+                    // Границы прогнозного коридора — служебные серии: на графике
+                    // это одна заливка, а строками они читались бы как три
+                    // отдельных числа.
+                    skipKeys={["netForecastTop", "netForecastBottom"]}
+                  />
                 }
               />
               <Legend
@@ -452,11 +452,12 @@ export function CashflowPage() {
                 <YAxis hide />
                 <Tooltip
                   {...chartTooltipProps}
-                  labelFormatter={(d) => monthLabel(String(d))}
-                  formatter={(v: unknown, n: unknown) => [
-                    formatMoney(toNum(v), base),
-                    String(n),
-                  ]}
+                  content={
+                    <SeriesTooltip
+                      formatValue={(v) => formatMoney(v, base)}
+                      formatLabel={(d) => monthLabel(String(d))}
+                    />
+                  }
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {stream.categories.map((cat) => {
@@ -514,7 +515,7 @@ export function CashflowPage() {
       </div>
 
       {allYears.length >= 2 && (
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
             <div>
               <div className="font-semibold">Год к году</div>
@@ -523,21 +524,21 @@ export function CashflowPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+              <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
                 <button
                   onClick={() => setYoyKind("expense")}
-                  className={`px-3 py-1 text-xs rounded-md ${yoyKind === "expense" ? "bg-expense text-white" : "text-muted"}`}
+                  className={`px-3 py-1 text-xs rounded-full ${yoyKind === "expense" ? "bg-expense text-white" : "text-muted"}`}
                 >
                   Расходы
                 </button>
                 <button
                   onClick={() => setYoyKind("income")}
-                  className={`px-3 py-1 text-xs rounded-md ${yoyKind === "income" ? "bg-income text-white" : "text-muted"}`}
+                  className={`px-3 py-1 text-xs rounded-full ${yoyKind === "income" ? "bg-income text-white" : "text-muted"}`}
                 >
                   Доходы
                 </button>
               </div>
-              <div className="flex items-center gap-1 bg-panel2 rounded-lg p-1 border border-border">
+              <div className="flex items-center gap-1 bg-panel2 rounded-full p-1 border border-border shadow-tray">
                 <button
                   onClick={() =>
                     setYoyYear((y) => {
@@ -578,7 +579,7 @@ export function CashflowPage() {
                 />
                 <Tooltip
                   {...chartTooltipProps}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base)}
+                  content={<SeriesTooltip formatValue={(v) => formatMoney(v, base)} />}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar
@@ -603,7 +604,7 @@ export function CashflowPage() {
 
       {/* Seasonality */}
       {seasonality.some((s) => s.yearsSampled >= 2) && (
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <div>
               <div className="font-semibold flex items-center gap-2">
@@ -625,18 +626,37 @@ export function CashflowPage() {
                   fontSize={11}
                   tickFormatter={(v) => formatNum(v, { compact: true })}
                 />
+                {/* Своя подсказка, а не общая: тут кроме суммы есть отклонение
+                    от среднего и размер выборки. Сплошной строкой
+                    «85 166 ₽ · +12% · 3 года в выборке» это читалось тяжело —
+                    теперь три отдельные строки, а размер выборки ушёл в
+                    примечание, потому что это не про этот месяц, а про то,
+                    насколько числу можно верить. */}
                 <Tooltip
                   {...chartTooltipProps}
-                  // Bars coloured per-point via <Cell> (no Bar fill), so pin the
-                  // tooltip value to the theme text colour for dark-theme readability.
-                  itemStyle={{ color: "rgb(var(--c-text))" }}
-                  formatter={(v: unknown, _n: unknown, p: { payload?: { expenseDeviationPct?: number; yearsSampled?: number } }) => {
-                    const dev = p.payload?.expenseDeviationPct ?? 0;
-                    const ys = p.payload?.yearsSampled ?? 0;
-                    return [
-                      `${formatMoney(toNum(v), base)} · ${dev > 0 ? "+" : ""}${(dev * 100).toFixed(0)}% · ${ys} год${ys === 1 ? "" : "а"} в выборке`,
-                      "Расход",
-                    ];
+                  content={({ active, payload, label }) => {
+                    const point = payload?.[0]?.payload as
+                      | { expenseDeviationPct?: number; yearsSampled?: number }
+                      | undefined;
+                    const value = Number(payload?.[0]?.value);
+                    if (!active || !point || !Number.isFinite(value)) return null;
+                    const dev = point.expenseDeviationPct ?? 0;
+                    const ys = point.yearsSampled ?? 0;
+                    return (
+                      <ChartTooltipCard>
+                        <TooltipFacts
+                          title={String(label ?? "")}
+                          facts={[
+                            { label: "Расход", value: formatMoney(value, base), strong: true },
+                            {
+                              label: "К среднему",
+                              value: `${dev > 0 ? "+" : dev < 0 ? "−" : ""}${Math.abs(dev * 100).toFixed(0)}%`,
+                            },
+                          ]}
+                          note={`${ys} ${pluralRu(ys, ["год", "года", "лет"])} в выборке`}
+                        />
+                      </ChartTooltipCard>
+                    );
                   }}
                 />
                 <ReferenceLine y={0} stroke={chartGridStroke} />
@@ -690,7 +710,7 @@ export function CashflowPage() {
         </div>
       )}
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <SortableTable<MonthBucket>
           title="Помесячная сводка"
           data={months}

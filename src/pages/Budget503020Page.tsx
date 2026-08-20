@@ -23,6 +23,7 @@ import { buildNeedsWants, savingsRateSeries } from "../lib/needsWants";
 import { PeriodPills } from "../components/PeriodPills";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { SeriesTooltip } from "../components/TooltipFacts";
 import { Stat } from "../components/Stat";
 import { EmptyState } from "../components/EmptyState";
 import {
@@ -110,12 +111,12 @@ export function Budget503020Page() {
       <PageHeader
         icon={PieIcon}
         title="50/30/20"
-        hint="Нужды / желания / сбережения против бюджетного ориентира 50/30/20."
+        hint="Нужды / желания / сбережения против бюджетного ориентира 50/30/20"
         right={<PeriodPills value={period} onChange={setPeriod} />}
       />
       <GlobalFilters showDateRange={false} dateRangeHint="Правило 50/30/20 считается за месяц, выбранный ниже" />
 
-      <details className="card card-pad text-sm group">
+      <details className="card-tray card-pad text-sm group">
         <summary className="cursor-pointer flex items-center gap-2 font-medium list-none">
           <Info className="w-4 h-4 text-accent shrink-0" />
           Что это за правило и как настроить деление
@@ -198,13 +199,13 @@ export function Budget503020Page() {
         </div>
       )}
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="font-semibold mb-1">Факт против цели</div>
         <div className="text-xs text-muted mb-4">
           Доли от дохода. Пунктир — границы правила 50/30/20.
         </div>
         <div className="relative">
-          <div className="flex h-8 rounded-md overflow-hidden">
+          <div className="flex h-8 rounded-full overflow-hidden">
             {split.needs > 0 && (
               <div
                 style={{ width: `${w(split.needs)}%`, backgroundColor: NEEDS_COLOR }}
@@ -261,7 +262,7 @@ export function Budget503020Page() {
         )}
       </div>
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="font-semibold mb-1">Норма сбережений за 12 месяцев</div>
         <div className="text-xs text-muted mb-4">
           (доход − расход) / доход по месяцам. Пунктир — цель 20%.
@@ -278,7 +279,9 @@ export function Budget503020Page() {
               />
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => [`${v}%`, "Норма сбережений"]}
+                content={
+                  <SeriesTooltip formatValue={(v) => `${Math.round(v)}%`} />
+                }
               />
               <ReferenceLine
                 y={20}

@@ -15,6 +15,7 @@ import {
   X,
   Combine,
   UserPlus,
+  XSquare,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -521,7 +522,7 @@ export function CounterpartyManager() {
               setDupOnly(false);
             }}
             aria-pressed={orphanOnly}
-            title="Получатели из выписок, под которых нет записи в справочнике. Число — сколько таких получателей, а не операций"
+            title={"Получатели без записи в справочнике\nПришли из выписок. Число — сколько таких получателей, а не операций."}
             className={clsx(
               "text-sm flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border shrink-0",
               orphanOnly
@@ -596,6 +597,7 @@ export function CounterpartyManager() {
               onClick={() => setSelected(new Set())}
               className="btn-ghost text-sm text-muted"
             >
+              <XSquare className="w-3.5 h-3.5" />
               Снять выделение
             </button>
           </div>

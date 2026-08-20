@@ -45,6 +45,7 @@ import { pluralRu } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { ChartTooltipCard, TooltipFacts } from "../components/TooltipFacts";
 import { MultiSelect } from "../components/MultiSelect";
 import { InfoPopover } from "../components/InfoPopover";
 
@@ -226,15 +227,15 @@ export function DynamicsPage() {
 
       <GlobalFilters period={lp} />
 
-      <div className="card card-pad space-y-4">
+      <div className="card-tray card-pad space-y-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+          <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
             {METRICS.map((m) => (
               <button
                 key={m}
                 onClick={() => setMetric(m)}
                 className={clsx(
-                  "px-2.5 py-1 text-xs rounded-md transition-colors",
+                  "px-2.5 py-1 text-xs rounded-full transition-colors",
                   metric === m ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
                 )}
               >
@@ -243,13 +244,13 @@ export function DynamicsPage() {
             ))}
           </div>
 
-          <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+          <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
             {GRANULARITIES.map((g) => (
               <button
                 key={g}
                 onClick={() => setGranularity(g)}
                 className={clsx(
-                  "px-2.5 py-1 text-xs rounded-md transition-colors",
+                  "px-2.5 py-1 text-xs rounded-full transition-colors",
                   granularity === g
                     ? "bg-accent text-accent-fg"
                     : "text-muted hover:text-text"
@@ -464,21 +465,26 @@ function DynTooltip({
   if (!active || !point) return null;
   const signed = metric === "net" || (metric === "expense" && point.value < 0);
   return (
-    <div className="rounded-lg border border-border bg-panel shadow-lg px-3 py-2 text-xs">
-      <div className="text-muted mb-1">{point.fullLabel}</div>
-      <div className="font-semibold tabular-nums">
-        {METRIC_LABELS[metric]}: {formatMoney(point.value, base, { signed })}
-      </div>
-      {point.refunds != null && (
-        <div className="mt-1 pt-1 border-t border-border/60 text-muted space-y-0.5">
-          <div className="tabular-nums">
-            Траты: {formatMoney(point.gross ?? 0, base)}
-          </div>
-          <div className="tabular-nums">
-            Возвраты: −{formatMoney(point.refunds, base)}
-          </div>
-        </div>
-      )}
-    </div>
+    // Подсказка на общих компонентах продукта, а не своей вёрсткой: у графиков
+    // подсказки обязаны выглядеть одинаково, иначе рядом с бюджетным графиком
+    // это читается как два разных приложения.
+    <ChartTooltipCard>
+      <TooltipFacts
+        title={point.fullLabel}
+        facts={[
+          {
+            label: METRIC_LABELS[metric],
+            value: formatMoney(point.value, base, { signed }),
+            strong: true,
+          },
+          ...(point.refunds != null
+            ? [
+                { label: "Траты", value: formatMoney(point.gross ?? 0, base) },
+                { label: "Возвраты", value: `−${formatMoney(point.refunds, base)}` },
+              ]
+            : []),
+        ]}
+      />
+    </ChartTooltipCard>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Copy, AlertCircle, Pencil, Trash2, ShieldOff } from "lucide-react";
+import { Copy, AlertCircle, Pencil, Trash2, ShieldOff, XSquare } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -107,7 +107,7 @@ export function DuplicatesPage() {
         icon={Copy}
         iconTone="text-warn"
         title="Дубликаты"
-        hint="Подозрительно похожие операции: одинаковая сумма, тот же получатель и тот же тип в пределах окна. Часто бывают при двойном импорте."
+        hint="Подозрительно похожие операции: одинаковая сумма, тот же получатель и тот же тип в пределах окна — часто бывают при двойном импорте"
         hintWrap
         right={
           <div className="flex items-center gap-4 flex-wrap">
@@ -151,7 +151,7 @@ export function DuplicatesPage() {
 
 
       {groups.length === 0 ? (
-        <div className="card card-pad text-center py-12">
+        <div className="card-tray card-pad text-center py-12">
           <AlertCircle className="w-10 h-10 text-muted mx-auto mb-3" />
           <div className="font-medium mb-1">Дубликатов не найдено</div>
           <div className="text-sm text-muted">
@@ -172,7 +172,7 @@ export function DuplicatesPage() {
                 return next;
               });
             return (
-              <div key={i} className="card card-pad">
+              <div key={i} className="card-tray card-pad">
                 <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
                   <div className="min-w-0">
                     <div className="font-medium">
@@ -308,6 +308,7 @@ export function DuplicatesPage() {
             onClick={() => setSelected(new Set())}
             className="btn-ghost text-sm text-muted"
           >
+            <XSquare className="w-3.5 h-3.5" />
             Снять выделение
           </button>
         </div>

@@ -154,7 +154,7 @@ export function UncategorizedPage() {
       <PageHeader
         icon={Tag}
         title="Без категории"
-        hint="Операции без категории — собраны в одном месте. Подсказки ниже помогут быстро их разнести, а правила — категоризировать похожие автоматически."
+        hint="Операции без категории в одном месте: подсказки помогут их разнести, а правила — категоризировать похожие автоматически"
         hintWrap
       />
 
@@ -309,7 +309,7 @@ export function UncategorizedPage() {
       )}
 
       {list.length === 0 ? (
-        <div className="card card-pad text-center py-12">
+        <div className="card-tray card-pad text-center py-12">
           <AlertCircle className="w-10 h-10 text-income mx-auto mb-3" />
           <div className="font-medium mb-1">Все операции категоризированы — отлично!</div>
           <div className="text-sm text-muted">
@@ -317,7 +317,7 @@ export function UncategorizedPage() {
           </div>
         </div>
       ) : (
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <div className="flex items-center justify-between mb-3">
             <div className="font-semibold">Все без категории ({list.length})</div>
             <button

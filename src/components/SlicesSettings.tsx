@@ -40,7 +40,7 @@ export function SlicesSettings() {
   }
 
   return (
-    <div className="card card-pad">
+    <div className="card-tray card-pad">
       <div className="flex items-start justify-between gap-3 mb-3">
         <SettingsSectionHeader icon={Layers} title="Разрезы данных" />
         <InfoPopover>

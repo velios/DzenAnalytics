@@ -3,6 +3,7 @@ import {
   Search,
   Download,
   Plus,
+  Copy,
   Pencil,
   Trash2,
   Eye,
@@ -18,6 +19,7 @@ import {
   Coins,
   ChevronDown,
   PiggyBank,
+  XSquare,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -25,10 +27,11 @@ import { useDisplayStore } from "../store/useDisplayStore";
 import { useEditsStore, type TransactionEdit } from "../store/useEditsStore";
 import { useDraftsStore } from "../store/useDraftsStore";
 import { useDeletedStore } from "../store/useDeletedStore";
+import { useSearchParams } from "react-router-dom";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useZenmoneyStore, getLiveAccountsFromCache } from "../store/useZenmoneyStore";
-import { confirm } from "../store/useConfirmStore";
+import { confirm, useConfirmStore } from "../store/useConfirmStore";
 import { pluralRu } from "../lib/plural";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { Tooltip } from "../components/Tooltip";
@@ -108,10 +111,14 @@ function transferCounterparty(t: Transaction): string | null {
 // Колонка есть у ВСЕХ строк, просто у просмотренных она пустая: так пометка
 // ничего не сдвигает, а глазом читается вертикальной дорожкой — сразу видно,
 // сколько нового и где оно кончается.
+// Первая колонка — ровно под чекбокс (16 пикселей плюс по два по бокам). Была
+// 32, и за ней стояла ещё одна, 10-пиксельная, под точку «новая операция» — со
+// своими зазорами это давало 66 пикселей от края до категории при 16 пикселях
+// видимого содержимого. Точка переехала на значок категории, полоса убрана.
 const GRID_COLS_FULL =
-  "32px 10px 84px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 2.6fr) 140px 88px";
+  "20px 84px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 2.6fr) 140px 112px";
 const GRID_COLS_NODATE =
-  "32px 10px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 2.6fr) 140px 88px";
+  "20px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 2.6fr) 140px 112px";
 
 const PAGE_SIZE = 100;
 
@@ -154,6 +161,28 @@ export function TransactionsPage() {
   }
   const filters = useFiltersStore();
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+
+  // Месяц из ссылки (`/transactions?month=2026-08`) — по ней приходят с
+  // главной, где весь экран про один месяц, и лента должна открыться за него,
+  // а не за тот период, что остался с прошлого раза.
+  //
+  // Своего периода у ленты нет, она живёт на общем отборе, — поэтому ссылка
+  // именно ПЕРЕКЛЮЧАЕТ общий период, а не заводит второй, страничный. Ставим
+  // один раз на приход по ссылке: дальше человек волен выбрать любой другой,
+  // и повторно навязывать ему августовский мы не будем.
+  const [searchParams] = useSearchParams();
+  const monthParam = useMemo(() => {
+    const q = searchParams.get("month");
+    return q && /^\d{4}-\d{2}$/.test(q) ? q : null;
+  }, [searchParams]);
+
+  const setMonth = filters.setMonth;
+  const appliedMonth = useRef<string | null>(null);
+  useEffect(() => {
+    if (!monthParam || appliedMonth.current === monthParam) return;
+    appliedMonth.current = monthParam;
+    setMonth(monthParam);
+  }, [monthParam, setMonth]);
 
   async function handleDelete(tx: Transaction) {
     const pushMode = useZenmoneyStore.getState().pushMode;
@@ -200,6 +229,9 @@ export function TransactionsPage() {
   };
   const [creating, setCreating] = useState<TxKind | null>(null);
   const [creatingDebt, setCreatingDebt] = useState(false);
+  // Операция, с которой снимают копию (issue #78). Живёт отдельно от
+  // `creating`: там выбирают вид с нуля, здесь форма открывается заполненной.
+  const [copying, setCopying] = useState<Transaction | null>(null);
 
   // ── «Добавить» dropdown: pick which kind of operation to create. ─────
   // Anchored to addMenuRef; opening/closing (outside-click, Esc, scroll) is
@@ -221,6 +253,30 @@ export function TransactionsPage() {
   // ── Bulk selection + edit ──────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+
+  // Escape снимает выделение. Ставим обработчик, только когда выделение есть и
+  // сверху ничего не открыто: Escape всегда закрывает САМОЕ верхнее — окно,
+  // диалог, меню, — и перехватывать его у них нельзя. Оба обработчика висят на
+  // `window`, где `stopPropagation` соседей не глушит, поэтому разводим их не
+  // порядком подписки, а условием.
+  const confirmOpen = useConfirmStore((s) => s.isOpen);
+  const anythingOnTop =
+    Boolean(editing) ||
+    Boolean(creating) ||
+    Boolean(copying) ||
+    bulkOpen ||
+    trashOpen ||
+    addMenuOpen ||
+    sortOpen ||
+    confirmOpen;
+  useEffect(() => {
+    if (selected.size === 0 || anythingOnTop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelected(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected.size, anythingOnTop]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -475,7 +531,7 @@ export function TransactionsPage() {
       <PageHeader
         icon={ListChecks}
         title="Операции"
-        hint="Сквозная лента операций. Двойной клик — редактирование строки."
+        hint="Сквозная лента операций"
       />
       <GlobalFilters />
 
@@ -529,11 +585,13 @@ export function TransactionsPage() {
         />
       </div>
 
-      <div className="card overflow-hidden">
+      {/* Двойной кант вокруг таблицы — как у карточек главной. */}
+      <div className="tray">
+      <div className="tray-core overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center gap-3 flex-wrap">
           <div
             className="relative flex-1 min-w-[220px]"
-            title="Быстрый поиск только по этой таблице (получатель, комментарий, категория, счёт) — не сохраняется и не влияет на другие страницы"
+            title={"Быстрый поиск по этой таблице\nИщет по получателю, комментарию, категории и счёту. Не сохраняется и на другие страницы не влияет."}
           >
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
             <input
@@ -729,6 +787,7 @@ export function TransactionsPage() {
                 edits={edits}
                 drafts={drafts}
                 onEdit={openEditor}
+                onCopy={apiConnected ? setCopying : undefined}
                 onDelete={handleDelete}
                 selected={selected}
                 onToggleSelect={toggleSelect}
@@ -750,6 +809,7 @@ export function TransactionsPage() {
                 edited={!!edits[t.id]}
                 draft={!!drafts[t.id]}
                 onEdit={() => openEditor(t)}
+                onCopy={apiConnected ? () => setCopying(t) : undefined}
                 onDelete={() => handleDelete(t)}
                 selected={selected.has(t.id)}
                 onToggleSelect={() => toggleSelect(t.id)}
@@ -770,12 +830,24 @@ export function TransactionsPage() {
           </div>
         )}
       </div>
+      </div>
 
       {editing && (
         <EditTransactionModal
           key={editing.id}
           tx={editing}
           onClose={() => setEditing(null)}
+          onCopy={
+            apiConnected
+              ? () => {
+                  // Карточку правки закрываем: копия — отдельная операция, и
+                  // держать обе формы открытыми значило бы предлагать править
+                  // образец и копию разом.
+                  setEditing(null);
+                  setCopying(editing);
+                }
+              : undefined
+          }
           onNavigate={(dir) => {
             const i = sorted.findIndex((t) => t.id === editing.id);
             const next = sorted[i + dir];
@@ -792,6 +864,14 @@ export function TransactionsPage() {
             setCreating(null);
             setCreatingDebt(false);
           }}
+        />
+      )}
+
+      {copying && (
+        <EditTransactionModal
+          key={`copy-${copying.id}`}
+          template={copying}
+          onClose={() => setCopying(null)}
         />
       )}
 
@@ -851,6 +931,7 @@ export function TransactionsPage() {
               onClick={() => setSelected(new Set())}
               className="btn-ghost text-sm text-muted"
             >
+              <XSquare className="w-3.5 h-3.5" />
               Снять выделение
             </button>
           </div>
@@ -910,9 +991,6 @@ function HeaderRow({
         title="Выбрать всё (под фильтрами)"
         aria-label="Выбрать все операции"
       />
-      {/* Пустая ячейка под дорожку с точками «новая» — колонка есть у всех
-          строк, включая шапку, иначе они разъедутся. */}
-      <div aria-hidden />
       {!grouped && <div>Дата</div>}
       <div>Категория</div>
       <div>Счёт</div>
@@ -932,6 +1010,7 @@ function DayGroup({
   edits,
   drafts,
   onEdit,
+  onCopy,
   onDelete,
   selected,
   onToggleSelect,
@@ -943,6 +1022,9 @@ function DayGroup({
   edits: Record<string, unknown>;
   drafts: Record<string, unknown>;
   onEdit: (t: Transaction) => void;
+  /** Не задан — копировать некуда: без подключённого Дзен-мани новых операций
+   *  не создать, и кнопка не рисуется. */
+  onCopy?: (t: Transaction) => void;
   onDelete: (t: Transaction) => void;
   selected: Set<string>;
   onToggleSelect: (id: string) => void;
@@ -1019,6 +1101,7 @@ function DayGroup({
           edited={!!edits[t.id]}
           draft={!!drafts[t.id]}
           onEdit={() => onEdit(t)}
+          onCopy={onCopy && (() => onCopy(t))}
           onDelete={() => onDelete(t)}
           selected={selected.has(t.id)}
           onToggleSelect={() => onToggleSelect(t.id)}
@@ -1039,6 +1122,7 @@ function Row({
   edited,
   draft = false,
   onEdit,
+  onCopy,
   onDelete,
   selected,
   onToggleSelect,
@@ -1048,6 +1132,7 @@ function Row({
   edited: boolean;
   draft?: boolean;
   onEdit: () => void;
+  onCopy?: () => void;
   onDelete: () => void;
   selected: boolean;
   onToggleSelect: () => void;
@@ -1120,26 +1205,14 @@ function Row({
         onChange={onToggleSelect}
         aria-label="Выбрать операцию"
       />
-      {/* «Новая» — операция приехала из банка, и в Дзен-мани её ещё не
-          открывали (`viewed: false`). Черновики не помечаем: у них своя
-          красная точка «не синхронизирована», это про другое. */}
-      <span className="flex items-center justify-center" aria-hidden={!tx.unseen}>
-        {tx.unseen && !draft && (
-          <Tooltip content="Новая — вы ещё не открывали её в Дзен-мани">
-            <span
-              className="w-1.5 h-1.5 rounded-full bg-accent"
-              role="img"
-              aria-label="Новая операция"
-            />
-          </Tooltip>
-        )}
-      </span>
       {!hideDate && (
         <div className="text-muted tabular-nums whitespace-nowrap">
           {tx.date.slice(8, 10)}.{tx.date.slice(5, 7)}.{tx.date.slice(0, 4)}
         </div>
       )}
-      <div className="flex items-center gap-2 min-w-0" title={tx.categoryFull}>
+      {/* Без `title`: подсказка повторяла название, которое тут же и написано,
+          и всплывала при каждом проходе мышью над лентой. */}
+      <div className="flex items-center gap-2 min-w-0">
         <span className="relative inline-flex shrink-0">
           {/* Sub-category operations show the SUB-tag's own icon (resolved by the
               «Parent / Sub» path), not the parent's. */}
@@ -1154,6 +1227,21 @@ function Row({
               aria-label="Новая операция — не синхронизирована"
             />
           )}
+          {/* «Новая» — операция приехала из банка, и в Дзен-мани её ещё не
+              открывали (`viewed: false`). Стоит тем же значком на иконке
+              категории, а не отдельной колонкой: колонка занимала место в
+              каждой строке ради метки, которая бывает у единиц. Столкнуться с
+              красной точкой черновика она не может — черновики этой пометки не
+              получают, у них своя. */}
+          {tx.unseen && !draft && (
+            <Tooltip content="Новая — вы ещё не открывали её в Дзен-мани">
+              <span
+                className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-panel"
+                role="img"
+                aria-label="Новая операция"
+              />
+            </Tooltip>
+          )}
         </span>
         <div className="min-w-0">
           <div className="flex items-center gap-2 min-w-0">
@@ -1166,7 +1254,7 @@ function Row({
             )}
           </div>
           {tx.subcategory && (
-            <div className="text-[0.85em] text-muted truncate" title={tx.subcategory}>
+            <div className="text-[0.85em] text-muted truncate">
               {tx.subcategory}
             </div>
           )}
@@ -1227,18 +1315,31 @@ function Row({
             e.stopPropagation();
             onEdit();
           }}
-          className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2 transition-colors"
+          className="btn-icon"
           title="Редактировать"
           aria-label="Редактировать операцию"
         >
           <Pencil className="w-4 h-4" />
         </button>
+        {onCopy && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopy();
+            }}
+            className="btn-icon"
+            title="Копировать — та же операция сегодняшним днём"
+            aria-label="Копировать операцию"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
-          className="p-1.5 rounded-md text-muted hover:text-expense hover:bg-expense/10 transition-colors"
+          className="btn-icon-danger"
           title="Удалить"
           aria-label="Удалить операцию"
         >

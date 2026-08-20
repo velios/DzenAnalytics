@@ -1,10 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Table as TableIcon,
   Download,
   ChevronRight,
   ChevronDown,
 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -227,7 +228,29 @@ export function ReportPage() {
   // (по умолчанию «Всё»), а не глобальный «текущий месяц»: иначе при первом
   // заходе таблица схлопывалась бы в один столбец. Остальные отборы —
   // счета/категории/валюты/поиск — работают как везде.
-  const lp = useLocalPeriod("all");
+  //
+  // Исключение — ссылка с указанным месяцем (`/report?month=2026-08`). По ней
+  // приходят с главной, где весь экран про один месяц, и открывать в ответ всю
+  // историю значило бы заставить сузить период руками. Столбец тогда один, зато
+  // тот самый: «Итого» рядом с ним не рисуется, он был бы его же копией.
+  const [searchParams] = useSearchParams();
+  const monthParam = useMemo(() => {
+    const q = searchParams.get("month");
+    return q && /^\d{4}-\d{2}$/.test(q) ? q : null;
+  }, [searchParams]);
+
+  const lp = useLocalPeriod("all", monthParam);
+
+  // Смена месяца в ссылке при той же открытой странице — это «назад»/«вперёд»
+  // в браузере: маршрут прежний, компонент не перемонтируется, и начального
+  // значения периода уже не хватит. Сверяемся с предыдущим значением, а не
+  // считаем прогоны: под StrictMode эффект на монтировании срабатывает дважды.
+  const prevMonthParam = useRef(monthParam);
+  useEffect(() => {
+    if (prevMonthParam.current === monthParam) return;
+    prevMonthParam.current = monthParam;
+    if (monthParam) lp.setMonth(monthParam);
+  }, [monthParam, lp]);
   const effectiveFilters = useMemo(
     () => ({ ...filters, preset: lp.preset, monthYM: lp.monthYM, from: lp.from, to: lp.to }),
     [filters, lp.preset, lp.monthYM, lp.from, lp.to]
@@ -337,12 +360,12 @@ export function ReportPage() {
 
       <div className="flex items-center gap-2 flex-wrap">
         <span className="label">Разбивка</span>
-        <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+        <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
           {SCALES.map((s) => (
             <button
               key={s}
               onClick={() => setScale(s)}
-              className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+              className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
                 scale === s ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
               }`}
             >
@@ -417,7 +440,7 @@ export function ReportPage() {
       )}
 
       {empty ? (
-        <div className="card card-pad text-sm text-muted text-center py-10">
+        <div className="card-tray card-pad text-sm text-muted text-center py-10">
           За выбранный период нет доходов и расходов — измените отбор выше.
         </div>
       ) : (
@@ -425,7 +448,7 @@ export function ReportPage() {
         // надо вернуть — непрозрачные ячейки шапки закрашивают их, — но
         // `hidden` сделал бы карточку контейнером прокрутки и убил бы
         // закрепление. `clip` контейнером прокрутки не становится.
-        <div className="card overflow-clip">
+        <div className="card-tray overflow-clip">
           {/* Двойник строки заголовков: липнет под шапку приложения, пока
               таблица на экране. Лежит ПЕРЕД таблицей и вынут из потока
               отрицательным отступом ниже, поэтому пока страница не прокручена

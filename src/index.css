@@ -17,6 +17,10 @@
   --c-expense: 220 38 38;
   --c-warn: 217 119 6;
   --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06);
+  /* Мягкая рассеянная тень поддона («двойной кант» на главной). Отдельно от
+     карточной: у поддона она заметно больше и ниже, иначе двойной кант не
+     читается как физический предмет. */
+  --shadow-tray: 0 24px 60px -28px rgba(15, 23, 42, 0.22);
   --grid: #E2E8F0;
   --tooltip-bg: #ffffff;
   --tooltip-border: rgb(203 213 225);
@@ -53,6 +57,7 @@
   --c-expense: 239 68 68;
   --c-warn: 245 158 11;
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-tray: 0 30px 70px -30px rgba(0, 0, 0, 0.7);
   --grid: #1F2937;
   --tooltip-bg: #111827;
   --tooltip-border: rgb(31 41 55);
@@ -98,16 +103,121 @@ h2,
 }
 
 @layer components {
+  /**
+   * Карточка. Мягче и глубже прежней: радиус 18 вместо 12, рассеянная тень
+   * вместо плотной, граница чуть тише. Один класс — и вид меняется на всех
+   * страницах сразу, их у нас сорок восемь.
+   */
   .card {
-    @apply bg-panel border border-border rounded-xl shadow-card;
+    @apply bg-panel border border-border/70 rounded-[18px] shadow-tray;
   }
   .card-pad {
     @apply p-5;
   }
+  /**
+   * Двойной кант: обойма с просветом и ядро внутри. Радиус ядра меньше ровно
+   * на просвет (18 − 6 = 12), иначе дуги расходятся и кант выглядит кривым.
+   *
+   * Отдельно от `.card`, потому что требует двух элементов: снаружи `.tray`,
+   * внутри `.tray-core`. Там, где переверстать нельзя, `.card` даёт тот же
+   * силуэт одним элементом.
+   */
+  .tray {
+    @apply rounded-[18px] p-1.5 bg-panel2/70 border border-border/70 shadow-tray;
+  }
+  .tray-core {
+    @apply rounded-[12px] bg-panel;
+  }
+  /**
+   * Двойной кант НА ОДНОМ элементе.
+   *
+   * `.tray` + `.tray-core` честнее, но требуют двух вложенных узлов, а на
+   * страницах вроде «Отчёта» блок с липкой шапкой таблицы так просто не
+   * разъять. Здесь та же обойма — но нарисована толстой границей ВНУТРИ
+   * элемента, а не тенями снаружи. Тени было бы проще, да только они рисуются
+   * за пределами коробки: каждый блок отъедал бы по семь пикселей у просветов
+   * между соседями, и сетка карточек с промежутком в шестнадцать пикселей
+   * схлопывалась бы почти вплотную. Внутренняя граница силуэт не меняет,
+   * поэтому класс можно подставлять где угодно, не пересчитывая отступы.
+   *
+   * Радиусы те же, что у честной пары: 18 снаружи, 18 − 6 = 12 у ядра.
+   * Волосок границы — `outline` со сдвигом внутрь, чтобы и он не выступал.
+   */
+  .card-tray {
+    @apply bg-panel rounded-[18px] border-[6px] border-panel2/70 shadow-tray;
+    outline: 1px solid rgb(var(--c-border) / 0.7);
+    outline-offset: -1px;
+  }
+
+  /**
+   * Утопленная плоскость: одна коробка вместо поддона.
+   *
+   * Двойной кант тут не годится: обойма поддона залита тем же серым, что и
+   * подложка, и кант просто не виден, — а выворачивать её белым значит обвести
+   * виджет светлой рамкой, которой больше нигде нет. Поэтому коробка одна:
+   * заливка глубже фона страницы, мягкая тень, никакого канта.
+   *
+   * Заливка не берётся готовым токеном: `panel2` почти неотличим от фона
+   * страницы (в светлой теме это 241/245/249 против 248/250/252), и на нём
+   * плоскость сливалась бы. Смешиваем его с цветом канта — получается на
+   * ступень глубже, и это работает в обеих темах: в тёмной кант, наоборот,
+   * светлее подложки, и плоскость всплывает над фоном, а не тонет.
+   */
+  .card-sunken {
+    @apply rounded-[18px] shadow-tray;
+    background: color-mix(in srgb, rgb(var(--c-panel2)) 60%, rgb(var(--c-border)));
+  }
+
+  /**
+   * Появление страницы при переходе.
+   *
+   * Раньше страницы менялись рывком: содержимое одной пропадало, другой —
+   * возникало на её месте тем же кадром. Здесь новая страница всплывает —
+   * прозрачность и восемь пикселей снизу вверх.
+   *
+   * Заливки (`animation-fill-mode`) нарочно НЕТ. С ней `transform` остался бы
+   * на обёртке навсегда, а элемент с трансформацией становится системой
+   * отсчёта для всего `position: fixed` внутри: модальные окна и плавающая
+   * панель массовых действий поехали бы от края обёртки, а не экрана. Без
+   * заливки трансформация живёт только те четверть секунды, что идёт
+   * анимация, — а в это время ничего плавающего на экране и нет.
+   *
+   * Кому движение мешает, тот его и не увидит: системная настройка
+   * «уменьшить движение» выключает анимацию целиком.
+   */
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .page-enter {
+    animation: page-in 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .page-enter {
+      animation: none;
+    }
+  }
+
+  /**
+   * Ссылка-пилюля из шапки виджета: «Счета →», «Регулярные →». Голый текст
+   * рядом с крупными числами читался как случайная сноска.
+   */
+  .pill-link {
+    @apply inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border
+           bg-panel2/60 px-3 py-1.5 text-[12.5px] font-medium text-accent
+           transition-colors duration-200 hover:border-accent/50 hover:bg-panel2
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40;
+  }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full
            text-sm font-medium
-           transition-[color,background-color,box-shadow,transform,opacity] duration-150
+           transition-[color,background-color,box-shadow,transform,opacity] duration-200
            active:scale-[0.97]
            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-bg
            disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100;
@@ -122,11 +232,35 @@ h2,
     @apply btn bg-expense/10 text-expense hover:bg-expense/20 border border-expense/30;
   }
   /* Solid warning action (e.g. the confirm button of a «warning»-tone dialog). */
+  /**
+   * Кнопка-значок в строке таблицы: правка, копия, удаление, «показать».
+   *
+   * Заведена отдельно, потому что таблицы разошлись: в ленте операций такие
+   * кнопки были самодельными, со скруглением в шесть пикселей и без заливки, а
+   * на «Счетах» брали общий `.btn-ghost` — и после перехода кнопок на пилюли
+   * превратились в залитые кружки. В одном продукте два разных вида у одного и
+   * того же действия.
+   *
+   * Выбран тихий вариант: в покое — только значок, подложка появляется под
+   * курсором. В ленте таких кнопок полторы сотни на экран, и постоянные кружки
+   * превращают столбец в рябь; на «Счетах» строк меньше, но правило одно.
+   */
+  .btn-icon {
+    @apply inline-flex items-center justify-center p-1.5 rounded-full text-muted
+           transition-colors duration-200
+           hover:text-accent hover:bg-panel2
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40;
+  }
+  /** То же, но действие разрушительное: подсветка красная. */
+  .btn-icon-danger {
+    @apply btn-icon hover:text-expense hover:bg-expense/10;
+  }
+
   .btn-warn {
     @apply btn bg-warn text-white hover:opacity-90;
   }
   .input {
-    @apply w-full bg-panel2 text-text placeholder:text-muted px-3 py-2 rounded-lg
+    @apply w-full bg-panel2 text-text placeholder:text-muted px-3 py-2 rounded-xl
            border border-border transition-colors
            focus:outline-none focus:border-accent
            focus-visible:ring-2 focus-visible:ring-accent/25;
@@ -145,6 +279,23 @@ h2,
        reads too airy. Pull only the group separators together — digits keep
        their tabular width. */
     word-spacing: -0.22em;
+  }
+  /**
+   * Прокрутка без единого видимого следа: ни полосы, ни стрелок.
+   *
+   * Нужна спискам на главной — счета и статьи там длиннее карточки, но
+   * добавлять ради этого полосу прокрутки в плитку значит ломать её вид.
+   * Колесо, тач и клавиатура работают как обычно.
+   */
+  .scroll-soft {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scroll-soft::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
   .pill {
     @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium

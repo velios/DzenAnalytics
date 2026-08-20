@@ -94,7 +94,8 @@ import { ChartTooltipCard, TooltipFacts, type TooltipFact } from "../components/
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
-import { PageTabs } from "../components/PageTabs";
+import { Segmented } from "../components/Segmented";
+import { InfoPopover } from "../components/InfoPopover";
 import { capitalShare, positiveBalanceTotal } from "../lib/accountOptions";
 import { Stat } from "../components/Stat";
 import { Sparkline } from "../components/Sparkline";
@@ -212,7 +213,7 @@ function DropdownMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         style={minWidth ? { minWidth } : undefined}
-        className={`px-3 py-1.5 text-xs rounded-lg border flex items-center gap-1.5 whitespace-nowrap ${
+        className={`px-3 py-1.5 text-xs rounded-full border flex items-center gap-1.5 whitespace-nowrap transition-colors duration-200 ${
           active
             ? "bg-accent/10 border-accent/40 text-accent"
             : "bg-panel2 border-border text-muted hover:text-text"
@@ -374,6 +375,16 @@ function passesFilter(selected: Set<string>, value: string): boolean {
   if (selected.has(FILTER_NONE)) return false;
   return selected.has(value);
 }
+
+/**
+ * Почему на «Капитале» половина отборов не работает.
+ *
+ * Один текст на два места: подсказка у кнопки раздела и подсказка при наведении
+ * на сами погашенные контролы. Разъезжаться им нельзя — объясняют они одно и то
+ * же правило.
+ */
+const CAPITAL_FILTERS_HINT =
+  "На «Капитале» работает только период: остаток на дату складывается из всей истории до неё. Какие счета показать на графике — в его карточке. Отборы по счетам, категориям и суммам живут на вкладке «Движение».";
 
 export function AccountsPage() {
   const transactions = useDataStore((s) => s.transactions);
@@ -1411,14 +1422,48 @@ export function AccountsPage() {
       <PageHeader
         icon={Wallet}
         title="Счета"
-        hint="Остатки на счетах, их история и обороты за период."
+        hint="Остатки на счетах, их история и обороты за период"
         right={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Переключатели «Вся история / По фильтрам» и «По счетам /
                 Совокупно» жили здесь, в шапке страницы, и по ним нельзя было
                 понять, на что каждый влияет. Теперь каждый стоит там, где
                 действует: первый — над блоком показателей и графиков, которые
-                он пересчитывает, второй — в карточке своего графика. */}
+                он пересчитывает, второй — в карточке своего графика.
+
+                А вот выбор раздела здесь как раз на месте: он меняет страницу
+                целиком, и стоит там же, где такой же выбор на «Категориях». */}
+            {/* Значок стоит слева от переключателя, а не между ним и
+                «Калибровкой». Ряд прижат к правому краю, поэтому появление и
+                исчезновение САМОГО ЛЕВОГО элемента ничего не двигает: короче
+                становится только левый край ряда. Стоял бы он в середине — при
+                переходе на «Движение» кнопки прыгали бы вбок. */}
+            {tab === "capital" && (
+              <InfoPopover label="Что делают отборы на «Капитале»">
+                <p>{CAPITAL_FILTERS_HINT}</p>
+              </InfoPopover>
+            )}
+            <Segmented
+              value={tab}
+              onChange={setTab}
+              label="Разделы страницы «Счета»"
+              options={[
+                {
+                  value: "capital",
+                  label: "Капитал",
+                  icon: Landmark,
+                  // Не «отбору не подчиняется»: период на этой вкладке работает —
+                  // просто выбирает показанный отрезок, а не пересчитывает суммы.
+                  title: "Сколько денег на счетах и как менялось",
+                },
+                {
+                  value: "flow",
+                  label: "Движение",
+                  icon: ArrowLeftRight,
+                  title: "Поступления и списания за выбранный период",
+                },
+              ]}
+            />
             {zenLoaded && !zenToken && (
               <button
                 onClick={() => setCalibOpen((o) => !o)}
@@ -1432,34 +1477,6 @@ export function AccountsPage() {
           </div>
         }
       />
-      {/* Вкладки, а не один длинный список блоков: на странице живут два разных
-          сюжета — «сколько у меня всего» и «что происходило по отбору». Раньше
-          они шли вперемешку, и понять, на что действует панель фильтров, было
-          нельзя: соседние карточки «Чистая дельта (фильтр)» и «Чистая дельта
-          (вся история)» стояли вплотную. */}
-      <PageTabs
-        value={tab}
-        onChange={setTab}
-        label="Разделы страницы «Счета»"
-        className="-mt-2"
-        tabs={[
-          {
-            id: "capital",
-            label: "Капитал",
-            icon: Landmark,
-            // Не «отбору не подчиняется»: период на этой вкладке работает —
-            // просто выбирает показанный отрезок, а не пересчитывает суммы.
-            title: "Сколько денег на счетах и как менялось",
-          },
-          {
-            id: "flow",
-            label: "Движение",
-            icon: ArrowLeftRight,
-            title: "Поступления и списания за выбранный период",
-          },
-        ]}
-      />
-
       {/* Панель больше не гаснет: отбор в деле на обеих вкладках. На «Капитале»
           окно показа задаёт ПЕРИОД (в нём есть «Всё» — это и есть вся история),
           на «Движении» работает весь отбор целиком. Отдельный переключатель
@@ -1470,7 +1487,7 @@ export function AccountsPage() {
           (общий и свой у графика) и не понять, какой чем управляет. */}
       <GlobalFilters
         showDataFilters={tab !== "capital"}
-        dataFiltersHint="На «Капитале» работает только период: остаток на дату складывается из всей истории до неё. Какие счета показать на графике — в его карточке. Отборы по счетам, категориям и суммам живут на вкладке «Движение»."
+        dataFiltersHint={CAPITAL_FILTERS_HINT}
       />
 
       {tab === "capital" && calibOpen && !zenToken && (
@@ -1642,7 +1659,7 @@ export function AccountsPage() {
         />
       </div>
 
-      <div className={tab === "capital" ? "card card-pad" : "hidden"}>
+      <div className={tab === "capital" ? "card-tray card-pad" : "hidden"}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <div className="font-semibold">
@@ -1712,6 +1729,7 @@ export function AccountsPage() {
                 }
                 labelOf={(name) => parseDebtKey(name)?.payee ?? name}
                 nestedOf={(name) => parseDebtKey(name) !== null}
+                nestedUnitForms={["контрагент", "контрагента", "контрагентов"]}
                 groupOf={chartAccountGroup}
                 unitForms={["счёт", "счёта", "счетов"]}
                 searchPlaceholder="Поиск счёта"
@@ -1719,10 +1737,10 @@ export function AccountsPage() {
                 compactSummary
               />
             )}
-            <div className="flex bg-panel2 rounded-lg p-1 border border-border shrink-0">
+            <div className="flex gap-0.5 bg-panel2 rounded-full p-1 border border-border shadow-tray shrink-0">
             <button
               onClick={() => setView("stacked")}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${view === "stacked" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${view === "stacked" ? "bg-accent text-accent-fg" : "text-muted"}`}
               title="Разложить по счетам"
             >
               <Layers className="w-3 h-3" />
@@ -1730,7 +1748,7 @@ export function AccountsPage() {
             </button>
             <button
               onClick={() => setView("single")}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${view === "single" ? "bg-accent text-accent-fg" : "text-muted"}`}
+              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${view === "single" ? "bg-accent text-accent-fg" : "text-muted"}`}
               title="Одной линией: активы минус долги"
             >
               <LineChartIcon className="w-3 h-3" />
@@ -1820,7 +1838,7 @@ export function AccountsPage() {
                 ))}
                 {stacked.accounts.map((acc, i) => (
                   <Area
-                    key={`${acc} minus`}
+                    key={`${acc}\u0000minus`}
                     type="monotone"
                     dataKey={(d: Record<string, number>) =>
                       Math.min(toNum(d[acc]), 0) * stackAxis.scale
@@ -1905,7 +1923,7 @@ export function AccountsPage() {
         </div>
       </div>
 
-      <div className={tab === "flow" ? "card card-pad" : "hidden"}>
+      <div className={tab === "flow" ? "card-tray card-pad" : "hidden"}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <div className="font-semibold">
@@ -1965,7 +1983,7 @@ export function AccountsPage() {
           его за вкладкой — значит отвечать на вопрос «сколько у меня есть» без
           перечня счетов. Вкладка меняет не наличие списка, а его столбцы:
           остаток и доля против оборотов за период. */}
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="flex items-center gap-2 flex-wrap mb-3">
           {/* Два показателя строки набраны одинаково: жирная подпись — значение
               обычным. Так строка читается парами «что : сколько», а не гонкой
@@ -2123,7 +2141,7 @@ export function AccountsPage() {
           <div
             role="group"
             aria-label="Вид списка счетов"
-            className="ml-auto flex bg-panel2 rounded-lg p-1 border border-border"
+            className="ml-auto flex gap-0.5 bg-panel2 rounded-full p-1 border border-border shadow-tray"
           >
             <button
               onClick={() =>
@@ -2137,7 +2155,7 @@ export function AccountsPage() {
                 })
               }
               aria-pressed={accountsView === "table"}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
+              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${
                 accountsView === "table" ? "bg-accent text-accent-fg" : "text-muted"
               }`}
             >
@@ -2158,7 +2176,7 @@ export function AccountsPage() {
                 })
               }
               aria-pressed={accountsView === "cards"}
-              className={`px-3 py-1 text-xs rounded-md flex items-center gap-1 ${
+              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${
                 accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
               }`}
             >
@@ -2168,7 +2186,7 @@ export function AccountsPage() {
           </div>
           <AppTooltip content={listHint} placement="bottom">
             <button
-              className="btn-ghost !p-1.5 text-muted hover:text-accent shrink-0"
+              className="btn-icon shrink-0"
               aria-label="Как читать список счетов"
             >
               <HelpCircle className="w-4 h-4" />
@@ -2494,7 +2512,17 @@ export function AccountsPage() {
                       : "text-income";
                   // Долговой счёт раскрывается по контрагентам; если долговых
                   // операций нет вовсе, раскрывать нечего — шеврона тоже нет.
-                  const debtRows = debtsByAccount.get(a.account)?.rows ?? [];
+                  //
+                  // На «Капитале» рассчитавшихся не показываем: там разбивка
+                  // отвечает на вопрос «кто кому должен СЕЙЧАС», а закрытый
+                  // долг вносит ноль и только топит живые строки — так же, как
+                  // это устроено в самом Дзен-мани (issue #80). На «Движении»
+                  // окно своё, и нулевой итог за период — тоже ответ: там
+                  // видно, что с человеком за месяц рассчитались.
+                  const allDebtRows = debtsByAccount.get(a.account)?.rows ?? [];
+                  const debtRows = capitalView
+                    ? allDebtRows.filter((d) => !d.settled)
+                    : allDebtRows;
                   const debt = debtRows.length > 0;
                   const debtsOpen = debt && openDebts.has(a.account);
                   return (
@@ -2619,7 +2647,7 @@ export function AccountsPage() {
                               e.stopPropagation();
                               openAccount(a.account);
                             }}
-                            className="btn-ghost !p-1.5 text-muted hover:text-accent"
+                            className="btn-icon"
                             title="Список операций"
                             aria-label="Список операций"
                           >
@@ -2635,10 +2663,9 @@ export function AccountsPage() {
                             }}
                             aria-pressed={sliceExcludedAccounts.has(a.account)}
                             className={clsx(
-                              "btn-ghost !p-1.5",
-                              sliceExcludedAccounts.has(a.account)
-                                ? "text-warn bg-warn/10"
-                                : "text-muted hover:text-accent"
+                              "btn-icon",
+                              sliceExcludedAccounts.has(a.account) &&
+                                "text-warn bg-warn/10 hover:text-warn"
                             )}
                             title={
                               sliceExcludedAccounts.has(a.account)
@@ -2666,7 +2693,7 @@ export function AccountsPage() {
                                 e.stopPropagation();
                                 openAccountEditor(a.id);
                               }}
-                              className="btn-ghost !p-1.5 text-muted hover:text-accent"
+                              className="btn-icon"
                               title="Изменить счёт"
                               aria-label="Изменить счёт"
                             >
@@ -2727,7 +2754,15 @@ export function AccountsPage() {
                           >
                             {formatMoney(Math.abs(d.amount), base)}
                           </td>
-                          <td className="table-td !py-1.5" colSpan={capitalView ? 2 : 3} />
+                          {/* Хвост до конца строки — ровно две колонки на обеих
+                              вкладках: «Доля» и «Действия» на «Капитале»,
+                              «Операции» и «Действия» на «Движении». Раньше здесь
+                              стояло три, и раскрытый долговой счёт добавлял
+                              таблице ВОСЬМОЙ столбец: `table-fixed` делил
+                              свободную ширину между ним и колонкой «Счёт», та
+                              ужималась вдвое, и таблица на глазах съезжала
+                              влево, оставляя пустое поле справа (issue #80). */}
+                          <td className="table-td !py-1.5" colSpan={2} />
                         </tr>
                       ))}
                     </Fragment>

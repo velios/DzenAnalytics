@@ -45,7 +45,7 @@ export function DigestPage() {
       <PageHeader
         icon={Newspaper}
         title="Дайджест"
-        hint="Авто-сгенерированные итоги по неделям и месяцам со сравнением с предыдущим периодом и категориями, где «выстрелило»."
+        hint="Авто-сгенерированные итоги по неделям и месяцам со сравнением с предыдущим периодом и категориями, где «выстрелило»"
         hintWrap
         right={
           <InfoPopover>
@@ -82,7 +82,7 @@ export function DigestPage() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="card card-pad text-center text-muted py-12">
+        <div className="card-tray card-pad text-center text-muted py-12">
           Нет завершённых периодов для дайджеста.
         </div>
       ) : (
@@ -100,7 +100,7 @@ export function DigestPage() {
                 <button
                   key={e.id}
                   onClick={() => setSelected(e.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded text-sm text-left transition-colors ${
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left transition-colors ${
                     isActive
                       ? "bg-accent/10 text-accent"
                       : "hover:bg-panel2/60 text-muted"
@@ -145,8 +145,8 @@ function TabBtn({
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-        active ? "bg-accent/10 text-accent" : "text-muted hover:text-text hover:bg-panel2"
+      className={`px-3 py-1.5 rounded-full text-sm transition-colors duration-200 ${
+        active ? "bg-accent text-accent-fg" : "text-muted hover:text-text hover:bg-panel2"
       }`}
     >
       {children}
@@ -184,7 +184,7 @@ function DigestDetail({
 
   return (
     <div className="space-y-4">
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="text-xs uppercase tracking-wider text-muted">
           {entry.label} · {entry.txCount} операций
         </div>
@@ -220,7 +220,7 @@ function DigestDetail({
       </div>
 
       {entry.movers.length > 0 && (
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <div className="font-semibold mb-3 flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-accent" />
             Категории, где &laquo;выстрелило&raquo;
@@ -266,7 +266,7 @@ function DigestDetail({
       )}
 
       {entry.topTransactions.length > 0 && (
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <div className="font-semibold mb-3 flex items-center gap-2">
             <TrendingDown className="w-4 h-4 text-expense" />
             Самое дорогое за период
@@ -276,7 +276,7 @@ function DigestDetail({
               <button
                 key={t.id}
                 onClick={() => onOpenTx([t], t.payee || t.categoryFull || "Операция")}
-                className="w-full flex items-center gap-3 text-sm hover:bg-panel2/40 p-2 -mx-2 rounded text-left"
+                className="w-full flex items-center gap-3 text-sm hover:bg-panel2/40 p-2 -mx-2 rounded-lg text-left"
               >
                 <Calendar className="w-3.5 h-3.5 text-muted shrink-0" />
                 <div className="flex-1 min-w-0">

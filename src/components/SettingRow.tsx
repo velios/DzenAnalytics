@@ -36,8 +36,16 @@ export function SettingRow({
 }) {
   return (
     <div className={`${dense ? "py-1.5" : "py-3"} border-b border-border/60 last:border-b-0`}>
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="min-w-0 flex-1">
+      {/* Подпись слева, контрол у правого края. Колонку фиксированной ширины
+          отсюда убрали: она ставила контролы на одну отметку, но правый край
+          карточки при этом пустовал, и строка не читалась строкой. Пустота
+          между подписью и контролом на широком мониторе — цена, которую здесь
+          платят осознанно: край выравнивает контролы между собой не хуже
+          колонки, а карточка перестаёт выглядеть обрезанной. */}
+      <div
+        className={`flex items-center justify-between ${dense ? "gap-3" : "gap-6"}`}
+      >
+        <div className="min-w-0">
           <SettingLabel title={title} help={help} />
           {status && <div className="text-xs text-muted mt-0.5">{status}</div>}
         </div>

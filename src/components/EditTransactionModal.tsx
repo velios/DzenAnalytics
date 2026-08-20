@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, HandCoins, BadgeCheck, BadgePlus, BadgeX, Info } from "lucide-react";
+import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, Copy, HandCoins, BadgeCheck, BadgePlus, BadgeX, Info } from "lucide-react";
 import { extractHashtags } from "../lib/aggregations";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -40,9 +40,26 @@ interface Props {
   /** Pre-selected kind for a freshly created operation (create mode only).
    *  Defaults to "expense". Ignored when editing an existing `tx`. */
   initialKind?: TxKind;
+  /**
+   * Операция-образец: форма открывается на СОЗДАНИЕ, но заполненная по ней
+   * (issue #78). Переносится всё, вплоть до комментария, кроме даты — она
+   * становится сегодняшней, ради чего копию обычно и делают: повторяющуюся
+   * трату проще скопировать, чем набирать заново.
+   *
+   * Не то же самое, что `tx`: там правится существующая операция, здесь
+   * рождается новая, и образец после сохранения остаётся нетронутым.
+   */
+  template?: Transaction | null;
   /** Open a freshly created operation as a «Долг» (create mode only). */
   initialDebt?: boolean;
   onClose: () => void;
+  /**
+   * Снять копию с открытой операции (issue #78). Задан — в подвале появляется
+   * кнопка: карточка закрывается, а вместо неё открывается форма создания,
+   * заполненная по этой операции. Не задан — копировать некуда (без
+   * подключённого Дзен-мани новых операций не создать).
+   */
+  onCopy?: () => void;
   /** Edit mode only. Step to the previous (-1) / next (+1) operation in the
    *  caller's current order. Wired to ←/→ keys; the caller swaps which `tx`
    *  is being edited. Omit to disable arrow navigation. */
@@ -52,12 +69,19 @@ interface Props {
 /** Zenmoney account types that make an operation a debt/loan/credit move. */
 const DEBT_ACCOUNT_TYPES = new Set(["loan", "credit", "debt"]);
 
-/** Today's date as ISO YYYY-MM-DD, for seeding a new draft. */
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * Today's date as ISO YYYY-MM-DD, for seeding a new draft.
+ *
+ * Дата берётся по МЕСТНОМУ времени, а не по UTC. `toISOString()` до трёх ночи
+ * по Москве отдаёт вчерашнее число, и новая операция — как и копия, которой
+ * дата ставится сегодняшней, — открывалась вчерашним днём.
+ */
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
 
 /** Local "HH:MM" time-of-day from an ISO timestamp (the operation's `created`).
  *  Empty string when the timestamp is missing/invalid (e.g. some CSV rows). */
@@ -87,14 +111,35 @@ function dateTimeToDate(dateIso: string, time: string): Date {
  * away and is sent to Zenmoney on the next push. API mode only (the caller
  * only offers the button when a token is present).
  */
-export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onClose, onNavigate }: Props) {
+export function EditTransactionModal({
+  tx: txProp,
+  template,
+  initialKind,
+  initialDebt,
+  onClose,
+  onCopy,
+  onNavigate,
+}: Props) {
   const isCreate = !txProp;
+  /** Создание по образцу: поля заполнены, но операция всё равно новая. */
+  const isCopy = isCreate && !!template;
   const rates = useDataStore((s) => s.rates);
   // A blank seed so every `tx.<field>` read below works uniformly in
   // create mode (no special-casing each reference).
   const tx: Transaction = useMemo(
     () =>
-      txProp ?? {
+      txProp ??
+      (template
+        ? // Дата — сегодняшняя, идентификатор пустой: всё остальное копия
+          // берёт у образца. `createdAt` пересобирается из сегодняшнего дня,
+          // иначе время операции уехало бы в прошлое вместе с ним.
+          {
+            ...template,
+            id: "",
+            date: todayIso(),
+            createdAt: `${todayIso()}T00:00:00Z`,
+          }
+        : {
         id: "",
         date: todayIso(),
         category: "",
@@ -117,8 +162,8 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
         opAmount: null,
         opCurrency: null,
         createdAt: `${todayIso()}T00:00:00Z`,
-      },
-    [txProp, rates.base, initialKind]
+      }),
+    [txProp, template, rates.base, initialKind]
   );
   const allTransactions = useDataStore((s) => s.transactions);
   const reapply = useDataStore((s) => s.reapplyRules);
@@ -173,7 +218,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
         c.accounts.find((a) => DEBT_ACCOUNT_TYPES.has(a.type));
       setDebtAccountTitle(d?.title ?? null);
       // Existing debt op — derive direction + real account from its legs.
-      if (!isCreate && tx.category === "Долг" && d) {
+      if ((!isCreate || isCopy) && tx.category === "Долг" && d) {
         if (tx.outcomeAccount === d.title) {
           // «Долги» → real account: money came IN.
           setDebtOutgoing(false);
@@ -500,8 +545,9 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
     return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
   }, [allTransactions]);
   // Blank amount in create mode (don't prefill "0"); the existing value
-  // otherwise.
-  const [amount, setAmount] = useState(isCreate ? "" : String(tx.amount));
+  // otherwise. Копия — как раз «otherwise»: сумму она несёт с собой, ради
+  // этого её и делают.
+  const [amount, setAmount] = useState(isCreate && !isCopy ? "" : String(tx.amount));
   const [currency, setCurrency] = useState(tx.currency);
   const [account, setAccount] = useState(tx.account);
   // Transfer-specific: outcome / income accounts. For income/expense we
@@ -941,6 +987,14 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
       await setEdit(tx.id, patch);
       await reapply();
       onClose();
+    } catch (e) {
+      // Сборщик черновика умеет и бросить — например, на неполном кэше. Без
+      // этого разбора нажатие «Создать» просто ничего не делало: ошибка уходила
+      // в консоль, а человек оставался перед той же формой и не понимал,
+      // сохранилось у него что-нибудь или нет.
+      setError(
+        `Не удалось сохранить операцию: ${e instanceof Error ? e.message : String(e)}`
+      );
     } finally {
       setSaving(false);
     }
@@ -1002,7 +1056,7 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
             ) : (
               <Pencil className="w-4 h-4 text-accent2" />
             )}
-            {isCreate ? "Новая операция" : "Редактирование операции"}
+            {isCopy ? "Копия операции" : isCreate ? "Новая операция" : "Редактирование операции"}
           </div>
           <div className="flex items-center gap-3">
             {!isCreate && onNavigate && (
@@ -1038,7 +1092,12 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
               flow on an expense category; it inflows the account but
               shrinks the category's spend rather than adding to income. */}
           <Field label="Тип операции">
-            <div className="inline-flex bg-panel2 border border-border rounded-lg p-0.5 w-full">
+            {/* Дорожка набрана как все переключатели в продукте: пилюля с
+                подложкой, кантом и мягкой тенью. Прежние восемь пикселей
+                скругления и отступ в полпикселя остались от старого плоского
+                стиля, а это самый верхний контрол карточки — он задаёт тон
+                всему, что ниже. */}
+            <div className="inline-flex gap-0.5 w-full rounded-full p-1 bg-panel2 border border-border shadow-tray">
               <KindButton
                 active={kind === "expense" && !isDebt}
                 onClick={() => {
@@ -1133,12 +1192,16 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
           {isDebt && (
             <>
               <Field label="Операция с долгом">
-                <div className="grid grid-cols-2 gap-1 bg-panel2 border border-border rounded-lg p-0.5 w-full">
+                {/* Та же дорожка, что у «Типа операции» строкой выше: два
+                    переключателя подряд обязаны выглядеть одинаково, иначе
+                    карточка читается собранной из разных мест. */}
+                <div className="grid grid-cols-2 gap-0.5 w-full rounded-full p-1 bg-panel2 border border-border shadow-tray">
                   <Tooltip content="Я дал в долг | Я вернул долг">
                     <button
                       type="button"
                       onClick={() => setDebtOutgoing(true)}
-                      className={`text-xs py-1.5 px-2 rounded-md whitespace-nowrap ${debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
+                      aria-pressed={debtOutgoing}
+                      className={`w-full text-[12.5px] font-medium py-1.5 px-2 rounded-full whitespace-nowrap transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${debtOutgoing ? "bg-warn text-white shadow-[0_6px_16px_-8px_currentColor]" : "text-muted hover:text-text hover:bg-panel/70"}`}
                     >
                       Я дал / вернул
                     </button>
@@ -1147,7 +1210,8 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
                     <button
                       type="button"
                       onClick={() => setDebtOutgoing(false)}
-                      className={`text-xs py-1.5 px-2 rounded-md whitespace-nowrap ${!debtOutgoing ? "bg-warn text-white" : "text-muted"}`}
+                      aria-pressed={!debtOutgoing}
+                      className={`w-full text-[12.5px] font-medium py-1.5 px-2 rounded-full whitespace-nowrap transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${!debtOutgoing ? "bg-warn text-white shadow-[0_6px_16px_-8px_currentColor]" : "text-muted hover:text-text hover:bg-panel/70"}`}
                     >
                       Мне дали / вернули
                     </button>
@@ -1395,19 +1459,44 @@ export function EditTransactionModal({ tx: txProp, initialKind, initialDebt, onC
           {isCreate ? (
             <span />
           ) : (
-            <Tooltip content="Удалить операцию">
-              <button
-                onClick={handleDelete}
-                disabled={saving}
-                className="btn-danger text-sm"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Удалить
-              </button>
-            </Tooltip>
+            // Четыре подписи в ряд перестали помещаться в карточку шириной
+            // 512 пикселей, и кнопки поехали к самым краям. Удаление осталось
+            // одним значком: подпись ему не нужна (корзину читают без слов), а
+            // разрушительное действие и не должно быть самым широким предметом
+            // в подвале. Освободившееся место ушло «Копировать», которое без
+            // подписи как раз непонятно.
+            <div className="flex items-center gap-2">
+              {/* Значок без подписи — только когда рядом стоит «Копировать» и
+                  места на две подписи не хватает. Один он смотрелся сиротой у
+                  левого края, а места в этом случае вдоволь. */}
+              <Tooltip content="Удалить операцию">
+                <button
+                  onClick={handleDelete}
+                  disabled={saving}
+                  aria-label="Удалить операцию"
+                  className={onCopy ? "btn-danger text-sm px-3" : "btn-danger text-sm"}
+                >
+                  <Trash2 className={onCopy ? "w-4 h-4" : "w-3.5 h-3.5"} />
+                  {!onCopy && "Удалить"}
+                </button>
+              </Tooltip>
+              {onCopy && (
+                <Tooltip content="Создать такую же операцию сегодняшним днём">
+                  <button
+                    onClick={onCopy}
+                    disabled={saving}
+                    className="btn-ghost text-sm"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Копировать
+                  </button>
+                </Tooltip>
+              )}
+            </div>
           )}
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="btn-ghost text-sm">
+              <X className="w-3.5 h-3.5" />
               Отмена
             </button>
             <button
@@ -1483,11 +1572,12 @@ function KindButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-        active ? activeBg : "text-muted hover:text-text"
+      aria-pressed={active}
+      className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-full text-[12.5px] font-medium whitespace-nowrap transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+        active ? `${activeBg} shadow-[0_6px_16px_-8px_currentColor]` : "text-muted hover:text-text hover:bg-panel/70"
       }`}
     >
-      <Icon className="w-3.5 h-3.5" />
+      <Icon className="w-3.5 h-3.5 shrink-0" />
       {label}
     </button>
   );

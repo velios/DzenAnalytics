@@ -520,7 +520,7 @@ export function RecurringPage() {
       <PageHeader
         title="Регулярные платежи"
         icon={Repeat}
-        hint="Планы из Дзен-мани и автодетект подписок по вашей истории. Глобальные фильтры здесь не применяются."
+        hint="Планы из Дзен-мани и автодетект подписок по вашей истории — глобальные фильтры здесь не применяются"
         right={
           <InfoPopover label="Как находятся регулярные платежи">
             <p>
@@ -557,12 +557,12 @@ export function RecurringPage() {
       />
 
       {/* Page-level tabs: Zen plans vs our own detection (#3). */}
-      <div className="flex gap-1 bg-panel2 rounded-lg p-1 border border-border w-fit">
+      <div className="flex gap-1 bg-panel2 rounded-full p-1 border border-border shadow-tray w-fit">
         {PAGE_TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setPageTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
               pageTab === t.id ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
             }`}
           >
@@ -580,7 +580,7 @@ export function RecurringPage() {
             по регулярности (прогноз).
           </p>
           {plannedUpcoming.length === 0 && plannedOverdue.length === 0 ? (
-            <div className="card card-pad text-center py-12">
+            <div className="card-tray card-pad text-center py-12">
               <CalendarClock className="w-10 h-10 text-muted mx-auto mb-3" />
               <div className="font-medium mb-1">Нет запланированных операций из Дзен-мани</div>
               <div className="text-sm text-muted max-w-md mx-auto">
@@ -589,13 +589,13 @@ export function RecurringPage() {
               </div>
             </div>
           ) : (
-          <div className="card card-pad space-y-4">
+          <div className="card-tray card-pad space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="font-semibold flex items-center gap-2">
                 <CalendarClock className="w-4 h-4 text-accent" />
                 Планируемые операции
               </div>
-              <div className="flex bg-panel2 rounded-lg p-0.5 border border-border shrink-0">
+              <div className="flex gap-0.5 bg-panel2 rounded-full p-1 border border-border shadow-tray shrink-0">
                 {plannedTabs.map((t) => {
                   const empty = plannedCounts[t.id] === 0;
                   return (
@@ -604,7 +604,7 @@ export function RecurringPage() {
                       onClick={() => setPlannedTab(t.id)}
                       disabled={empty}
                       title={empty ? "Нет таких операций в выбранном периоде" : undefined}
-                      className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                      className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
                         effectiveTab === t.id
                           ? "bg-accent text-accent-fg"
                           : empty
@@ -672,7 +672,7 @@ export function RecurringPage() {
                         {queued ? (
                           <button
                             type="button"
-                            className="shrink-0 p-1.5 rounded-md text-muted hover:text-fg hover:bg-panel"
+                            className="btn-icon shrink-0"
                             aria-label="Вернуть операцию"
                             title="Удаление ждёт отправки — вернуть"
                             onClick={() =>
@@ -684,7 +684,7 @@ export function RecurringPage() {
                         ) : (
                           <button
                             type="button"
-                            className="shrink-0 p-1.5 rounded-md text-muted hover:text-expense hover:bg-expense/10"
+                            className="btn-icon-danger shrink-0"
                             aria-label="Удалить операцию"
                             title={
                               p.repeating === false
@@ -837,7 +837,7 @@ export function RecurringPage() {
             role="switch"
             aria-checked={onlyActive}
             onClick={() => setOnlyActive((v) => !v)}
-            title="Показывать только активные. Неактивные — те, по которым пропущено больше ~2 ожидаемых платежей (с учётом периодичности)"
+            title={"Только активные\nНеактивные — те, по которым пропущено больше двух ожидаемых платежей подряд."}
             className={`ml-auto flex items-center gap-2 transition-colors ${
               onlyActive ? "text-text" : "text-muted hover:text-text"
             }`}
@@ -859,7 +859,7 @@ export function RecurringPage() {
       )}
 
       {candidates.length === 0 && (
-        <div className="card card-pad text-center py-12">
+        <div className="card-tray card-pad text-center py-12">
           <AlertCircle className="w-10 h-10 text-muted mx-auto mb-3" />
           <div className="font-medium mb-1">Регулярных платежей не найдено</div>
           <div className="text-sm text-muted">
@@ -869,7 +869,7 @@ export function RecurringPage() {
       )}
 
       {upcoming.length > 0 && (
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <div className="font-semibold mb-3 flex items-center gap-2">
             <Calendar className="w-4 h-4 text-accent" />
             Ближайшие ожидаемые
@@ -883,7 +883,7 @@ export function RecurringPage() {
                 <button
                   key={c.payee + c.currency}
                   onClick={() => openCandidate(c)}
-                  className="text-left p-3 rounded-lg bg-panel2 border border-border hover:border-accent transition-colors"
+                  className="text-left p-3 rounded-xl bg-panel2 border border-border hover:border-accent transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <div className="font-medium text-sm truncate">{c.payee}</div>
@@ -905,7 +905,7 @@ export function RecurringPage() {
       )}
 
       {candidates.length > 0 && (
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <SortableTable<RecurringCandidate>
             title={
               <span className="flex items-center gap-2">

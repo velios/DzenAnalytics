@@ -33,7 +33,6 @@ import {
   formatMoney,
   formatNum,
   monthLabel,
-  toNum,
   chartTooltipProps,
   chartGridStroke,
   chartAxisStroke,
@@ -43,6 +42,7 @@ import type { Transaction } from "../types";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { SeriesTooltip } from "../components/TooltipFacts";
 import { Stat } from "../components/Stat";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { colorForCategory } from "../lib/categoryColor";
@@ -170,35 +170,35 @@ export function TrendsPage() {
       <PageHeader
         icon={Activity}
         title="Тренды"
-        hint="Помесячная динамика и паттерны по дням недели."
+        hint="Помесячная динамика и паттерны по дням недели"
         right={
           <div className="flex flex-wrap gap-2">
-            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+            <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
               <button
                 onClick={() => setKind("expense")}
-                className={`px-3 py-1 text-xs rounded-md ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
+                className={`px-3 py-1 text-xs rounded-full ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
               >
                 Расходы
               </button>
               <button
                 onClick={() => setKind("income")}
-                className={`px-3 py-1 text-xs rounded-md ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
+                className={`px-3 py-1 text-xs rounded-full ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
               >
                 Доходы
               </button>
             </div>
-            <div className="flex bg-panel2 rounded-lg p-1 border border-border">
+            <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
               <button
                 onClick={() => setLevel("top")}
                 title="Группировать по верхнеуровневым категориям"
-                className={`px-3 py-1 text-xs rounded-md ${level === "top" ? "bg-accent text-accent-fg" : "text-muted"}`}
+                className={`px-3 py-1 text-xs rounded-full ${level === "top" ? "bg-accent text-accent-fg" : "text-muted"}`}
               >
                 Крупно
               </button>
               <button
                 onClick={() => setLevel("full")}
                 title="Разбивать по подкатегориям"
-                className={`px-3 py-1 text-xs rounded-md ${level === "full" ? "bg-accent text-accent-fg" : "text-muted"}`}
+                className={`px-3 py-1 text-xs rounded-full ${level === "full" ? "bg-accent text-accent-fg" : "text-muted"}`}
               >
                 Детально
               </button>
@@ -208,7 +208,7 @@ export function TrendsPage() {
       />
       <GlobalFilters period={lp} />
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
           <div>
             <div className="font-semibold">Категории по месяцам</div>
@@ -269,7 +269,7 @@ export function TrendsPage() {
               />
               <Tooltip
                 {...chartTooltipProps}
-                formatter={(v: unknown) => formatMoney(toNum(v), base)}
+                content={<SeriesTooltip formatValue={(v) => formatMoney(v, base)} />}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {activeCategories.map((cat) => (
@@ -288,7 +288,7 @@ export function TrendsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="card card-pad lg:col-span-2">
+        <div className="card-tray card-pad lg:col-span-2">
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="font-semibold flex items-center gap-2">
@@ -315,14 +315,16 @@ export function TrendsPage() {
                 <YAxis stroke={chartAxisStroke} fontSize={11} tickFormatter={(v) => formatNum(v, { compact: true })} />
                 <Tooltip
                   {...chartTooltipProps}
-                  // Bars coloured per-point via <Cell> (no Bar fill), so pin the
-                  // tooltip value to the theme text colour for dark-theme readability.
-                  itemStyle={{ color: "rgb(var(--c-text))" }}
-                  labelFormatter={(_, p) => (p?.[0]?.payload as { fullName?: string })?.fullName ?? ""}
-                  formatter={(v: unknown, n: unknown) => [
-                    formatMoney(toNum(v), base),
-                    n === "avg" ? "Средний за день" : "Всего",
-                  ]}
+                  content={
+                    <SeriesTooltip
+                      formatValue={(v) => formatMoney(v, base)}
+                      // Полное название дня лежит в самой точке: по оси стоит
+                      // сокращение («Пн»), а в подсказке уместно целиком.
+                      formatLabel={(_, rows) =>
+                        String((rows[0]?.payload as { fullName?: string })?.fullName ?? "")
+                      }
+                    />
+                  }
                 />
                 <Bar dataKey="avg" radius={[4, 4, 0, 0]} activeBar={false}>
                   {dowChart.map((d, i) => (
@@ -337,7 +339,7 @@ export function TrendsPage() {
           </div>
         </div>
 
-        <div className="card card-pad">
+        <div className="card-tray card-pad">
           <div className="mb-3">
             <div className="font-semibold flex items-center gap-2">
               <Calendar className="w-4 h-4 text-accent" />
@@ -368,7 +370,7 @@ export function TrendsPage() {
                 />
                 <Tooltip
                   {...chartTooltipProps}
-                  formatter={(v: unknown) => formatMoney(toNum(v), base)}
+                  content={<SeriesTooltip formatValue={(v) => formatMoney(v, base)} />}
                 />
               </RadarChart>
             </ResponsiveContainer>
@@ -465,7 +467,7 @@ function HourOfWeekHeatmap({
   const dowNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
   return (
-    <div className="card card-pad flex flex-col">
+    <div className="card-tray card-pad flex flex-col">
       <div className="font-semibold mb-1">
         Когда вы {kind === "expense" ? "тратите" : "получаете"}
       </div>
@@ -561,7 +563,7 @@ function HourOfDayBars({
   const color = kind === "expense" ? "#EF4444" : "#10B981";
 
   return (
-    <div className="card card-pad flex flex-col">
+    <div className="card-tray card-pad flex flex-col">
       <div className="font-semibold mb-1">По часам суток</div>
       <div className="text-xs text-muted mb-3">
         Сумма {kind === "expense" ? "расходов" : "доходов"} по каждому часу дня
@@ -586,15 +588,14 @@ function HourOfDayBars({
             />
             <Tooltip
               {...chartTooltipProps}
-              // The <Bar> colours its <Cell>s individually, so Recharts can't
-              // resolve a series colour for the tooltip item and falls back to
-              // black — invisible in dark theme. Pin it to the theme text colour.
-              itemStyle={{ color: "rgb(var(--c-text))" }}
-              labelFormatter={(h) => `${String(h).padStart(2, "0")}:00–${String(h).padStart(2, "0")}:59`}
-              formatter={(v: unknown) => [
-                formatMoney(toNum(v), base),
-                kind === "expense" ? "Расход" : "Доход",
-              ]}
+              content={
+                <SeriesTooltip
+                  formatValue={(v) => formatMoney(v, base)}
+                  formatLabel={(h) =>
+                    `${String(h).padStart(2, "0")}:00–${String(h).padStart(2, "0")}:59`
+                  }
+                />
+              }
             />
             <Bar dataKey="total" radius={[3, 3, 0, 0]}>
               {data.map((d) => (

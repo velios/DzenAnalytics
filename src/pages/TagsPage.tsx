@@ -113,7 +113,7 @@ export function TagsPage() {
         <PageHeader
           icon={Hash}
           title="Теги"
-          hint="Метки `#проект` в комментариях позволяют группировать операции по темам — поездки, члены семьи, машины и так далее. В текущей выборке тегов нет."
+          hint="Метки `#проект` в комментариях группируют операции по темам — в текущей выборке тегов нет"
         />
         <GlobalFilters />
       </div>
@@ -129,12 +129,12 @@ export function TagsPage() {
       <PageHeader
         icon={Hash}
         title="Теги"
-        hint="Группировка операций по хэштегам из комментариев. Клик по облаку или по числу операций — список операций, по строке таблицы — разбивка по категориям."
+        hint="Группировка операций по хэштегам из комментариев"
         hintWrap
       />
       <GlobalFilters />
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="flex items-center justify-between mb-4 gap-3">
           <div className="font-semibold flex items-baseline gap-2 flex-wrap min-w-0">
             <span>Облако тегов</span>
@@ -145,16 +145,16 @@ export function TagsPage() {
               {totalExpense > 0 && ` · по тегам ${formatMoney(totalExpense, base)}`}
             </span>
           </div>
-          <div className="inline-flex rounded-md border border-border overflow-hidden text-xs">
+          <div className="inline-flex gap-0.5 rounded-full p-1 bg-panel2 border border-border shadow-tray text-xs">
             <button
               onClick={() => setCloudAlpha(false)}
-              className={`px-2.5 py-1 ${!cloudAlpha ? "bg-accent text-accent-fg" : "text-muted hover:text-text"}`}
+              className={`px-2.5 py-1 rounded-full transition-colors duration-200 ${!cloudAlpha ? "bg-accent text-accent-fg" : "text-muted hover:text-text hover:bg-panel/70"}`}
             >
               По сумме
             </button>
             <button
               onClick={() => setCloudAlpha(true)}
-              className={`px-2.5 py-1 ${cloudAlpha ? "bg-accent text-accent-fg" : "text-muted hover:text-text"}`}
+              className={`px-2.5 py-1 rounded-full transition-colors duration-200 ${cloudAlpha ? "bg-accent text-accent-fg" : "text-muted hover:text-text hover:bg-panel/70"}`}
             >
               А–Я
             </button>
@@ -182,7 +182,7 @@ export function TagsPage() {
         </div>
       </div>
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <SortableTable<TagBucket>
           title={
             <span className="flex items-baseline gap-2 flex-wrap min-w-0">

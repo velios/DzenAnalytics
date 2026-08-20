@@ -12,15 +12,18 @@ import {
   Fragment,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { SURFACE_ATTR } from "./Popover";
 import { ChevronDown, Search } from "lucide-react";
 import clsx from "clsx";
 import { FILTER_NONE } from "../store/useFiltersStore";
 import { pluralRu } from "../lib/plural";
+import { nestedBranches, visibleOptions } from "../lib/nestedOptions";
 
 export function MultiSelect({
   label,
@@ -30,6 +33,7 @@ export function MultiSelect({
   renderIcon,
   labelOf,
   nestedOf,
+  nestedUnitForms,
   unitForms,
   searchPlaceholder,
   archivedSet,
@@ -61,6 +65,13 @@ export function MultiSelect({
    * где нужна вложенность.
    */
   nestedOf?: (opt: string) => boolean;
+  /**
+   * Чем называть ветки в подсказке переключателя: [1, 2–4, 5+].
+   *
+   * Ветки свёрнуты, и число на кнопке само по себе ни о чём не говорит:
+   * «Показать 12 контрагентов» объясняет, что под счётом спрятано.
+   */
+  nestedUnitForms?: [string, string, string];
   /** Russian [one, few, many] noun for the count header (e.g. счёт/счёта/счетов). */
   unitForms?: [string, string, string];
   /** Override the search placeholder. */
@@ -89,6 +100,15 @@ export function MultiSelect({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  /**
+   * Раскрытые ветки — по умолчанию ни одной.
+   *
+   * Контрагентов у долгового счёта набирается больше, чем всех остальных
+   * счетов вместе: раскрытыми они топят список, и отбор счетов читается как
+   * список должников. Под свёрнутым счётом остаётся переключатель с их числом.
+   */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const branches = useMemo(() => nestedBranches(options, nestedOf), [options, nestedOf]);
   // Search appears only for longer lists (currency etc. don't need it).
   const showSearch = options.length > 8;
   const q = query.trim().toLowerCase();
@@ -98,6 +118,12 @@ export function MultiSelect({
   const filteredOptions = q
     ? options.filter((o) => text(o).toLowerCase().includes(q))
     : options;
+  // Рисуем не всё найденное: у свёрнутого счёта ветки спрятаны. При поиске
+  // свёрнутость отменяется — ищут как раз то, что внутри, и прятать найденное
+  // значит не найти ничего.
+  const visible = q
+    ? filteredOptions
+    : visibleOptions(filteredOptions, branches, expanded);
 
   // Set semantics: empty = ALL, {FILTER_NONE} = NONE, else a subset.
   const isAll = selected.size === 0;
@@ -122,24 +148,20 @@ export function MultiSelect({
    *
    * Вложенность в этом списке одноуровневая и НЕПРЕРЫВНАЯ (см. `nestedOf`),
    * поэтому детей можно не передавать отдельно: это все вложенные строки до
-   * следующей невложенной.
+   * следующей невложенной (см. `nestedBranches`).
    */
-  const childrenOf = (opt: string): string[] => {
-    if (!nestedOf) return [];
-    const i = options.indexOf(opt);
-    if (i < 0 || nestedOf(opt)) return [];
-    const out: string[] = [];
-    for (let j = i + 1; j < options.length && nestedOf(options[j]); j++) out.push(options[j]);
-    return out;
-  };
+  const childrenOf = (opt: string): string[] => branches.children.get(opt) ?? [];
 
   /** Родитель варианта-ветки: ближайшая невложенная строка выше. */
-  const parentOf = (opt: string): string | null => {
-    if (!nestedOf?.(opt)) return null;
-    const i = options.indexOf(opt);
-    for (let j = i - 1; j >= 0; j--) if (!nestedOf(options[j])) return options[j];
-    return null;
-  };
+  const parentOf = (opt: string): string | null => branches.parent.get(opt) ?? null;
+
+  /** Раскрыть или свернуть ветки счёта. */
+  const toggleBranch = (opt: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(opt)) next.add(opt);
+      return next;
+    });
 
   /**
    * Отметка варианта.
@@ -174,6 +196,21 @@ export function MultiSelect({
       : kids.some((k) => isChecked(k));
   };
 
+  /**
+   * Ветки, где выбор разошёлся с родителем, — их раскрываем при открытии.
+   *
+   * Свёрнуть такую ветку значит спрятать сам выбор: на кнопке стоит «3 из 20»,
+   * на экране — ни одной отмеченной строки, и снять отметку нечем. Дальше
+   * свернуть её человек волен сам.
+   */
+  const pickedBranches = () =>
+    new Set([...branches.children.keys()].filter(isPartial));
+
+  /** Подпись переключателя ветки: сколько под ним и что сделает щелчок. */
+  const branchHint = (count: number, shown: boolean) =>
+    `${shown ? "Скрыть" : "Показать"} ${count} ` +
+    pluralRu(count, nestedUnitForms ?? ["вариант", "варианта", "вариантов"]);
+
   /** Отметить или снять сразу группу — по кнопке в её заголовке. */
   const setMany = (opts: string[], on: boolean) => {
     const eff = effective();
@@ -185,10 +222,12 @@ export function MultiSelect({
   };
 
   /**
-   * Варианты группы среди ВИДИМЫХ.
+   * Варианты группы среди НАЙДЕННЫХ.
    *
-   * Именно видимых: при поиске список сужен, и кнопка в заголовке должна
-   * делать ровно то, что под ней видно, а не трогать спрятанное.
+   * Именно найденных: при поиске список сужен, и кнопка в заголовке должна
+   * делать ровно то, что под ней видно, а не трогать спрятанное. Свёрнутые
+   * ветки при этом считаются наравне с остальными: «Выбрать все» про группу
+   * счетов, а не про то, какие из них сейчас развёрнуты.
    */
   const membersOf = (group: string | null, archived: boolean) =>
     filteredOptions.filter((o) =>
@@ -226,13 +265,32 @@ export function MultiSelect({
     );
   };
 
+  /**
+   * Сколько вариантов считать своими в подписи и в шапке меню.
+   *
+   * Вложенные строки — не отдельные варианты, а разбивка одного: у долгового
+   * счёта это его контрагенты. Считая их наравне, кнопка сообщала «Счета: Все
+   * (318)» там, где счетов восемнадцать, — число говорило о чём угодно, кроме
+   * счетов.
+   */
+  const totalCount = useMemo(
+    () => (nestedOf ? options.filter((o) => !nestedOf(o)).length : options.length),
+    [options, nestedOf]
+  );
+  const selectedCount = useMemo(() => {
+    if (!nestedOf) return selected.size;
+    let n = 0;
+    for (const key of selected) if (!nestedOf(key)) n++;
+    return n;
+  }, [selected, nestedOf]);
+
   const summary = isNone
     ? "Ничего"
     : isAll
       ? compactSummary
         ? "Все"
-        : `Все (${options.length})`
-      : `${selected.size} из ${options.length}`;
+        : `Все (${totalCount})`
+      : `${selectedCount} из ${totalCount}`;
 
   // The menu renders in a portal (position: fixed) so it floats above the
   // table below — `absolute` left it under a later stacking context. Its
@@ -254,26 +312,34 @@ export function MultiSelect({
     if (open && el) {
       const r = el.getBoundingClientRect();
       const width = Math.max(r.width, MENU_W);
-      const estH = Math.min(options.length * 32 + 44 + (showSearch ? 40 : 0), 360);
+      // Высоту прикидываем по СТРОКАМ НА ЭКРАНЕ: со свёрнутыми ветками список
+      // короче, и резервировать под них место — значит открыть меню с пустым
+      // хвостом. Раскрыли ветку — прикидка пересчитается, и меню подрастёт.
+      const estH = Math.min(visible.length * 32 + 44 + (showSearch ? 40 : 0), 360);
       const below = window.innerHeight - r.bottom - 8;
       const above = r.top - 8;
       const flipUp = above > below && above >= Math.min(estH, 48);
+      // Меню шире кнопки, и по левому краю кнопки оно уезжало за правый край
+      // экрана — например у кнопки счетов в настройках бюджета: то окно само
+      // прижато к правому краю. Прижимаем меню в видимую область, оставляя
+      // восемь пикселей поля, как это делает `Popover`.
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
       next = flipUp
         ? {
-            left: r.left,
+            left,
             width,
             bottom: window.innerHeight - r.top + 4,
             maxHeight: Math.min(estH, above),
           }
         : {
-            left: r.left,
+            left,
             width,
             top: r.bottom + 4,
             maxHeight: Math.min(estH, below),
           };
     }
     setPos(next);
-  }, [open, options.length, showSearch]);
+  }, [open, visible.length, showSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -298,6 +364,9 @@ export function MultiSelect({
       <button
         ref={btnRef}
         onClick={() => {
+          // Открываем — раскрываем ветки, в которых что-то уже отмечено:
+          // спрятанный выбор ни увидеть, ни снять.
+          if (!open) setExpanded(pickedBranches());
           setOpen((o) => !o);
           setQuery("");
         }}
@@ -326,6 +395,7 @@ export function MultiSelect({
             <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
             <div
               ref={menuRef}
+              {...{ [SURFACE_ATTR]: "" }}
               className="fixed z-[80] overflow-auto card p-2"
               style={{
                 left: pos.left,
@@ -337,11 +407,8 @@ export function MultiSelect({
             >
               <div className="flex items-center justify-between gap-2 px-2 py-1 mb-1 border-b border-border/60">
                 <span className="text-xs text-muted">
-                  {options.length}{" "}
-                  {pluralRu(
-                    options.length,
-                    unitForms ?? ["вариант", "варианта", "вариантов"]
-                  )}
+                  {totalCount}{" "}
+                  {pluralRu(totalCount, unitForms ?? ["вариант", "варианта", "вариантов"])}
                 </span>
                 <button
                   onClick={() => onChange(isAll ? new Set([FILTER_NONE]) : new Set())}
@@ -362,21 +429,24 @@ export function MultiSelect({
                   />
                 </div>
               )}
-              {filteredOptions.length === 0 ? (
+              {visible.length === 0 ? (
                 <div className="px-2 py-2 text-xs text-muted">Ничего не найдено</div>
               ) : (
-                filteredOptions.map((opt, i) => {
+                visible.map((opt, i) => {
                   // First archived option → render an «Архивные» divider above it.
                   const showArchivedHeader =
                     !!archivedSet?.has(opt) &&
-                    (i === 0 || !archivedSet.has(filteredOptions[i - 1]));
+                    (i === 0 || !archivedSet.has(visible[i - 1]));
                   // Первый вариант группы → заголовок над ним. Считаем по
-                  // ОТФИЛЬТРОВАННОМУ списку, иначе при поиске заголовок остался
+                  // ПОКАЗАННОМУ списку, иначе при поиске заголовок остался
                   // бы висеть над пустотой.
                   const group = groupOf?.(opt) ?? null;
                   const showGroupHeader =
                     group !== null &&
-                    (i === 0 || (groupOf?.(filteredOptions[i - 1]) ?? null) !== group);
+                    (i === 0 || (groupOf?.(visible[i - 1]) ?? null) !== group);
+                  // Ветки счёта: пока они свёрнуты, на строке стоит их число.
+                  const kids = childrenOf(opt);
+                  const branchOpen = expanded.has(opt);
                   return (
                     <Fragment key={opt}>
                       {showArchivedHeader &&
@@ -399,7 +469,7 @@ export function MultiSelect({
                           <>
                             <span
                               className={`absolute left-3 -top-1 w-px bg-border ${
-                                nestedOf(filteredOptions[i + 1] ?? "") ? "-bottom-1" : "bottom-1/2"
+                                nestedOf(visible[i + 1] ?? "") ? "-bottom-1" : "bottom-1/2"
                               }`}
                             />
                             <span className="absolute left-3 top-1/2 w-2 h-px bg-border" />
@@ -421,6 +491,31 @@ export function MultiSelect({
                           <span className="shrink-0">{renderIcon(opt)}</span>
                         )}
                         <span className="truncate">{text(opt)}</span>
+                        {/* Переключатель веток. Во время поиска его нет: там
+                            найденное показано целиком, и сворачивать нечего.
+                            `preventDefault` держит его отдельно от галочки —
+                            щелчок по кнопке внутри `<label>` иначе отобрал бы
+                            весь счёт заодно. */}
+                        {kids.length > 0 && !q && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              toggleBranch(opt);
+                            }}
+                            aria-expanded={branchOpen}
+                            aria-label={branchHint(kids.length, branchOpen)}
+                            title={branchHint(kids.length, branchOpen)}
+                            className="ml-auto shrink-0 -my-1 flex items-center gap-1 px-1 py-1 rounded text-[11px] text-muted hover:text-accent hover:bg-panel2"
+                          >
+                            {kids.length}
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 transition-transform ${
+                                branchOpen ? "" : "-rotate-90"
+                              }`}
+                            />
+                          </button>
+                        )}
                       </label>
                     </Fragment>
                   );

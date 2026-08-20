@@ -236,7 +236,7 @@ export function GoalsPage() {
       <PageHeader
         title="Цели"
         icon={Target}
-        hint="Копите на конкретные цели и следите за прогрессом и расчётным сроком достижения."
+        hint="Копите на конкретные цели и следите за прогрессом и расчётным сроком достижения"
         right={
           // Hidden while the add form is open — the form has its own «Отмена»,
           // so a second one in the header would just be redundant.
@@ -331,7 +331,7 @@ export function GoalsPage() {
 
       {goals.length === 0 ? (
         !adding && (
-          <div className="card card-pad text-center py-14">
+          <div className="card-tray card-pad text-center py-14">
             <div className="w-14 h-14 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
               <Target className="w-7 h-7 text-accent" />
             </div>
@@ -613,7 +613,7 @@ function GoalCard({
   }
 
   return (
-    <div className="card card-pad flex flex-col gap-4">
+    <div className="card-tray card-pad flex flex-col gap-4">
       {/* Header: name + saved/target, then % and actions (never shift) */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -642,7 +642,7 @@ function GoalCard({
             <Tooltip content="Редактировать цель">
               <button
                 onClick={() => (editing && !closing ? closeEdit() : openEdit())}
-                className={`p-1.5 rounded-md transition-colors ${
+                className={`p-1.5 rounded-full transition-colors duration-200 ${
                   editing && !closing
                     ? "text-accent bg-accent/10"
                     : "text-muted hover:text-text hover:bg-panel2"
@@ -663,7 +663,7 @@ function GoalCard({
                   });
                   if (ok) onRemove(g.id);
                 }}
-                className="p-1.5 rounded-md text-muted hover:text-expense hover:bg-panel2 transition-colors"
+                className="btn-icon-danger"
                 aria-label="Удалить цель"
               >
                 <Trash2 className="w-4 h-4" />

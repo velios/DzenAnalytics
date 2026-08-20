@@ -460,7 +460,7 @@ export function RulesPage() {
         />
       </div>
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         {/* Панель действий — как в справочниках: заголовок со счётчиком,
             пояснение под «?», действия справа. */}
         <div className="flex items-center gap-2 flex-wrap mb-3">
@@ -479,7 +479,7 @@ export function RulesPage() {
               aria-label="Как это работает"
               title="Как это работает"
               className={clsx(
-                "p-1.5 rounded-md",
+                "p-1.5 rounded-full",
                 infoOpen
                   ? "text-accent bg-accent/10"
                   : "text-muted hover:text-accent hover:bg-panel2"

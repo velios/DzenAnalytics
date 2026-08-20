@@ -7,10 +7,11 @@ import { colorForCategory } from "../lib/categoryColor";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { buildSankey } from "../lib/aggregations";
-import { formatMoney, toNum, chartTooltipProps } from "../lib/format";
+import { formatMoney, chartTooltipProps } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { SeriesTooltip } from "../components/TooltipFacts";
 
 const COLORS = {
   income: "#10B981",
@@ -43,10 +44,10 @@ export function SankeyPage() {
         <PageHeader
           icon={GitFork}
           title="Потоки денег"
-          hint="Слева — источники доходов (и привлечённые со счетов средства, если трат больше дохода); справа — категории расходов и сбережения."
+          hint="Слева — источники доходов (и привлечённые со счетов средства, если трат больше дохода); справа — категории расходов и сбережения"
         />
         <GlobalFilters />
-        <div className="card card-pad text-center py-12 text-muted">
+        <div className="card-tray card-pad text-center py-12 text-muted">
           Нет данных для построения потоков в текущем фильтре.
         </div>
       </div>
@@ -58,11 +59,11 @@ export function SankeyPage() {
       <PageHeader
         icon={GitFork}
         title="Потоки денег"
-        hint="Слева — источники доходов (и привлечённые со счетов средства, если трат больше дохода); справа — категории расходов и сбережения."
+        hint="Слева — источники доходов (и привлечённые со счетов средства, если трат больше дохода); справа — категории расходов и сбережения"
       />
       <GlobalFilters />
 
-      <div className="card card-pad">
+      <div className="card-tray card-pad">
         <div className="h-[600px]">
           <ResponsiveContainer>
             <Sankey
@@ -112,12 +113,7 @@ export function SankeyPage() {
             >
               <Tooltip
                 {...chartTooltipProps}
-                // Sankey paints the node/link name with its own (dark) colour,
-                // which is unreadable on the dark-theme tooltip. Pin both the
-                // label and item text to the theme text colour.
-                labelStyle={{ color: "rgb(var(--c-text))" }}
-                itemStyle={{ color: "rgb(var(--c-text))" }}
-                formatter={(v: unknown) => formatMoney(toNum(v), base)}
+                content={<SeriesTooltip formatValue={(v) => formatMoney(v, base)} />}
               />
             </Sankey>
           </ResponsiveContainer>

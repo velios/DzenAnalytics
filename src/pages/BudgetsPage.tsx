@@ -857,7 +857,7 @@ export function BudgetsPage() {
       <PageHeader
         icon={Wallet}
         title="Бюджет"
-        hint="План и факт по статьям: сводка за год, выбранный месяц и помесячная таблица. Планы синхронизируются с Дзен-мани, отчёт выгружается в Excel и PDF."
+        hint="План и факт по статьям — за месяц и за год"
       />
 
       {/* Панель: вид и период (слева), действия (справа). */}
@@ -884,7 +884,10 @@ export function BudgetsPage() {
           <Tooltip content={monthPeriod ? "Предыдущий месяц" : "Предыдущий год"}>
             <button
               onClick={() => (monthPeriod ? setYm((m) => addMonths(m, -1)) : shiftYear(-1))}
-              className="btn-ghost !p-2"
+              // Поле в 10 пикселей, а не 8: в одной строке шапки стоят
+              // переключатель вида, выбор месяца и «Заполнить по среднему» —
+              // все ростом 38, и кнопка в 34 читалась осевшей.
+              className="btn-ghost !p-2.5"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -894,22 +897,33 @@ export function BudgetsPage() {
               granularity="month"
               value={ym}
               onChange={(e) => e.target.value && setYm(e.target.value)}
-              centered
-              // Ширина фиксированная и посчитана под самое длинное сокращение
-              // («Сен. 2026»): при `min-width` кнопка дышала на каждом шаге, и
-              // соседние стрелки ездили вместе с ней. Поля уже обычного поля
-              // ввода — тут не текст набирают, а листают месяцы.
-              className="input text-sm font-medium w-[138px] !px-2"
+              // Ширина фиксированная и посчитана под самое длинное сокращение:
+              // при `min-width` кнопка дышала на каждом шаге, и соседние
+              // стрелки ездили вместе с ней. Поля уже обычного поля ввода —
+              // тут не текст набирают, а листают месяцы.
+              //
+              // Было 138 пикселей и центрирование. Центрирование держалось на
+              // невидимой распорке слева — противовесе значку календаря
+              // справа, — и вместе с запасом ширины давало заметную пустоту
+              // перед названием месяца. Подпись выровнена по левому краю, как
+              // в любом другом поле продукта, ширина посчитана по факту:
+              // 79 (самое длинное «Февр. 2026», замерено) + 16 (значок) +
+              // 8 (просвет) + 24 (поля) + 2 (кант) = 129, берём 132. Поля стали
+              // по 12: у пилюли восьмипиксельные прижимали подпись к канту.
+              // Пилюля, а не скруглённое поле: вокруг одни пилюли, и
+              // двенадцатипиксельный радиус посреди них был единственным на всю
+              // строку.
+              className="input text-sm font-medium w-[132px] !px-3 !rounded-full"
             />
           ) : (
-            <span className="text-sm font-medium tabular-nums px-3 py-1.5 rounded-lg bg-panel2 border border-border">
+            <span className="text-sm font-medium tabular-nums px-4 py-2 rounded-full bg-panel2 border border-border">
               {year}
             </span>
           )}
           <Tooltip content={monthPeriod ? "Следующий месяц" : "Следующий год"}>
             <button
               onClick={() => (monthPeriod ? setYm((m) => addMonths(m, 1)) : shiftYear(1))}
-              className="btn-ghost !p-2"
+              className="btn-ghost !p-2.5"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -1115,7 +1129,7 @@ export function BudgetsPage() {
                 <h2 className="font-semibold text-lg">Без бюджета</h2>
                 <span className="text-sm text-muted">Траты есть, плана нет</span>
               </div>
-              <div className="card divide-y divide-border">
+              <div className="card-tray divide-y divide-border">
                 {unbudgeted.map((u) => (
                   <div
                     key={`${u.kind}/${u.category}/${u.subcategory ?? ""}`}
@@ -1226,7 +1240,8 @@ function PlanFactCard({
   withTransfers?: number;
 }) {
   return (
-    <div className="card card-pad">
+    <div className="tray">
+    <div className="tray-core card-pad">
       <div className="label mb-1.5">{title}</div>
       <div className={`stat-num ${factClass} mb-3`}>
         {formatMoney(fact, base, { signed })}
@@ -1274,6 +1289,7 @@ function PlanFactCard({
           )
         )}
       </div>
+    </div>
     </div>
   );
 }
@@ -1683,7 +1699,7 @@ function TransferList({
 }) {
   const total = rows.reduce((s, r) => s + r.sum, 0);
   return (
-    <div className="card">
+    <div className="card-tray">
       <div className="flex items-baseline justify-between gap-3 px-3 py-2 border-b border-border">
         <span className="label">{title}</span>
         <span className="text-sm font-medium tabular-nums">{formatMoney(total, base)}</span>
