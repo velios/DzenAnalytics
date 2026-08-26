@@ -1236,32 +1236,46 @@ export function buildSankey(txs: Transaction[]): SankeyData {
   const links: { source: number; target: number; value: number }[] = [];
   const POOL_NAME = "Бюджет";
 
-  finalIncome.forEach(([name]) => nodes.push({ name: name as string, kind: "income" }));
-  // Deficit funding sits on the LEFT as an extra source feeding the budget.
+  // Узел без ленты раскладке некуда деть, и она сваливает его в ПОСЛЕДНИЙ
+  // столбец: «Прочие доходы» на копейку оказывались справа, среди статей
+  // расхода, без суммы и с пустой строкой в списке. Ленты рисуются по
+  // округлённым суммам, поэтому и отбор идёт по ним же — иначе бакет на
+  // сорок копеек породил бы узел, к которому не придёт ни одной ленты.
+  const shownIncome = finalIncome.filter(([, v]) => Math.round(v as number) > 0);
+  const shownExpense = finalExpense.filter(([, v]) => Math.round(v as number) > 0);
+
+  // Deficit funding sits on the LEFT as an extra source feeding the budget —
+  // и первым в своей колонке, как «Сбережения» справа. Обе строки отвечают на
+  // один вопрос — хватило дохода или нет, — и стоят на одном месте, а не
+  // теряются среди источников и статей.
   let fundingIdx = -1;
   if (net < 0) {
     fundingIdx = nodes.length;
     nodes.push({ name: "Из накоплений", kind: "funding" });
   }
+  const incomeStart = nodes.length;
+  shownIncome.forEach(([name]) => nodes.push({ name: name as string, kind: "income" }));
   const poolIdx = nodes.length;
   nodes.push({ name: POOL_NAME, kind: "account" });
-  const expenseStart = nodes.length;
-  finalExpense.forEach(([name]) => nodes.push({ name: name as string, kind: "category" }));
-  // Surplus sits on the RIGHT as an extra target drawn from the budget.
+  // Surplus sits on the RIGHT as an extra target drawn from the budget — и
+  // ПЕРВЫМ в своей колонке. Раньше он добавлялся последним, а место ему
+  // выбирала раскладка, и «Сбережения» всплывали то сверху, то посреди списка
+  // статей. Это не статья расхода, а ответ на вопрос «сколько осталось», и
+  // искать его каждый раз в новом месте незачем.
   let savingsIdx = -1;
   if (net > 0) {
     savingsIdx = nodes.length;
     nodes.push({ name: "Сбережения", kind: "savings" });
   }
+  const expenseStart = nodes.length;
+  shownExpense.forEach(([name]) => nodes.push({ name: name as string, kind: "category" }));
 
-  finalIncome.forEach((entry, i) => {
-    const v = Math.round(entry[1] as number);
-    if (v > 0) links.push({ source: i, target: poolIdx, value: v });
+  shownIncome.forEach((entry, i) => {
+    links.push({ source: incomeStart + i, target: poolIdx, value: Math.round(entry[1] as number) });
   });
   if (fundingIdx >= 0) links.push({ source: fundingIdx, target: poolIdx, value: -net });
-  finalExpense.forEach((entry, i) => {
-    const v = Math.round(entry[1] as number);
-    if (v > 0) links.push({ source: poolIdx, target: expenseStart + i, value: v });
+  shownExpense.forEach((entry, i) => {
+    links.push({ source: poolIdx, target: expenseStart + i, value: Math.round(entry[1] as number) });
   });
   if (savingsIdx >= 0) links.push({ source: poolIdx, target: savingsIdx, value: net });
 
@@ -1691,14 +1705,28 @@ export interface PayeeBucket {
  *  exactly those empty-payee operations instead of an empty drawer. */
 export const NO_PAYEE_LABEL = "Без получателя";
 
-export function topPayees(txs: Transaction[], kind: "expense" | "income" = "expense", limit = 20): PayeeBucket[] {
+export function topPayees(
+  txs: Transaction[],
+  kind: "expense" | "income" = "expense",
+  limit = 20,
+  /**
+   * Считать по контрагентам из справочника, а не по строкам банка.
+   *
+   * `payee` — это то, что напечатал банк: «DOSTAVKA PYATEROCHKA» и «DOSTAVKA IZ
+   * PYATEROCHK» две разные строки и одна «Пятёрочка». В топе они делят сумму
+   * пополам и обе проваливаются вниз списка. Параметром, а не насовсем: у
+   * командной палитры поиск идёт как раз по строкам банка.
+   */
+  byCounterparty = false
+): PayeeBucket[] {
   const map = new Map<string, PayeeBucket>();
   for (const t of txs) {
     // For the expense view, a refund to the same payee should reduce
     // that payee's net spend ("I bought X then returned it" → net 0).
     const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
     if (!include) continue;
-    const key = t.payee || NO_PAYEE_LABEL;
+    const key =
+      (byCounterparty ? t.brand?.trim() || t.payee?.trim() : t.payee) || NO_PAYEE_LABEL;
     let b = map.get(key);
     if (!b) {
       b = { payee: key, total: 0, count: 0 };
@@ -1766,6 +1794,31 @@ export interface TagBucket {
   income: number;
   count: number;
   txIds: string[];
+}
+
+/**
+ * Итог по тегу и его доходность.
+ *
+ * Тегом часто помечают затею целиком: сколько в неё вложили и сколько она
+ * вернула. Разница отвечает «сколько вышло», доходность — «сколько это в долях
+ * от вложенного» (issue #84).
+ *
+ * Без расхода доходности не существует: делить не на что. Там `null`, а не
+ * ноль, — ноль означал бы «вышли ровно в ноль», а это совсем другой ответ.
+ * Отрицательный расход (возвратов больше, чем трат) тоже не годится в
+ * знаменатель: доходность вышла бы с перевёрнутым знаком.
+ */
+export function tagReturn(bucket: { expense: number; income: number }): {
+  /** Доход минус расход. */
+  net: number;
+  /** Доля от вложенного: 0,1132 — это 11,3 %. Пусто — считать не от чего. */
+  rate: number | null;
+} {
+  const { expense, income } = bucket;
+  return {
+    net: income - expense,
+    rate: expense > 0 ? income / expense - 1 : null,
+  };
 }
 
 export function groupByHashtag(txs: Transaction[]): TagBucket[] {

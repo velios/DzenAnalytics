@@ -5,6 +5,7 @@ import {
   cumulativeNetAt,
   extractHashtags,
   groupByHashtag,
+  tagReturn,
   detectDuplicates,
   hashtagCategoryTrees,
   detectRecurring,
@@ -1395,5 +1396,131 @@ describe("stackedBalanceByAccount — долговой счёт по контр�
     );
     const totalOf = (s: { total: number }[]) => s[s.length - 1].total;
     expect(totalOf(split.series)).toBe(totalOf(plain.series));
+  });
+});
+
+describe("tagReturn: сколько затея вернула (issue #84)", () => {
+  it("считает разницу и доходность", () => {
+    // Пример из задачи: вложено 10 312,19 ₽, получено 11 479,50 ₽.
+    const r = tagReturn({ expense: 10312.19, income: 11479.5 });
+    expect(r.net).toBeCloseTo(1167.31, 2);
+    expect(r.rate! * 100).toBeCloseTo(11.32, 2);
+  });
+
+  it("убыток даёт минус в обоих числах", () => {
+    const r = tagReturn({ expense: 1000, income: 800 });
+    expect(r.net).toBe(-200);
+    expect(r.rate).toBeCloseTo(-0.2, 10);
+  });
+
+  it("без расхода доходности нет — делить не на что", () => {
+    // Именно `null`, а не ноль: ноль означал бы «вышли ровно в ноль».
+    expect(tagReturn({ expense: 0, income: 5000 }).rate).toBeNull();
+    expect(tagReturn({ expense: 0, income: 5000 }).net).toBe(5000);
+  });
+
+  it("отрицательный расход в знаменатель не берём", () => {
+    // Возвратов больше, чем трат: доходность вышла бы с перевёрнутым знаком.
+    expect(tagReturn({ expense: -100, income: 50 }).rate).toBeNull();
+  });
+});
+
+describe("buildSankey: место «Сбережений» и «Из накоплений»", () => {
+  let n = 0;
+  const tx = (kind: "income" | "expense", cat: string, amt: number): Transaction =>
+    ({
+      id: `s${++n}`,
+      date: "2026-08-10",
+      category: cat,
+      subcategory: null,
+      categoryFull: cat,
+      payee: "",
+      comment: "",
+      account: "Карта",
+      kind,
+      amount: amt,
+      amountBase: amt,
+      currency: "RUB",
+    }) as Transaction;
+
+  it("«Сбережения» стоят ПЕРВЫМИ в правой колонке", () => {
+    // Раньше узел добавлялся последним, и место ему выбирала раскладка: он
+    // всплывал то сверху, то посреди статей.
+    const d = buildSankey([
+      tx("income", "Зарплата", 100000),
+      tx("expense", "Еда", 30000),
+      tx("expense", "Дом", 20000),
+    ]);
+    const right = d.nodes.filter((x) => x.kind === "savings" || x.kind === "category");
+    expect(right[0].name).toBe("Сбережения");
+    expect(right.slice(1).map((x) => x.name)).toEqual(["Еда", "Дом"]);
+  });
+
+  it("«Из накоплений» стоит ПЕРВЫМ в левой колонке", () => {
+    const d = buildSankey([
+      tx("income", "Зарплата", 10000),
+      tx("expense", "Еда", 30000),
+    ]);
+    const left = d.nodes.filter((x) => x.kind === "funding" || x.kind === "income");
+    expect(left[0].name).toBe("Из накоплений");
+    expect(left[1].name).toBe("Зарплата");
+  });
+
+  it("после перестановки ленты по-прежнему ведут в свои узлы", () => {
+    const d = buildSankey([
+      tx("income", "Зарплата", 10000),
+      tx("expense", "Еда", 30000),
+    ]);
+    const pool = d.nodes.findIndex((x) => x.kind === "account");
+    const funding = d.nodes.findIndex((x) => x.kind === "funding");
+    const salary = d.nodes.findIndex((x) => x.name === "Зарплата");
+    // Обе левые ленты приходят в «Бюджет», и суммы у них свои.
+    expect(d.links.find((l) => l.source === salary)?.target).toBe(pool);
+    expect(d.links.find((l) => l.source === salary)?.value).toBe(10000);
+    expect(d.links.find((l) => l.source === funding)?.target).toBe(pool);
+    expect(d.links.find((l) => l.source === funding)?.value).toBe(20000);
+  });
+});
+
+describe("buildSankey: узлы без ленты", () => {
+  let n = 0;
+  const tx = (kind: "income" | "expense", cat: string, amt: number): Transaction =>
+    ({
+      id: `w${++n}`,
+      date: "2026-08-10",
+      category: cat,
+      subcategory: null,
+      categoryFull: cat,
+      payee: "",
+      comment: "",
+      account: "Карта",
+      kind,
+      amount: amt,
+      amountBase: amt,
+      currency: "RUB",
+    }) as Transaction;
+
+  it("копеечный источник не становится узлом", () => {
+    // Ленты рисуются по округлённым суммам: источник на сорок копеек ленты не
+    // получал, а узел получал — и раскладка сваливала его в ПОСЛЕДНИЙ столбец,
+    // где он вставал среди статей расхода без суммы и ел высоту.
+    const d = buildSankey([
+      tx("income", "Зарплата", 100000),
+      tx("income", "Кэшбэк", 0.4),
+      tx("expense", "Еда", 30000),
+    ]);
+    expect(d.nodes.map((x) => x.name)).not.toContain("Кэшбэк");
+    // У каждого узла есть хотя бы одна лента.
+    const touched = new Set(d.links.flatMap((l) => [l.source, l.target]));
+    expect(d.nodes.every((_, i) => touched.has(i))).toBe(true);
+  });
+
+  it("копеечная статья расхода тоже отпадает", () => {
+    const d = buildSankey([
+      tx("income", "Зарплата", 100000),
+      tx("expense", "Еда", 30000),
+      tx("expense", "Мелочь", 0.3),
+    ]);
+    expect(d.nodes.map((x) => x.name)).not.toContain("Мелочь");
   });
 });

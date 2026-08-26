@@ -84,6 +84,8 @@ type ModalState =
   | { kind: "create" }
   | { kind: "rename"; row: Row }
   | { kind: "delete"; rows: Row[] }
+  /** Перенос операций на другого контрагента — без повода их удалять. */
+  | { kind: "transfer"; row: Row }
   /** Привязка получателя под другим именем: «11043 MOP SBP» → «Магнит». */
   | { kind: "adopt"; payee: OrphanPayee }
   | null;
@@ -341,6 +343,10 @@ export function CounterpartyManager() {
     setModal({ kind: "delete", rows: [row] });
   }
 
+  function transferOne(row: Row) {
+    setModal({ kind: "transfer", row });
+  }
+
   function removeSelected() {
     const ids = new Set(selectedVisible);
     const picked = rows.filter((r) => ids.has(r.id));
@@ -366,7 +372,7 @@ export function CounterpartyManager() {
     );
     const ok = await confirm({
       title: `Объединить ${formatNum(dupGroups.length)} ${pluralRu(dupGroups.length, ["группу", "группы", "групп"])} дублей?`,
-      message: `Лишних записей: ${formatNum(dupCount)}. У ${formatNum(moving)} ${pluralRu(moving, ["операции", "операций", "операций"])} получатель переедет на оставшегося контрагента, дубли удалятся. Всё уйдёт в Дзен-мани при отправке в облако.`,
+      message: `Лишних записей: ${formatNum(dupCount)}. ${formatNum(moving)} ${pluralRu(moving, ["операция переедет", "операции переедут", "операций переедут"])} на оставшегося контрагента, дубли удалятся. Всё уйдёт в Дзен-мани при отправке в облако.`,
       confirmLabel: "Объединить",
     });
     if (!ok) return;
@@ -488,19 +494,19 @@ export function CounterpartyManager() {
                 </p>
                 <p>
                   В столбце <strong className="text-text">«Операций»</strong>{" "}
-                  видно, сколько операций на него ссылается. При удалении их
-                  можно{" "}
-                  <strong className="text-text">перенести на другого</strong> —
-                  так же делается и замена контрагента. Если не переносить,
-                  получатель у этих операций сотрётся, и после отправки в облако
-                  обратно его не вернуть.
+                  видно, сколько операций на него ссылается. Кнопка{" "}
+                  <strong className="text-text">переноса</strong> отдаёт их
+                  другому контрагенту — так делается и замена контрагента. То же
+                  предлагается при удалении; если там не переносить, контрагент у
+                  этих операций сотрётся вместе с текстом от банка, и после
+                  отправки в облако обратно его не вернуть.
                 </p>
                 <p>
                   <strong className="text-text">«Без контрагента»</strong> — те
                   самые получатели-строки. Карандаш даёт задать имя: например,
                   свести «MAGNIT 7712 MOSCOW» к уже заведённому «Магниту». Значок
                   с плюсом заводит контрагента прямо под этим именем. В обоих
-                  случаях получатель проставится во всех операциях строки, а если
+                  случаях контрагент проставится во всех операциях строки, а если
                   запись с таким именем уже есть — операции просто привяжутся к
                   ней. Правку видно в списке изменений, откатить можно
                   построчно.
@@ -765,7 +771,7 @@ export function CounterpartyManager() {
               </span>
               <span className="flex-1 min-w-0">Получатель</span>
               <span className="w-20 shrink-0 text-right">Операций</span>
-              <span className="w-20 shrink-0 text-center whitespace-nowrap">Действия</span>
+              <span className="w-28 shrink-0 text-center whitespace-nowrap">Действия</span>
             </div>
             <div className="divide-y divide-border/60">
               {visibleOrphans.map((o) => {
@@ -817,7 +823,7 @@ export function CounterpartyManager() {
                     {/* Два действия, как и в основной таблице: под своим именем
                         и «как есть». Банковскую строку почти всегда хочется
                         переименовать, поэтому карандаш стоит первым. */}
-                    <span className="w-20 shrink-0 flex items-center justify-center gap-0.5">
+                    <span className="w-28 shrink-0 flex items-center justify-center gap-0.5">
                       <button
                         onClick={() => setModal({ kind: "adopt", payee: o })}
                         title={`Привязать под другим именем — например, к уже заведённому контрагенту`}
@@ -959,6 +965,22 @@ export function CounterpartyManager() {
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
+                    {/* Перенос стоит отдельной кнопкой, а не прячется в корзине:
+                        «эти операции на самом деле вот этого контрагента» —
+                        самостоятельная задача, а не побочный вопрос удаления. */}
+                    <button
+                      onClick={() => transferOne(row)}
+                      disabled={gone || row.isNew}
+                      title={
+                        row.isNew
+                          ? "Черновик ещё не уехал в облако — переносить нечего"
+                          : "Перенести операции на другого контрагента"
+                      }
+                      aria-label="Перенести операции на другого контрагента"
+                      className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Combine className="w-4 h-4" />
+                    </button>
                     {gone ? (
                       <button
                         onClick={() => useCounterpartyEditsStore.getState().restore(row.id)}
@@ -1010,21 +1032,28 @@ export function CounterpartyManager() {
           onClose={() => setModal(null)}
         />
       )}
-      {modal?.kind === "delete" && (
-        <CounterpartyDeleteModal
-          targets={modal.rows.map((r) => ({
-            id: r.id,
-            title: r.title,
-            count: r.count,
-            isNew: r.isNew,
-          }))}
-          options={transferTargets(modal.rows)}
-          onClose={() => {
-            setModal(null);
-            setSelected(new Set());
-          }}
-        />
-      )}
+      {(modal?.kind === "delete" || modal?.kind === "transfer") &&
+        (() => {
+          // Окно одно на обе задачи: механика переноса та же, что при удалении
+          // с переездом, — меняются только вопрос и обязательность цели.
+          const picked = modal.kind === "delete" ? modal.rows : [modal.row];
+          return (
+            <CounterpartyDeleteModal
+              mode={modal.kind}
+              targets={picked.map((r) => ({
+                id: r.id,
+                title: r.title,
+                count: r.count,
+                isNew: r.isNew,
+              }))}
+              options={transferTargets(picked)}
+              onClose={() => {
+                setModal(null);
+                setSelected(new Set());
+              }}
+            />
+          );
+        })()}
     </div>
   );
 }
