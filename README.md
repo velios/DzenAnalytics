@@ -84,6 +84,19 @@
 
 React 19 · TypeScript · Vite · Tailwind. 
 
+## Деплой (инстанс velios)
+
+Единый канал (ADR 0022 в zen-hub): GitHub Actions собирает образ и пушит в `ghcr.io/velios/dzenanalytics` с тегами `:latest` и `:<git-sha>`, затем деплоит по ssh — `dokku ps:stop dzenanalytics && dokku git:from-image dzenanalytics ghcr.io/velios/dzenanalytics:<sha>` (workflow `.github/workflows/deploy.yml`). Обвязка dokku — в README репо `zen-infra`.
+
+**Откат** — деплой предыдущего sha-тега:
+
+```sh
+# из репо zen-infra
+just rollback dzenanalytics ghcr.io/velios/dzenanalytics:<старый-sha>
+```
+
+Где взять sha: `gh run list -R velios/DzenAnalytics` или теги пакета в ghcr (хранятся 3 последних, чистка — в deploy-workflow). SPA stateless — откат данных не трогает.
+
 ## ❤️ Отблагодарить автора
 
 Проект делается с любовью в свободное время и остаётся бесплатным. Если он оказался полезным — можно сказать спасибо с помощью донатов (отсканируйте QR или нажмите на него). Кофе нынче дорогой, а недосыпы пагубно влияют на здоровье. ~~Ещё жена сказала, что хочет мужа миллионера.~~
