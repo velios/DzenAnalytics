@@ -100,8 +100,11 @@ import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Segmented } from "../components/Segmented";
-import { InfoPopover } from "../components/InfoPopover";
+import { InfoPopover, InfoTerm } from "../components/InfoPopover";
 import { capitalShare, mergeLiveByTitle, positiveBalanceTotal } from "../lib/accountOptions";
+import { depositTotals, projectDeposit, type DepositRow } from "../lib/deposits";
+import { SectionCard } from "../components/SectionCard";
+import { toIsoDate } from "../lib/period";
 import { Stat } from "../components/Stat";
 import { Sparkline } from "../components/Sparkline";
 import { AccountLogo } from "../components/AccountLogo";
@@ -391,6 +394,7 @@ function passesFilter(selected: Set<string>, value: string): boolean {
 const CAPITAL_FILTERS_HINT =
   "На «Капитале» работает только период: остаток на дату складывается из всей истории до неё. Какие счета показать на графике — в его карточке. Отборы по счетам, категориям и суммам живут на вкладке «Движение».";
 
+/** Колонки свода вкладов: ставка, остаток срока, сумма, что ещё набежит. */
 export function AccountsPage() {
   const transactions = useDataStore((s) => s.transactions);
   const base = useDataStore((s) => s.rates.base);
@@ -704,6 +708,32 @@ export function AccountsPage() {
     });
     return { rows, dormant };
   }, [accounts, accountsAll, capitalView, liveList, accountEdits, toBase]);
+
+  /**
+   * Вклады с посчитанной доходностью (issue #81).
+   *
+   * Параметры вклада — ставка, срок, периодичность, капитализация — приезжают
+   * из Дзен-мани вместе с остатками и правятся в карточке счёта, но до сих пор
+   * нигде не считались. Счёт без ставки или срока в свод не попадает: мы про
+   * него ничего не знаем, а ноль означал бы «ничего не принесёт».
+   */
+  const depositRows = useMemo(() => {
+    const today = toIsoDate(new Date());
+    const out: DepositRow<(typeof liveList)[number]>[] = [];
+    for (const a of liveList) {
+      if (a.type !== "deposit" || a.archive) continue;
+      // Считаем СРАЗУ в базовой валюте: проценты пропорциональны остатку, а
+      // прогноз от нативной суммы складывался бы с базовым остатком строки —
+      // у валютного вклада доллары попадали бы в рублёвый итог.
+      const balance = toBase(a.balance, a.currency);
+      const projection = projectDeposit(balance, a, today);
+      if (!projection) continue;
+      out.push({ account: a, balance, projection });
+    }
+    // Ближайшие к закрытию — первыми: по ним и решать раньше всего.
+    return out.sort((x, y) => x.projection.daysLeft - y.projection.daysLeft);
+  }, [liveList, toBase]);
+  const depositSum = useMemo(() => depositTotals(depositRows), [depositRows]);
 
   /** Спящие счета, не попавшие в список вовсе (нулевой остаток и без операций). */
   const dormantCount = accountRowsResult.dormant;
@@ -2011,6 +2041,164 @@ export function AccountsPage() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Доходность вкладов. Только на «Капитале»: на «Движении» речь про обороты
+          за период, а вклад отвечает на другой вопрос — сколько он принесёт. */}
+      {capitalView && depositRows.length > 0 && (
+        <SectionCard
+          icon={<PiggyBank className="w-4 h-4 text-income" />}
+          title="Вклады"
+          info={
+            <p>
+              Проценты считаются от <InfoTerm>текущего остатка</InfoTerm> по
+              ставке, сроку и капитализации, которые заданы у счёта в Дзен-мани.
+              Это прогноз «сколько набежит, если ничего не трогать», а не выписка
+              банка: будущие пополнения и снятия не учитываются — их никто не
+              обещал. Налог с процентов тоже не считаем: он зависит от ключевой
+              ставки и от всех ваших вкладов сразу, включая те, которых в
+              Дзен-мани нет. Вклад без ставки или без срока в список не попадает
+              — про него нечего сказать.
+            </p>
+          }
+          right={
+            <span className="text-[11px] text-muted tabular-nums">
+              {formatNum(depositRows.length)}{" "}
+              {pluralRu(depositRows.length, ["вклад", "вклада", "вкладов"])}
+            </span>
+          }
+        >
+          {/* Ширины колонок ЗАДАНЫ, а не подобраны по содержимому: иначе один
+              вклад с длинным названием сдвигал бы столбцы с деньгами у всех
+              остальных. Резиновым остаётся только название. */}
+          <div className="overflow-x-auto -mx-1 px-1">
+            <table className="w-full text-sm table-fixed min-w-[50rem]">
+              <colgroup>
+                <col />
+                <col style={{ width: 84 }} />
+                <col style={{ width: 124 }} />
+                <col style={{ width: 124 }} />
+                <col style={{ width: 124 }} />
+                <col style={{ width: 152 }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col" className="table-th">
+                    Вклад
+                  </th>
+                  <th scope="col" className="table-th text-right">
+                    Ставка
+                  </th>
+                  <th scope="col" className="table-th text-right">
+                    До закрытия
+                  </th>
+                  <th scope="col" className="table-th text-right">
+                    Сумма
+                  </th>
+                  <th scope="col" className="table-th text-right">
+                    Проценты
+                  </th>
+                  <th scope="col" className="table-th text-right">
+                    На конец срока
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {depositRows.map((r) => {
+                  const p = r.projection;
+                  const done = p.daysLeft === 0;
+                  const isSel = selectedAccount === r.account.title;
+                  return (
+                    <tr
+                      key={r.account.id}
+                      onClick={() =>
+                        setSelectedAccount(isSel ? null : r.account.title)
+                      }
+                      className={`align-middle cursor-pointer group ${
+                        isSel ? "bg-accent/10" : "hover:bg-panel2/50"
+                      }`}
+                    >
+                      <td className="table-td">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="shrink-0">
+                            <AccountLogo
+                              title={r.account.title}
+                              type={r.account.type}
+                            />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block font-medium truncate group-hover:text-accent">
+                              {r.account.title}
+                            </span>
+                            {/* Условия договора второй строкой: они объясняют
+                                все остальные числа этой строки. */}
+                            <span className="block text-[11px] text-muted truncate">
+                              {formatDate(r.account.startDate ?? "", "short")} —{" "}
+                              {formatDate(p.endDate, "short")}
+                              {p.compounded ? " · С капитализацией" : ""}
+                            </span>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="table-td text-right tabular-nums whitespace-nowrap">
+                        {formatPct(p.percent / 100, 1)}
+                      </td>
+                      <td
+                        className={`table-td text-right tabular-nums whitespace-nowrap ${
+                          done ? "text-warn" : ""
+                        }`}
+                      >
+                        {done
+                          ? "Срок вышел"
+                          : `${formatNum(p.daysLeft)} ${pluralRu(p.daysLeft, [
+                              "день",
+                              "дня",
+                              "дней",
+                            ])}`}
+                      </td>
+                      <td className="table-td text-right tabular-nums whitespace-nowrap">
+                        {formatMoney(r.balance, base)}
+                      </td>
+                      <td
+                        className={`table-td text-right tabular-nums whitespace-nowrap ${
+                          done ? "text-muted" : "text-income"
+                        }`}
+                      >
+                        {done ? "—" : `+${formatMoney(p.interestLeft, base)}`}
+                      </td>
+                      <td className="table-td text-right tabular-nums whitespace-nowrap font-medium">
+                        {formatMoney(p.atMaturity, base)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              {/* Итог строкой таблицы, а не подписью под ней: каждое число
+                  стоит под своим столбцом и читается как сумма колонки. */}
+              <tfoot>
+                <tr className="bg-panel2/60 font-semibold">
+                  <td className="table-td">Итого</td>
+                  <td
+                    className="table-td text-right tabular-nums font-normal text-muted whitespace-nowrap"
+                    title="Средняя ставка, взвешенная остатком вклада"
+                  >
+                    {formatPct(depositSum.avgPercent / 100, 1)}
+                  </td>
+                  <td className="table-td" />
+                  <td className="table-td text-right tabular-nums whitespace-nowrap">
+                    {formatMoney(depositSum.balance, base)}
+                  </td>
+                  <td className="table-td text-right tabular-nums whitespace-nowrap text-income">
+                    +{formatMoney(depositSum.interestLeft, base)}
+                  </td>
+                  <td className="table-td text-right tabular-nums whitespace-nowrap">
+                    {formatMoney(depositSum.atMaturity, base)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </SectionCard>
+      )}
 
       {/* Список счетов виден на ОБЕИХ вкладках: это опора страницы, и прятать
           его за вкладкой — значит отвечать на вопрос «сколько у меня есть» без
