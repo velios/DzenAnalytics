@@ -44,3 +44,13 @@ jobs:
           # '|| true' covers the very first deploy when the app has no containers yet
           dokku ps:stop dzenanalytics || true
           dokku git:from-image dzenanalytics "$IMAGE:$GITHUB_SHA"
+
+      # 500 MB private-package storage is account-wide: keep only recent versions.
+      # Same pattern as zen-platform ci.yml (zen-hub#78); registry-aware action
+      # (multi-arch manifests, untagged orphans).
+      - uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          packages: dzenanalytics
+          exclude-tags: latest
+          keep-n-tagged: 3
+          delete-untagged: true
