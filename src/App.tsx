@@ -61,6 +61,7 @@ import {
 } from "./store/useCounterpartyEditsStore";
 import { useTagDeletionsStore } from "./store/useTagDeletionsStore";
 import { usePlannedDeletionsStore } from "./store/usePlannedDeletionsStore";
+import { useFilterMemoryStore } from "./store/useFilterMemoryStore";
 import { useDashboardLayoutStore } from "./store/useDashboardLayoutStore";
 import { useFiltersStore } from "./store/useFiltersStore";
 import { useImportBatchesStore } from "./store/useImportBatchesStore";
@@ -127,11 +128,17 @@ function App() {
     useTagDeletionsStore.getState().hydrate();
     usePlannedDeletionsStore.getState().hydrate();
     useDashboardLayoutStore.getState().hydrate();
+    useFilterMemoryStore.getState().hydrate();
     hydrate();
     backupHydrate();
     reportPeriodHydrate();
     return initTheme();
   }, [hydrate, backupHydrate, reportPeriodHydrate, initTheme]);
+
+  // Складываем фильтр на диск, пока включена его память. Подписка стоит всегда:
+  // сам стор проверяет флажок, и включение настройки начинает работать сразу,
+  // без перезагрузки страницы.
+  useEffect(() => useFilterMemoryStore.getState().watch(), []);
 
   // Ask the browser to keep our IndexedDB as PERSISTENT storage, so it isn't
   // silently evicted on a browser update / "clear site data under pressure"
@@ -412,7 +419,7 @@ function App() {
                 the title sits above the filter bar.
 
                 Раньше они стояли ВНЕ общего слоя — привычка тех времён, когда
-                у них была своя обёртка с панелью отборов. Отборы давно
+                у них была своя обёртка с панелью фильтров. Фильтры давно
                 переехали внутрь самих страниц, а страницы так и остались
                 снаружи, мимо перезапуска обработчика ошибок и появления при
                 переходе. */}

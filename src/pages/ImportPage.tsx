@@ -63,6 +63,7 @@ import { usePayeeAliasStore } from "../store/usePayeeAliasStore";
 import { Combobox } from "../components/Combobox";
 import { PageHeader } from "../components/PageHeader";
 import { formatNum, formatDate, formatMoney } from "../lib/format";
+import { useFilterMemoryStore } from "../store/useFilterMemoryStore";
 import { useDisplayStore, type TableFontLevel } from "../store/useDisplayStore";
 import { useThemeStore } from "../store/useThemeStore";
 import { parseAndValidateBackup, restoreBackupPayload } from "../lib/backup";
@@ -189,6 +190,8 @@ export function ImportPage() {
   const setThemeMode = useThemeStore((s) => s.setMode);
   const fractionDigits = useDisplayStore((s) => s.fractionDigits);
   const statementLine = useDisplayStore((s) => s.statementLine);
+  const rememberFilters = useFilterMemoryStore((s) => s.enabled);
+  const setRememberFilters = useFilterMemoryStore((s) => s.setEnabled);
   const setStatementLine = useDisplayStore((s) => s.setStatementLine);
   const setFractionDigits = useDisplayStore((s) => s.setFractionDigits);
   const tableFontLevel = useDisplayStore((s) => s.tableFontLevel);
@@ -1573,6 +1576,45 @@ export function ImportPage() {
             </span>
           </div>
         </SettingRow>
+
+        <SettingRow
+          title="Запоминать фильтры"
+          status={
+            rememberFilters
+              ? "Сохраняются между сессиями"
+              : "Сбрасываются при перезагрузке"
+          }
+          help={
+            <>
+              <p>
+                Обычно фильтры живут до перезагрузки вкладки: закрыли — открыли
+                чистым. Включите, и выбранные счета, статьи, валюты, поиск и
+                всё из <InfoTerm>«Дополнительно»</InfoTerm> вернутся такими же,
+                какими вы их оставили. Тогда же они начнут ездить в бэкапе.
+              </p>
+              <p>
+                <strong>Период не запоминается</strong> — ни при включённой
+                памяти, ни при выключенной. Приложение всегда открывается на
+                текущем месяце: увидеть при запуске позапрошлый август и
+                гадать, куда делись деньги, — не то, ради чего его открывают.
+                Период, который нужно возвращать, стоит сохранить{" "}
+                <InfoTerm>видом</InfoTerm> — там он хранится по желанию.
+              </p>
+              <p>
+                Что выбрано, видно всегда: в панели сверху написано, сколько
+                счетов и статей отмечено, а кнопка слева показывает название
+                применённого вида или «Без фильтрации».
+              </p>
+            </>
+          }
+          control={
+            <Switch
+              checked={rememberFilters}
+              label="Запоминать фильтры между сессиями"
+              onChange={(next) => setRememberFilters(next)}
+            />
+          }
+        />
       </div>
 
       </>)}
@@ -1994,20 +2036,42 @@ export function ImportPage() {
 
         {backupTab === "local" && (<>
         <div className="rounded-xl border border-border bg-panel2/30 p-4">
+          {/* Что именно уезжает в файл — под знаком вопроса: это читают один
+              раз, а место занимало постоянно, отодвигая сами кнопки вниз. */}
           <div className="flex items-center gap-2 mb-3">
-            <Database className="w-5 h-5 text-accent" />
+            <Database className="w-5 h-5 text-accent shrink-0" />
             <span className="font-medium">Бэкап всех данных</span>
+            <InfoPopover label="Что попадает в бэкап">
+              <p>
+                Один JSON со всем, что живёт <InfoTerm>только здесь</InfoTerm>:
+                операции и курсы валют по датам, бюджеты с их настройками, цели,
+                калибровка, виды, разрезы данных, правила категоризации, иконки и
+                цвета категорий, оформление с темой и настройки страниц.
+              </p>
+              <p>
+                Отдельно — <InfoTerm>несинхронизированные изменения</InfoTerm>:
+                правки операций, счетов, контрагентов, категорий и планов,
+                созданные операции, заведённые контрагенты и категории, удаления.
+                После восстановления их всё ещё можно отправить в Дзен-мани.
+              </p>
+              <p>
+                Настройки синхронизации тоже едут. Фильтры — только если включено{" "}
+                <InfoTerm>«Запоминать фильтры»</InfoTerm> на вкладке «Оформление».
+              </p>
+              <p>
+                <InfoTerm>Токен Дзен-мани и кэш облака не попадают никогда.</InfoTerm>{" "}
+                Секрет не должен покидать устройство, а кэш тянет за собой весь
+                объём и подтянется сам при первой синхронизации.
+              </p>
+              <p>
+                Восстановление заменяет текущую базу целиком и обновляет страницу.
+                Отправка изменений при этом становится{" "}
+                <InfoTerm>ручной</InfoTerm>, даже если была автоматической:
+                восстановленные правки не должны уехать в облако сами, прежде чем
+                вы их посмотрите.
+              </p>
+            </InfoPopover>
           </div>
-        <p className="text-xs text-muted mb-3">
-          Экспортирует JSON со всем, что живёт только здесь: операции, бюджеты и их
-          настройки, цели, калибровка, виды, разрезы данных, оформление и тема,
-          правила категоризации, иконки и цвета категорий, курсы валют по датам,
-          настройки страниц — и <strong>несинхронизированные изменения</strong>:
-          правки операций, счетов, контрагентов, категорий и планов, созданные
-          операции, заведённые контрагенты и категории, удаления. Токен Дзен-мани
-          и кэш облака в файл не попадают. Восстановление возвращает всё одним
-          файлом и обновляет страницу.
-        </p>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={exportBackup}
@@ -2040,16 +2104,14 @@ export function ImportPage() {
             <span className="text-xs text-muted self-center">{backupMsg}</span>
           )}
         </div>
-      </div>
 
-      {/* Scheduled backup. Заголовок, периодичность и кнопка — в одну строку:
-          четыре кнопки во всю ширину занимали ряд ради выбора из четырёх слов,
-          а объяснение читают один раз и убирают под знак вопроса. */}
-      <div className="rounded-xl border border-border bg-panel2/30 p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+        {/* Расписание живёт ЗДЕСЬ ЖЕ, а не отдельной карточкой: это тот же
+            самый бэкап, только скачанный без нажатия. Двумя блоками подряд он
+            читался как вторая, чем-то другая функция. */}
+        <div className="flex items-center justify-between gap-3 flex-wrap border-t border-border pt-3 mt-4">
           <div className="flex items-center gap-2 min-w-0 flex-wrap">
             <Clock className="w-5 h-5 text-accent shrink-0" />
-            <span className="font-medium">Бэкап по расписанию</span>
+            <span className="font-medium">По расписанию</span>
             <InfoPopover label="Как работает расписание">
               <p>
                 Автоматически скачивает тот же JSON-бэкап с выбранной
@@ -2100,27 +2162,32 @@ export function ImportPage() {
         {backupTab === "cloud" && (zenToken ? (
           <div className="rounded-xl border border-border bg-panel2/30 p-4">
             <div className="flex items-center gap-2 mb-3">
-              <History className="w-5 h-5 text-accent2" />
+              <History className="w-5 h-5 text-accent2 shrink-0" />
               <span className="font-medium">Снимки данных из Дзен-мани</span>
+              <InfoPopover label="Зачем нужны снимки">
+                <p>
+                  Полный слепок того, что сейчас лежит в облаке Дзен-мани.
+                  Хранится локально в браузере, и его можно скачать файлом.
+                </p>
+                <p>
+                  Это страховка для{" "}
+                  <button
+                    type="button"
+                    onClick={() => setSettingsTab("source")}
+                    className="text-accent hover:underline"
+                  >
+                    двусторонней синхронизации
+                  </button>
+                  : если отправка что-то испортит, состояние облака
+                  восстанавливается из снимка. Каждая отправка и сама создаёт
+                  снимок — по политике, выбранной на вкладке «Данные».
+                </p>
+                <p>
+                  Хранятся последние <InfoTerm>пять</InfoTerm> снимков, старые
+                  вытесняются автоматически.
+                </p>
+              </InfoPopover>
             </div>
-            <p className="text-xs text-muted mb-3">
-              Полный «слепок» того, что сейчас лежит в облаке Дзена. Сохраняется
-              локально в браузере и доступен для скачивания. Страховка на случай
-              сбоев двусторонней синхронизации — если что-то пойдёт не так,
-              всегда можно восстановить состояние из снимка. Хранятся последние{" "}
-              <strong>5 снимков</strong> — старые автоматически вытесняются.
-            </p>
-            <p className="text-xs text-muted mb-3">
-              Эти снимки особенно важны при включённой{" "}
-              <button
-                type="button"
-                onClick={() => setSettingsTab("source")}
-                className="text-accent hover:underline"
-              >
-                двусторонней синхронизации
-              </button>{" "}
-              — каждый Push автоматически создаёт снимок по выбранной политике.
-            </p>
             <div className="flex flex-wrap items-center gap-3 mb-3">
               <button
                 onClick={() => takeCloudSnapshot()}
