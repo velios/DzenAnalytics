@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, Copy, HandCoins, BadgeCheck, BadgePlus, BadgeX, Info } from "lucide-react";
+import { Pencil, Plus, Save, X, TrendingUp, TrendingDown, ArrowLeftRight, Undo2, Trash2, Copy, Scissors, HandCoins, BadgeCheck, BadgePlus, BadgeX, Info } from "lucide-react";
 import { extractHashtags } from "../lib/aggregations";
 import { useDataStore } from "../store/useDataStore";
 import { useEditsStore } from "../store/useEditsStore";
@@ -23,8 +23,8 @@ import {
 import { createCounterpartyMinter } from "../lib/counterparties";
 import { Combobox, type ComboboxGroup } from "./Combobox";
 import { CategoryCascadePicker, type CategoryNode } from "./CategoryCascadePicker";
+import { buildCategoryNodes } from "../lib/categoryNodes";
 import { Tooltip } from "./Tooltip";
-import { NO_CATEGORY } from "../lib/zenmoneyMap";
 import { validateOperation } from "../lib/operationValidation";
 import { DateField } from "./DateField";
 import type { ZenTag } from "../lib/zenmoney";
@@ -60,6 +60,8 @@ interface Props {
    * подключённого Дзен-мани новых операций не создать).
    */
   onCopy?: () => void;
+  /** Открыть разделение этой операции. Нет — делить нечем или уже разделена. */
+  onSplit?: () => void;
   /** Edit mode only. Step to the previous (-1) / next (+1) operation in the
    *  caller's current order. Wired to ←/→ keys; the caller swaps which `tx`
    *  is being edited. Omit to disable arrow navigation. */
@@ -118,6 +120,7 @@ export function EditTransactionModal({
   initialDebt,
   onClose,
   onCopy,
+  onSplit,
   onNavigate,
 }: Props) {
   const isCreate = !txProp;
@@ -305,70 +308,10 @@ export function EditTransactionModal({
   // the single cascade field. Hierarchy comes from the raw tags (authoritative)
   // unioned with sub-categories observed in the data; child tags that leaked
   // into `categoryOptions` are dropped from the first level.
-  const categoryNodes = useMemo<CategoryNode[]>(() => {
-    const subsMap = new Map<string, Set<string>>();
-    const addSub = (cat: string, sub: string) => {
-      let s = subsMap.get(cat);
-      if (!s) {
-        s = new Set<string>();
-        subsMap.set(cat, s);
-      }
-      s.add(sub);
-    };
-    // Подкатегории из ИСТОРИИ операций — только когда живого справочника нет
-    // (выгрузка CSV). При синхронизации с Дзен-мани справочник и есть правда:
-    // в истории остаются имена подкатегорий, которых в Дзен-мани уже нет —
-    // удалённых, убранных в архив или переехавших к другому родителю. Выбрать
-    // такую было можно, а сохранить нельзя: отправка ищет тег по живому
-    // справочнику и отвечала «категория не найдена».
-    if (!cacheTags) {
-      for (const [cat, subs] of subcatByCategory)
-        for (const sub of subs) addSub(cat, sub);
-    }
-    const realTop = new Set<string>();
-    if (cacheTags) {
-      const byId = new Map(cacheTags.map((t) => [t.id, t] as const));
-      for (const t of cacheTags) {
-        if (t.archive) continue;
-        if (t.parent) {
-          const parent = byId.get(t.parent);
-          if (parent && !parent.archive) addSub(parent.title, t.title);
-        } else {
-          realTop.add(t.title);
-        }
-      }
-    }
-    // Names that are a child of some category — drop them from the first level
-    // unless they're *also* a genuine top-level tag (e.g. a "Прочее" that exists
-    // both as its own category and as a sub elsewhere).
-    const childNames = new Set<string>();
-    for (const subs of subsMap.values()) for (const s of subs) childNames.add(s);
-    // Живые названия тегов: с ними сверяется отправка. Категории, которой в
-    // справочнике уже нет, в списке быть не должно — сохранить операцию с ней
-    // всё равно не выйдет.
-    const liveTitles = cacheTags
-      ? new Set(cacheTags.filter((t) => !t.archive).map((t) => t.title))
-      : null;
-    const tops = categoryOptions.filter(
-      // Drop full-path «Parent / Sub» entries — categoryMeta carries those keys
-      // (for same-named-sub icons), but the first level is top-level only; subs
-      // are reached via the right panel.
-      (c) =>
-        !c.includes(" / ") &&
-        (realTop.has(c) || !childNames.has(c)) &&
-        (!liveTitles || liveTitles.has(c))
-    );
-    // Always offer «Без категории» (pinned first) so a category can be REMOVED —
-    // Zenmoney has no uncategorized tag, so this maps to a tag-less operation on
-    // push. Without this the option only appeared when uncategorized data existed.
-    const withClear = [NO_CATEGORY, ...tops.filter((c) => c !== NO_CATEGORY)];
-    return withClear.map((name) => ({
-      name,
-      subs: Array.from(subsMap.get(name) ?? []).sort((a, b) =>
-        a.localeCompare(b, "ru")
-      ),
-    }));
-  }, [categoryOptions, subcatByCategory, cacheTags]);
+  const categoryNodes = useMemo<CategoryNode[]>(
+    () => buildCategoryNodes(categoryOptions, subcatByCategory, cacheTags),
+    [categoryOptions, subcatByCategory, cacheTags]
+  );
 
   // "Получатель" suggestions, served as two distinct groups so the
   // user can tell at a glance which bucket a suggestion comes from:
@@ -1480,15 +1423,31 @@ export function EditTransactionModal({
                   {!onCopy && "Удалить"}
                 </button>
               </Tooltip>
+              {/* Копирование и разделение — значками без подписей. Обе
+                  подписи рядом с «Удалить» забивали подвал текстом, а
+                  действия эти опознаются по значку: ножницы и две страницы
+                  трактовать иначе трудно. */}
               {onCopy && (
-                <Tooltip content="Создать такую же операцию сегодняшним днём">
+                <Tooltip content="Копировать — такая же операция сегодняшним днём">
                   <button
                     onClick={onCopy}
                     disabled={saving}
-                    className="btn-ghost text-sm"
+                    aria-label="Копировать операцию"
+                    className="btn-ghost text-sm px-3"
                   >
-                    <Copy className="w-3.5 h-3.5" />
-                    Копировать
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </Tooltip>
+              )}
+              {onSplit && (
+                <Tooltip content="Разделить — расписать операцию по нескольким статьям">
+                  <button
+                    onClick={onSplit}
+                    disabled={saving}
+                    aria-label="Разделить операцию"
+                    className="btn-ghost text-sm px-3"
+                  >
+                    <Scissors className="w-4 h-4" />
                   </button>
                 </Tooltip>
               )}

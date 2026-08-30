@@ -5,6 +5,7 @@ import {
   Plus,
   Copy,
   Pencil,
+  Scissors,
   Trash2,
   Eye,
   Scale,
@@ -34,6 +35,8 @@ import { useZenmoneyStore, getLiveAccountsFromCache } from "../store/useZenmoney
 import { confirm, useConfirmStore } from "../store/useConfirmStore";
 import { pluralRu } from "../lib/plural";
 import { EditTransactionModal } from "../components/EditTransactionModal";
+import { SplitTransactionModal } from "../components/SplitTransactionModal";
+import { useSplitTransaction } from "../hooks/useSplitTransaction";
 import { Tooltip } from "../components/Tooltip";
 import { BulkEditModal } from "../components/BulkEditModal";
 import { confirmBulkDelete } from "../lib/confirmBulkDelete";
@@ -232,6 +235,9 @@ export function TransactionsPage() {
   // Операция, с которой снимают копию (issue #78). Живёт отдельно от
   // `creating`: там выбирают вид с нуля, здесь форма открывается заполненной.
   const [copying, setCopying] = useState<Transaction | null>(null);
+  const [splitting, setSplitting] = useState<Transaction | null>(null);
+  const { applySplit } = useSplitTransaction();
+
 
   // ── «Добавить» dropdown: pick which kind of operation to create. ─────
   // Anchored to addMenuRef; opening/closing (outside-click, Esc, scroll) is
@@ -789,6 +795,7 @@ export function TransactionsPage() {
                 onEdit={openEditor}
                 onCopy={apiConnected ? setCopying : undefined}
                 onDelete={handleDelete}
+                onSplit={apiConnected ? setSplitting : undefined}
                 selected={selected}
                 onToggleSelect={toggleSelect}
               />
@@ -811,6 +818,7 @@ export function TransactionsPage() {
                 onEdit={() => openEditor(t)}
                 onCopy={apiConnected ? () => setCopying(t) : undefined}
                 onDelete={() => handleDelete(t)}
+                onSplit={apiConnected ? () => setSplitting(t) : undefined}
                 selected={selected.has(t.id)}
                 onToggleSelect={() => toggleSelect(t.id)}
               />
@@ -832,6 +840,16 @@ export function TransactionsPage() {
       </div>
       </div>
 
+      {splitting && (
+        <SplitTransactionModal
+          tx={splitting}
+          onClose={() => setSplitting(null)}
+          onSplit={(parts, payee, account) =>
+              applySplit(splitting, parts, payee, account)
+            }
+        />
+      )}
+
       {editing && (
         <EditTransactionModal
           key={editing.id}
@@ -845,6 +863,17 @@ export function TransactionsPage() {
                   // образец и копию разом.
                   setEditing(null);
                   setCopying(editing);
+                }
+              : undefined
+          }
+          // Разделение открывается ВМЕСТО карточки: держать обе формы
+          // открытыми значило бы предлагать править операцию и делить её
+          // одновременно.
+          onSplit={
+            apiConnected
+              ? () => {
+                  setEditing(null);
+                  setSplitting(editing);
                 }
               : undefined
           }
@@ -1012,6 +1041,7 @@ function DayGroup({
   onEdit,
   onCopy,
   onDelete,
+  onSplit,
   selected,
   onToggleSelect,
 }: {
@@ -1026,6 +1056,8 @@ function DayGroup({
    *  не создать, и кнопка не рисуется. */
   onCopy?: (t: Transaction) => void;
   onDelete: (t: Transaction) => void;
+  /** Не задан — делить нечем: без подключённого Дзен-мани частей не создать. */
+  onSplit?: (t: Transaction) => void;
   selected: Set<string>;
   onToggleSelect: (id: string) => void;
 }) {
@@ -1103,6 +1135,7 @@ function DayGroup({
           onEdit={() => onEdit(t)}
           onCopy={onCopy && (() => onCopy(t))}
           onDelete={() => onDelete(t)}
+          onSplit={onSplit && (() => onSplit(t))}
           selected={selected.has(t.id)}
           onToggleSelect={() => onToggleSelect(t.id)}
           hideDate
@@ -1124,6 +1157,7 @@ function Row({
   onEdit,
   onCopy,
   onDelete,
+  onSplit,
   selected,
   onToggleSelect,
   hideDate = false,
@@ -1134,6 +1168,8 @@ function Row({
   onEdit: () => void;
   onCopy?: () => void;
   onDelete: () => void;
+  /** Разделить операцию на части. Нет — делить нечего или незачем. */
+  onSplit?: () => void;
   selected: boolean;
   onToggleSelect: () => void;
   hideDate?: boolean;
@@ -1332,6 +1368,19 @@ function Row({
             aria-label="Копировать операцию"
           >
             <Copy className="w-4 h-4" />
+          </button>
+        )}
+        {onSplit && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSplit();
+            }}
+            className="btn-icon"
+            title="Разделить — расписать операцию по нескольким статьям"
+            aria-label="Разделить операцию"
+          >
+            <Scissors className="w-4 h-4" />
           </button>
         )}
         <button
