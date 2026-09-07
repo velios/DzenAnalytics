@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Upload,
@@ -24,13 +24,11 @@ import {
   History,
   CloudDownload,
   CloudUpload,
-  Info,
   ChevronDown,
   LogIn,
   LogOut,
   Users,
   Calculator,
-  HardDrive,
   ALargeSmall,
   ArrowLeftRight,
   HelpCircle,
@@ -67,6 +65,11 @@ import { useFilterMemoryStore } from "../store/useFilterMemoryStore";
 import { useDisplayStore, type TableFontLevel } from "../store/useDisplayStore";
 import { useThemeStore } from "../store/useThemeStore";
 import { parseAndValidateBackup, restoreBackupPayload } from "../lib/backup";
+import { snapshotSummary } from "../lib/snapshotLabel";
+import { readSnapshotFile } from "../lib/snapshotFile";
+import { BackupComparison } from "../components/BackupComparison";
+import { RestoreWizardModal } from "../components/RestoreWizardModal";
+import { useRestoreWizardStore } from "../store/useRestoreWizardStore";
 import { useTagEditsStore } from "../store/useTagEditsStore";
 import { useNewCategoriesStore } from "../store/useNewCategoriesStore";
 import { useTagDeletionsStore } from "../store/useTagDeletionsStore";
@@ -315,10 +318,10 @@ export function ImportPage() {
   const deleteCloudSnapshot = useCloudSnapshotStore((s) => s.deleteSnapshot);
   const downloadCloudSnapshot = useCloudSnapshotStore((s) => s.download);
   const importCloudSnapshot = useCloudSnapshotStore((s) => s.importFromFile);
-  const restoreCloudSnapshot = useCloudSnapshotStore((s) => s.restore);
-  const lastRestoreResult = useCloudSnapshotStore((s) => s.lastRestoreResult);
-  const restoreProgress = useCloudSnapshotStore((s) => s.restoreProgress);
-  const snapshotImportRef = useRef<HTMLInputElement>(null);
+  const cloudSnapshotsOp = useCloudSnapshotStore((s) => s.busyOp);
+  const openRestoreWizard = useRestoreWizardStore((s) => s.open);
+  const pruneForeignSnapshots = useCloudSnapshotStore((s) => s.pruneForeign);
+  const [restoreWizardOpen, setRestoreWizardOpen] = useState(false);
   // Current Zenmoney user id — read from the local cache. Lets us
   // filter the snapshot list to "snapshots for the currently
   // connected account only", so switching accounts doesn't surface
@@ -355,8 +358,17 @@ export function ImportPage() {
       (s) => s.userId == null || s.userId === currentUserId
     );
   }, [cloudSnapshots, currentUserId]);
-  const otherAccountSnapshotCount =
-    cloudSnapshots.length - visibleSnapshots.length;
+  // Подключили другой аккаунт — снимки прежнего выбрасываем. Слотов пять, и
+  // занимать их копиями чужой базы незачем: восстановить в текущий аккаунт из
+  // них всё равно нельзя без переноса, а место под свою страховку они съедают.
+  // Копии без привязки к аккаунту (старые) не трогаем — они могут быть своими.
+  useEffect(() => {
+    if (currentUserId == null || !cloudSnapshotsLoaded) return;
+    const foreign = cloudSnapshots.some(
+      (s) => s.userId != null && s.userId !== currentUserId
+    );
+    if (foreign) void pruneForeignSnapshots(currentUserId);
+  }, [cloudSnapshots, cloudSnapshotsLoaded, currentUserId, pruneForeignSnapshots]);
   useEffect(() => {
     if (!cloudSnapshotsLoaded) hydrateCloudSnapshots();
   }, [cloudSnapshotsLoaded, hydrateCloudSnapshots]);
@@ -394,8 +406,6 @@ export function ImportPage() {
 
   // Inner tab inside the Бэкапы section — local files vs cloud
   // snapshots. Mirrors the Источник данных card pattern.
-  type BackupTab = "local" | "cloud";
-  const [backupTab, setBackupTab] = useState<BackupTab>("local");
 
   // "Show all rates" toggle for the currency-rates grid in CSV
   // mode. By default only the 4 most-common currencies are shown
@@ -669,8 +679,10 @@ export function ImportPage() {
     setBackupBusy(true);
     setBackupMsg(null);
     try {
-      const res = await runBackupNow();
-      setBackupMsg(`Скачано: ${res.fileName} (${Math.round(res.size / 1024)} КБ)`);
+      await runBackupNow();
+      // Имя файла и его размер не показываем: браузер и так сообщает о
+      // скачивании, а строка оставалась висеть рядом с кнопкой навсегда.
+      setBackupMsg(null);
     } catch (e) {
       setBackupMsg(e instanceof Error ? `Ошибка: ${e.message}` : "Ошибка экспорта");
     } finally {
@@ -679,20 +691,33 @@ export function ImportPage() {
   }
 
   async function importBackup(file: File) {
+    // Разбираем файл ДО вопроса о замене. Раньше сначала спрашивали
+    // «текущие данные будут заменены?», человек соглашался — и только потом
+    // узнавал, что файл вообще не тот. Страшный вопрос ради ничего.
+    let dump: Record<string, unknown>;
+    setBackupMsg(null);
+    try {
+      // Тем же чтением, что и у снимков: копию часто пересылают себе архивом,
+      // и «сервис не принял мой же бэкап» — плохой конец истории.
+      const text = await readSnapshotFile(file);
+      // Validate + sanitize (type checks, prototype-pollution stripping,
+      // size/depth bounds) before anything touches IndexedDB.
+      dump = parseAndValidateBackup(text) as unknown as Record<string, unknown>;
+    } catch (e) {
+      setBackupMsg(e instanceof Error ? `Ошибка: ${e.message}` : "Ошибка импорта backup'а");
+      return;
+    }
+
+    const count = Array.isArray(dump.transactions) ? dump.transactions.length : 0;
     const ok = await confirm({
-      title: "Восстановить из бэкапа?",
-      message: "Текущие данные будут заменены.",
+      title: "Восстановить из копии?",
+      message: `Текущие данные будут заменены. В файле ${formatNum(count)} операций.`,
       confirmLabel: "Восстановить",
       tone: "warning",
     });
     if (!ok) return;
     setBackupBusy(true);
-    setBackupMsg(null);
     try {
-      const text = await file.text();
-      // Validate + sanitize (type checks, prototype-pollution stripping,
-      // size/depth bounds) before anything touches IndexedDB.
-      const dump = parseAndValidateBackup(text) as unknown as Record<string, unknown>;
       // Write every section back to IndexedDB (shared key list with the
       // builder — incl. local edits/drafts/deletions/rules so un-pushed work
       // survives a restore).
@@ -1035,9 +1060,9 @@ export function ImportPage() {
                 className="btn-primary text-sm whitespace-nowrap"
               >
                 {zenStatus === "checking" ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                 ) : zenStatus === "syncing" ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <LinkIcon className="w-3.5 h-3.5" />
                 )}
@@ -1094,9 +1119,9 @@ export function ImportPage() {
                 className="btn-primary text-sm"
               >
                 {zenStatus === "syncing" ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <RefreshCw className="w-4 h-4" />
                 )}
                 {zenStatus === "syncing" ? "Синхронизирую..." : "Синхронизировать"}
               </button>
@@ -1106,7 +1131,7 @@ export function ImportPage() {
                 className="btn-ghost text-sm text-muted"
                 title="Сбросить локальный кэш и скачать всё заново"
               >
-                <CloudDownload className="w-3.5 h-3.5" />
+                <CloudDownload className="w-4 h-4" />
                 Полная синхронизация
               </button>
               {providerMode ? (
@@ -1590,7 +1615,7 @@ export function ImportPage() {
                 Обычно фильтры живут до перезагрузки вкладки: закрыли — открыли
                 чистым. Включите, и выбранные счета, статьи, валюты, поиск и
                 всё из <InfoTerm>«Дополнительно»</InfoTerm> вернутся такими же,
-                какими вы их оставили. Тогда же они начнут ездить в бэкапе.
+                какими вы их оставили. Тогда же они начнут попадать в копию.
               </p>
               <p>
                 <strong>Период не запоминается</strong> — ни при включённой
@@ -1997,78 +2022,44 @@ export function ImportPage() {
 
       {settingsTab === "backups" && (
       <section className="card-tray card-pad space-y-5">
-        {/* Header + Локальные/Облачные tab selector. Mirrors the
-            Источник данных card structure. */}
-        <SettingsSectionHeader
-          icon={History}
-          title="Резервные копии"
-          right={
-          <div className="inline-flex gap-0.5 bg-panel2 border border-border rounded-full p-1 shadow-tray">
-            <button
-              type="button"
-              onClick={() => setBackupTab("local")}
-              className={`px-3 py-1.5 text-sm rounded-full inline-flex items-center gap-1.5 transition-colors ${
-                backupTab === "local"
-                  ? "bg-accent/10 text-accent"
-                  : "text-muted hover:text-text"
-              }`}
-              title="Скачивание JSON-бэкапов на ваше устройство"
-            >
-              <HardDrive className="w-3.5 h-3.5" />
-              Локальные
-            </button>
-            <button
-              type="button"
-              onClick={() => setBackupTab("cloud")}
-              className={`px-3 py-1.5 text-sm rounded-full inline-flex items-center gap-1.5 transition-colors ${
-                backupTab === "cloud"
-                  ? "bg-accent/10 text-accent"
-                  : "text-muted hover:text-text"
-              }`}
-              title="Снимки облачного состояния Дзен-мани"
-            >
-              <Cloud className="w-3.5 h-3.5" />
-              Облачные
-            </button>
-          </div>
-          }
-        />
+        {/* Обе копии на одной странице, друг под другом: раньше их развели
+            вкладками, и рядом они никогда не показывались — а разница между
+            ними как раз в том, что одна не заменяет другую. */}
+        <SettingsSectionHeader icon={History} title="Резервные копии" />
 
-        {backupTab === "local" && (<>
+        <BackupComparison />
+
+        <>
         <div className="rounded-xl border border-border bg-panel2/30 p-4">
           {/* Что именно уезжает в файл — под знаком вопроса: это читают один
               раз, а место занимало постоянно, отодвигая сами кнопки вниз. */}
           <div className="flex items-center gap-2 mb-3">
-            <Database className="w-5 h-5 text-accent shrink-0" />
-            <span className="font-medium">Бэкап всех данных</span>
-            <InfoPopover label="Что попадает в бэкап">
+            <Database className="w-4 h-4 text-accent shrink-0" />
+            <span className="text-sm font-medium">Копии данных сервиса</span>
+            <InfoPopover label="Что попадает в копию">
               <p>
-                Один JSON со всем, что живёт <InfoTerm>только здесь</InfoTerm>:
-                операции и курсы валют по датам, бюджеты с их настройками, цели,
-                калибровка, виды, разрезы данных, правила категоризации, иконки и
-                цвета категорий, оформление с темой и настройки страниц.
+                Всё, что <InfoTerm>живёт только здесь</InfoTerm> и не приходит
+                из Дзен-мани: операции, бюджеты, цели, правила, виды, разрезы
+                данных и оформление.
               </p>
               <p>
-                Отдельно — <InfoTerm>несинхронизированные изменения</InfoTerm>:
-                правки операций, счетов, контрагентов, категорий и планов,
-                созданные операции, заведённые контрагенты и категории, удаления.
-                После восстановления их всё ещё можно отправить в Дзен-мани.
+                И <InfoTerm>правки, которые ещё не ушли в Дзен-мани</InfoTerm>:
+                после восстановления их по-прежнему можно отправить.
               </p>
               <p>
-                Настройки синхронизации тоже едут. Фильтры — только если включено{" "}
-                <InfoTerm>«Запоминать фильтры»</InfoTerm> на вкладке «Оформление».
+                <InfoTerm>Токен Дзен-мани в копию не попадает никогда</InfoTerm>{" "}
+                — ему незачем покидать компьютер. Данные из облака тоже: они
+                вернутся сами при первой синхронизации.
               </p>
               <p>
-                <InfoTerm>Токен Дзен-мани и кэш облака не попадают никогда.</InfoTerm>{" "}
-                Секрет не должен покидать устройство, а кэш тянет за собой весь
-                объём и подтянется сам при первой синхронизации.
+                Файл сжат — распаковывать его не нужно, сервис принимает оба
+                вида.
               </p>
               <p>
-                Восстановление заменяет текущую базу целиком и обновляет страницу.
-                Отправка изменений при этом становится{" "}
-                <InfoTerm>ручной</InfoTerm>, даже если была автоматической:
-                восстановленные правки не должны уехать в облако сами, прежде чем
-                вы их посмотрите.
+                Восстановление заменяет всё, что сейчас в сервисе, и
+                перезагружает страницу. Отправку правок оно переводит в{" "}
+                <InfoTerm>ручной режим</InfoTerm>: вернувшиеся правки не должны
+                уехать в Дзен-мани, прежде чем вы их увидите.
               </p>
             </InfoPopover>
           </div>
@@ -2076,23 +2067,23 @@ export function ImportPage() {
           <button
             onClick={exportBackup}
             disabled={backupBusy || transactions.length === 0}
-            className="btn-primary text-sm"
+            className="btn-primary"
           >
             <Download className="w-4 h-4" />
-            Скачать бэкап
+            Создать копию
           </button>
           <button
             onClick={() => backupRef.current?.click()}
             disabled={backupBusy}
-            className="btn-ghost text-sm"
+            className="btn-ghost"
           >
             <Upload className="w-4 h-4" />
-            Восстановить из бэкапа
+            Восстановить
           </button>
           <input
             ref={backupRef}
             type="file"
-            accept="application/json,.json"
+            accept="application/json,.json,application/zip,.zip,application/gzip,.gz"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -2110,24 +2101,23 @@ export function ImportPage() {
             читался как вторая, чем-то другая функция. */}
         <div className="flex items-center justify-between gap-3 flex-wrap border-t border-border pt-3 mt-4">
           <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <Clock className="w-5 h-5 text-accent shrink-0" />
-            <span className="font-medium">По расписанию</span>
+            <Clock className="w-4 h-4 text-accent shrink-0" />
+            <span className="text-sm font-medium">По расписанию</span>
             <InfoPopover label="Как работает расписание">
               <p>
-                Автоматически скачивает тот же JSON-бэкап с выбранной
-                периодичностью. Проверка запускается при открытии приложения и
-                каждые ~10 минут. Файл уходит в стандартную папку загрузок
-                браузера, к имени добавляется «-auto».
+                Та же копия, только скачивается сама — раз в час, день или
+                неделю. Сервис проверяет срок при открытии и дальше примерно
+                каждые десять минут. К имени файла добавляется «-auto».
               </p>
               <p>
-                Срок считается от <InfoTerm>последней копии</InfoTerm>, включая
-                скачанную руками кнопкой «Скачать бэкап»: если копия только что
-                сделана, повторять её через час незачем.
+                Срок считается от <InfoTerm>последней копии</InfoTerm>, в том
+                числе сделанной вручную: если копия только что готова,
+                повторять её через час незачем.
               </p>
               <p>
-                <InfoTerm>Важно:</InfoTerm> работает, только пока вкладка открыта
-                — браузер не умеет запускать нас по будильнику. Уведомление о
-                скачивании при этом нормально, его показывает сам браузер.
+                Копия создаётся, только пока сервис открыт: закрытую вкладку
+                браузер к сроку не разбудит. О скачивании он покажет
+                уведомление — так и должно быть.
               </p>
             </InfoPopover>
             <span className="text-xs text-muted">
@@ -2139,7 +2129,7 @@ export function ImportPage() {
           <div className="w-44 shrink-0">
             <Select
               size="sm"
-              ariaLabel="Как часто делать бэкап"
+              ariaLabel="Как часто создавать копию"
               value={backupInterval}
               onChange={(v) => setBackupInterval(v)}
               options={[
@@ -2152,39 +2142,46 @@ export function ImportPage() {
           </div>
         </div>
       </div>
-        </>)}
+        </>
 
         {/* Cloud snapshot — Phase 0 of two-way sync. Only available with
             an API token connected (there's nothing to snapshot in CSV
             mode). Stores up to 5 raw responses of POST /v8/diff/ so we
             can fall back to a known-good cloud state if a future push
             operation goes wrong. */}
-        {backupTab === "cloud" && (zenToken ? (
+        {zenToken ? (
           <div className="rounded-xl border border-border bg-panel2/30 p-4">
             <div className="flex items-center gap-2 mb-3">
-              <History className="w-5 h-5 text-accent2 shrink-0" />
-              <span className="font-medium">Снимки данных из Дзен-мани</span>
-              <InfoPopover label="Зачем нужны снимки">
+              <History className="w-4 h-4 text-accent2 shrink-0" />
+              <span className="text-sm font-medium">Снимки аккаунта Дзен-мани</span>
+              <InfoPopover label="Что попадает в снимок">
                 <p>
-                  Полный слепок того, что сейчас лежит в облаке Дзен-мани.
-                  Хранится локально в браузере, и его можно скачать файлом.
+                  Всё, что лежит в Дзен-мани: операции, счета, категории,
+                  контрагенты и планы. Снимок остаётся на этом компьютере, в
+                  облако не уходит, и его можно скачать файлом.
                 </p>
                 <p>
-                  Это страховка для{" "}
+                  Восстановление отправляет обратно в Дзен-мани всё, кроме{" "}
+                  <InfoTerm>«Планов месяца»</InfoTerm>: суммы бюджета по
+                  категориям снимок хранит, но не возвращает — при отправке они
+                  теряют подкатегории.
+                </p>
+                <p>
+                  Снимок — страховка перед{" "}
                   <button
                     type="button"
                     onClick={() => setSettingsTab("source")}
                     className="text-accent hover:underline"
                   >
-                    двусторонней синхронизации
+                    двусторонней синхронизацией
                   </button>
-                  : если отправка что-то испортит, состояние облака
-                  восстанавливается из снимка. Каждая отправка и сама создаёт
-                  снимок — по политике, выбранной на вкладке «Данные».
+                  : если отправка правок что-то испортит, прежнее состояние
+                  можно вернуть. Перед отправкой правок снимок делается и сам,
+                  а частоту можно настроить на вкладке «Данные».
                 </p>
                 <p>
-                  Хранятся последние <InfoTerm>пять</InfoTerm> снимков, старые
-                  вытесняются автоматически.
+                  Хранятся последние <InfoTerm>пять</InfoTerm>: самый старый
+                  уступает место новому.
                 </p>
               </InfoPopover>
             </div>
@@ -2192,84 +2189,30 @@ export function ImportPage() {
               <button
                 onClick={() => takeCloudSnapshot()}
                 disabled={cloudSnapshotsBusy}
-                className="btn-primary text-sm inline-flex items-center gap-2"
+                className="btn-primary"
               >
-                {cloudSnapshotsBusy ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                {cloudSnapshotsOp === "snapshot" ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <CloudDownload className="w-3.5 h-3.5" />
+                  <CloudDownload className="w-4 h-4" />
                 )}
-                {cloudSnapshotsBusy ? "Делаю снимок…" : "Сделать снимок сейчас"}
+                {cloudSnapshotsOp === "snapshot" ? "Создаю снимок…" : "Создать снимок"}
               </button>
-              {/* Import snapshot from a JSON file — file you previously
-                  downloaded via the per-row Download button, or copied
-                  from another machine. Goes into the same rolling
-                  5-slot index as fresh snapshots. */}
+              {/* Одна кнопка на всё восстановление: выбор снимка, проверка,
+                  подготовка и заливка идут шагами внутри окна. На экране они
+                  занимали половину страницы и читались все сразу. */}
               <button
-                onClick={() => snapshotImportRef.current?.click()}
-                disabled={cloudSnapshotsBusy}
-                className="btn-ghost text-sm inline-flex items-center gap-2"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                Загрузить из файла
-              </button>
-              <input
-                ref={snapshotImportRef}
-                type="file"
-                accept="application/json,.json"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) importCloudSnapshot(f);
-                  e.target.value = "";
+                onClick={() => {
+                  openRestoreWizard(visibleSnapshots[0]?.id ?? null);
+                  setRestoreWizardOpen(true);
                 }}
-              />
-              <span className="text-xs text-muted">
-                {cloudSnapshots.length === 0
-                  ? "Снимков ещё не было"
-                  : `${visibleSnapshots.length}${
-                      otherAccountSnapshotCount > 0
-                        ? ` (+${otherAccountSnapshotCount} с других аккаунтов)`
-                        : ""
-                    } из 5 слотов занято`}
-              </span>
+                disabled={cloudSnapshotsBusy}
+                className="btn-ghost"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Восстановить
+              </button>
             </div>
-
-            {/* Live restore-progress bar — only visible while a
-                restore is in flight. Shows current phase + counter so
-                the user knows the operation is moving and where it is. */}
-            {restoreProgress && (
-              <div className="text-xs mb-3 p-3 rounded-lg bg-accent2/10 border border-accent2/30">
-                <div className="flex items-center gap-2 mb-1.5 text-accent2 font-medium">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Восстановление:{" "}
-                  {restoreProgress.phase === "accounts"
-                    ? "Счета"
-                    : restoreProgress.phase === "tags"
-                      ? "Теги"
-                      : restoreProgress.phase === "merchants"
-                        ? "Мерчанты"
-                        : restoreProgress.phase === "transactions"
-                          ? "Транзакции"
-                          : "Готово"}
-                  {restoreProgress.total > 0 && (
-                    <span className="text-muted tabular-nums">
-                      {restoreProgress.current} / {restoreProgress.total}
-                    </span>
-                  )}
-                </div>
-                {restoreProgress.total > 0 && (
-                  <div className="h-1 bg-panel2 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-accent2 transition-all"
-                      style={{
-                        width: `${Math.min(100, Math.round((restoreProgress.current / restoreProgress.total) * 100))}%`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
 
             {cloudSnapshotsError && (
               <div className="text-xs text-expense flex items-start gap-2 mb-3">
@@ -2277,6 +2220,21 @@ export function ImportPage() {
                 <span>{cloudSnapshotsError}</span>
               </div>
             )}
+
+            {/* Счётчик слотов — заголовком списка, а не подписью у кнопок:
+                он описывает список, и рядом с «Создать снимок» читался как
+                состояние кнопки. */}
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <span className="text-[11px] uppercase tracking-wide text-muted">
+                {cloudSnapshots.length === 0 ? "Снимков ещё не было" : "Сохранённые снимки"}
+              </span>
+              {cloudSnapshots.length > 0 && (
+                <span className="text-xs text-muted tabular-nums">
+                  Занято {visibleSnapshots.length}{" "}
+                  {pluralRu(visibleSnapshots.length, ["слот", "слота", "слотов"])} из 5
+                </span>
+              )}
+            </div>
 
             {visibleSnapshots.length > 0 && (
               <div className="text-xs space-y-1 -mx-1 px-1 max-h-72 overflow-y-auto">
@@ -2287,66 +2245,38 @@ export function ImportPage() {
                   >
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium">
-                        {new Date(s.createdAt).toLocaleString("ru-RU")}
+                        {new Date(s.createdAt).toLocaleString("ru-RU", {
+                          day: "numeric",
+                          month: "long",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </div>
-                      <div className="text-[11px] text-muted tabular-nums truncate">
-                        {formatNum(s.counts.transactions)} оп. ·{" "}
-                        {s.counts.accounts} счёт. · {s.counts.tags} тег. ·{" "}
-                        {s.counts.instruments} вал. ·{" "}
-                        {Math.round(s.approxBytes / 1024)} КБ
+                      <div className="text-xs text-muted tabular-nums">
+                        {snapshotSummary(s.counts, s.approxBytes)}
                       </div>
                     </div>
                     <button
                       onClick={() => downloadCloudSnapshot(s.id)}
-                      className="btn-ghost !px-2 !py-1 text-xs"
-                      title="Скачать как JSON-файл"
+                      className="btn-ghost !px-2 !py-1 text-xs shrink-0"
+                      title="Сохранить снимок файлом"
+                      aria-label="Сохранить снимок файлом"
                     >
                       <Download className="w-3.5 h-3.5" />
-                    </button>
-                    {/* Restore — pushes the snapshot's contents back
-                        into Zenmoney via /v8/diff/. Destructive
-                        (overwrites cloud state by `changed` timestamp),
-                        gated behind a clear confirm dialog. */}
-                    <button
-                      onClick={async () => {
-                        const confirmed = await confirm({
-                          title: `Восстановить облако из снимка от ${new Date(s.createdAt).toLocaleString("ru-RU")}?`,
-                          message:
-                            `В Дзен-мани (на текущий токен) уйдут:\n` +
-                            `• ${formatNum(s.counts.transactions)} транзакций\n` +
-                            `• ${s.counts.accounts} счетов\n` +
-                            `• ${s.counts.tags} тегов\n` +
-                            `• ${s.counts.merchants} контрагентов\n\n` +
-                            `Каждая сущность будет «обновлена» в облаке: победит та версия, у которой свежее поле changed. Операции, созданные в облаке ПОСЛЕ снимка, останутся на месте (это не полный откат, а upsert).\n\n` +
-                            `⚠️ Если снимок сделан с другого аккаунта — операция может провалиться или привести к смешению данных. Перед действием убедитесь, что подключён нужный токен.`,
-                          confirmLabel: "Восстановить",
-                          tone: "warning",
-                        });
-                        if (!confirmed) return;
-                        try {
-                          await restoreCloudSnapshot(s.id);
-                        } catch {
-                          /* error already in store */
-                        }
-                      }}
-                      className="text-muted hover:text-warn p-1"
-                      title="Восстановить в облако (загрузить содержимое снимка обратно в Дзен-мани)"
-                      disabled={cloudSnapshotsBusy || !zenToken}
-                    >
-                      <CloudUpload className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={async () => {
                         const ok = await confirm({
                           title: "Удалить снимок?",
-                          message: `Снимок от ${new Date(s.createdAt).toLocaleString("ru-RU")} будет удалён из локальной базы.`,
+                          message: `Снимок от ${new Date(s.createdAt).toLocaleString("ru-RU")} будет удалён с этого компьютера.`,
                           confirmLabel: "Удалить",
                           tone: "danger",
                         });
                         if (ok) deleteCloudSnapshot(s.id);
                       }}
-                      className="text-muted hover:text-expense p-1"
-                      title="Удалить снимок"
+                      className="text-muted hover:text-expense p-1 shrink-0"
+                      title="Удалить снимок с этого компьютера"
+                      aria-label="Удалить снимок"
                       disabled={cloudSnapshotsBusy}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -2356,152 +2286,23 @@ export function ImportPage() {
               </div>
             )}
 
-            {/* Restore result — shown after a successful restore call.
-                Counts of accepted entities + cross-user warning if the
-                snapshot was for a different account than the current
-                token. */}
-            {lastRestoreResult && (
-              <div className="text-xs mt-3 space-y-2">
-                <div
-                  className={`flex items-start gap-2 ${
-                    lastRestoreResult.crossUser ? "text-warn" : "text-income"
-                  }`}
-                >
-                  {lastRestoreResult.crossUser ? (
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  ) : (
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  )}
-                  <span>
-                    {lastRestoreResult.crossUser ? (
-                      <>
-                        Восстановление выполнено в <strong>другой</strong>{" "}
-                        Дзен-аккаунт. Сущностям сгенерированы новые ID,
-                        ссылки на системные банки и валюты сброшены.
-                        Облако приняло:
-                      </>
-                    ) : (
-                      <>Восстановление прошло. Облако приняло:</>
-                    )}{" "}
-                    <strong>
-                      {lastRestoreResult.accepted.transactions.visible +
-                        lastRestoreResult.accepted.transactions.hidden}
-                    </strong>{" "}
-                    транзакций (
-                    {lastRestoreResult.accepted.transactions.visible} видимых в
-                    приложении
-                    {lastRestoreResult.accepted.transactions.hidden > 0 && (
-                      <>
-                        {" + "}
-                        {lastRestoreResult.accepted.transactions.hidden}{" "}
-                        удалённых / без суммы
-                      </>
-                    )}
-                    ) ·{" "}
-                    <strong>
-                      {lastRestoreResult.accepted.accounts.active +
-                        lastRestoreResult.accepted.accounts.archived}
-                    </strong>{" "}
-                    счетов (
-                    {lastRestoreResult.accepted.accounts.active} активных
-                    {lastRestoreResult.accepted.accounts.archived > 0 && (
-                      <>
-                        {" + "}
-                        {lastRestoreResult.accepted.accounts.archived}{" "}
-                        архивных
-                      </>
-                    )}
-                    ) ·{" "}
-                    <strong>
-                      {lastRestoreResult.accepted.tags.active +
-                        lastRestoreResult.accepted.tags.archived}
-                    </strong>{" "}
-                    тегов (
-                    {lastRestoreResult.accepted.tags.active} активных
-                    {lastRestoreResult.accepted.tags.archived > 0 && (
-                      <>
-                        {" + "}
-                        {lastRestoreResult.accepted.tags.archived}{" "}
-                        архивных
-                      </>
-                    )}
-                    ) ·{" "}
-                    <strong>{lastRestoreResult.accepted.merchants}</strong>{" "}
-                    мерчантов.
-                  </span>
-                </div>
-
-                {/* Per-category "что не зашло" — only render when we
-                    actually skipped something, otherwise the result
-                    looks needlessly busy. */}
-                {(lastRestoreResult.skipped.transactions > 0 ||
-                  lastRestoreResult.skipped.debtAccount > 0) && (
-                  <div className="flex items-start gap-2 text-muted">
-                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span>
-                      Пропущено:{" "}
-                      {(() => {
-                        const parts: ReactNode[] = [];
-                        if (lastRestoreResult.skipped.transactions > 0) {
-                          parts.push(
-                            <>
-                              <strong>{lastRestoreResult.skipped.transactions}</strong>{" "}
-                              транзакций с битыми ссылками на счёт / тег /
-                              мерчант
-                            </>
-                          );
-                        }
-                        if (lastRestoreResult.skipped.debtAccount > 0) {
-                          parts.push(
-                            <>
-                              <strong>1</strong> системный счёт «Долг» сведён с
-                              локальным
-                            </>
-                          );
-                        }
-                        return parts.map((p, i) => (
-                          <span key={i}>
-                            {i > 0 && " · "}
-                            {p}
-                          </span>
-                        ));
-                      })()}
-                      .
-                    </span>
-                  </div>
-                )}
-
-                {lastRestoreResult.droppedTxReasons.length > 0 && (
-                  <details className="text-muted">
-                    <summary className="cursor-pointer hover:text-text">
-                      Примеры пропущенных транзакций (
-                      {lastRestoreResult.droppedTxReasons.length})
-                    </summary>
-                    <div className="mt-1 max-h-32 overflow-y-auto space-y-0.5 -mx-1 px-1">
-                      {lastRestoreResult.droppedTxReasons.map((r) => (
-                        <div key={r.id} className="py-0.5">
-                          <span className="font-mono text-[10px]">{r.id}</span>
-                          {" · "}
-                          {r.reason}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-
-                <div className="text-muted">
-                  После восстановления сделайте полную синхронизацию (⤓ в
-                  шапке), чтобы локальный кэш подтянул свежие `changed`-метки.
-                </div>
-              </div>
+            {restoreWizardOpen && (
+              <RestoreWizardModal
+                snapshots={visibleSnapshots}
+                onImportFile={(f) => importCloudSnapshot(f)}
+                onTakeSnapshot={() => takeCloudSnapshot()}
+                takingSnapshot={cloudSnapshotsOp === "snapshot"}
+                onClose={() => setRestoreWizardOpen(false)}
+              />
             )}
+
           </div>
         ) : (
           <div className="rounded-xl border border-border bg-panel2/30 p-4 text-sm text-muted">
-            Облачные снимки доступны только при подключённом Дзен-мани API.
-            Подключите токен на вкладке «Данные».
+            Снимки аккаунта доступны только при подключённом Дзен-мани.
+            Подключите его на вкладке «Данные».
           </div>
-        ))}
+        )}
       </section>
       )}
 
@@ -2559,11 +2360,10 @@ export function ImportPage() {
                             onClick={() => {
                               setSyncInfoOpen(false);
                               setSettingsTab("backups");
-                              setBackupTab("cloud");
                             }}
                             className="text-accent hover:underline"
                           >
-                            списке облачных бэкапов
+                            списке облачных снимков
                           </button>
                           , его можно скачать или восстановить.
                         </p>
@@ -2652,7 +2452,7 @@ export function ImportPage() {
                     className="btn-primary text-xs !py-1 inline-flex items-center gap-2 sm:ml-auto disabled:opacity-50"
                   >
                     {pushStatus === "syncing" ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <CloudUpload className="w-3.5 h-3.5" />
                     )}
@@ -2707,11 +2507,10 @@ export function ImportPage() {
                     type="button"
                     onClick={() => {
                       setSettingsTab("backups");
-                      setBackupTab("cloud");
                     }}
                     className="text-accent hover:underline inline-flex items-center gap-0.5"
                   >
-                    Копии во вкладке «Бэкапы»
+                    Снимки во вкладке «Бэкапы»
                     <ArrowRight className="w-3 h-3" />
                   </button>
                 </p>

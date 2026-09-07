@@ -21,8 +21,15 @@
  */
 
 import * as db from "./db";
-import type { ZenAccount, ZenDiffResponse, ZenTransaction } from "./zenmoney";
+import type {
+  ZenAccount,
+  ZenDiffResponse,
+  ZenReminder,
+  ZenReminderMarker,
+  ZenTransaction,
+} from "./zenmoney";
 import { fetchDiff, pushDiff, type PushPayload } from "./zenmoney";
+import { compressText, decompressBytes } from "./snapshotFile";
 import { devLog } from "./devLog";
 
 const INDEX_KEY = "cloudSnapshotIndex";
@@ -53,14 +60,43 @@ export interface CloudSnapshotSummary {
     instruments: number;
     companies: number;
     user: number;
+    /**
+     * Планы и их операции.
+     *
+     * Необязательные: снимки, снятые до того, как мы стали запрашивать планы
+     * явно, их не считали — и приписывать им ноль значило бы утверждать, что
+     * планов в аккаунте не было, хотя мы их просто не забирали.
+     */
+    reminders?: number;
+    reminderMarkers?: number;
+    budgets?: number;
   };
-  /** Approximate JSON byte size of the raw snapshot (after stringify). */
+  /**
+   * Сколько снимок ЗАНИМАЕТ — то есть размер того, что реально лежит в базе.
+   *
+   * У новых снимков это размер после сжатия (8,6 МБ JSON → 1,06 МБ), у снятых
+   * раньше — размер самого JSON: они и лежат несжатыми. В обоих случаях число
+   * отвечает на один и тот же вопрос «сколько места это стоит», поэтому
+   * подпись под датой показывает его как есть, без оговорок.
+   */
   approxBytes: number;
 }
 
 /** Full snapshot payload — separated so listing the index is cheap. */
 export interface CloudSnapshot extends CloudSnapshotSummary {
   raw: ZenDiffResponse;
+}
+
+/**
+ * Как снимок лежит в базе.
+ *
+ * `gz` — сжатый JSON, обычный случай. `raw` — несжатый объект: так выглядят
+ * снимки, снятые до сжатия, и те, что сняты в браузере без `CompressionStream`.
+ * Читать надо оба вида, иначе обновление обесценит уже сделанные страховки.
+ */
+interface StoredSnapshot extends CloudSnapshotSummary {
+  gz?: Uint8Array;
+  raw?: ZenDiffResponse;
 }
 
 function snapshotKey(id: string): string {
@@ -76,7 +112,73 @@ export async function loadSnapshotIndex(): Promise<CloudSnapshotSummary[]> {
 }
 
 export async function loadSnapshot(id: string): Promise<CloudSnapshot | null> {
-  return db.loadJSON<CloudSnapshot>(snapshotKey(id));
+  const rec = await db.loadJSON<StoredSnapshot>(snapshotKey(id));
+  if (!rec) return null;
+  if (rec.gz) {
+    const { gz: _gz, ...summary } = rec;
+    return { ...summary, raw: JSON.parse(await decompressBytes(rec.gz)) };
+  }
+  return rec.raw ? ({ ...rec, raw: rec.raw } as CloudSnapshot) : null;
+}
+
+/** Счётчики снимка. Одни и те же и для снятого, и для загруженного файлом. */
+function countsOf(raw: ZenDiffResponse): CloudSnapshotSummary["counts"] {
+  return {
+    // Живые операции — тот же фильтр, что применяет прямой разбор
+    // (`zenmoneyMap.ts`) перед тем, как они попадут в приложение: без
+    // удалённых и без записей с нулевой суммой (Дзен-мани держит такие как
+    // служебные). Так число на карточке совпадает с тем, что человек увидит
+    // после синхронизации. Отправляем при этом всё — и удалённые, и нулевые.
+    transactions:
+      raw.transaction?.filter(
+        (t) => !t.deleted && ((t.outcome || 0) > 0 || (t.income || 0) > 0)
+      ).length ?? 0,
+    accounts: raw.account?.length ?? 0,
+    tags: raw.tag?.length ?? 0,
+    merchants: raw.merchant?.length ?? 0,
+    instruments: raw.instrument?.length ?? 0,
+    companies: (raw.company as unknown[] | undefined)?.length ?? 0,
+    user: raw.user?.length ?? 0,
+    reminders: raw.reminder?.length ?? 0,
+    reminderMarkers: raw.reminderMarker?.length ?? 0,
+    budgets: (raw.budget as unknown[] | undefined)?.length ?? 0,
+  };
+}
+
+/**
+ * Сохранить снимок и подвинуть индекс, вытеснив лишние.
+ *
+ * Общий путь для снятого с облака и для загруженного файлом: раньше эти два
+ * места повторяли друг друга слово в слово, и правку счётчиков приходилось
+ * вносить дважды — один раз я на этом уже попался.
+ */
+async function persistSnapshot(
+  raw: ZenDiffResponse,
+  userId: number | null
+): Promise<CloudSnapshot> {
+  const now = Date.now();
+  const id = new Date(now).toISOString();
+  const json = JSON.stringify(raw);
+  const gz = await compressText(json);
+  const summary: CloudSnapshotSummary = {
+    id,
+    createdAt: now,
+    serverTimestamp: raw.serverTimestamp,
+    userId,
+    counts: countsOf(raw),
+    approxBytes: gz ? gz.byteLength : new Blob([json]).size,
+  };
+  const stored: StoredSnapshot = gz ? { ...summary, gz } : { ...summary, raw };
+  await db.saveJSON(snapshotKey(id), stored);
+
+  const prev = await loadSnapshotIndex();
+  const next = [summary, ...prev.filter((s) => s.id !== id)].slice(0, MAX_KEPT);
+  await db.saveJSON(INDEX_KEY, next);
+  const kept = new Set(next.map((s) => s.id));
+  for (const old of prev) {
+    if (!kept.has(old.id)) await db.saveJSON(snapshotKey(old.id), null);
+  }
+  return { ...summary, raw };
 }
 
 /**
@@ -87,60 +189,55 @@ export async function loadSnapshot(id: string): Promise<CloudSnapshot | null> {
  */
 export async function takeSnapshot(token: string): Promise<CloudSnapshot> {
   if (!token) throw new Error("Нет токена Дзен-мани — снимок невозможен");
-  // `serverTimestamp=0` → full payload regardless of any previous sync.
+  // `serverTimestamp=0` → полный ответ, ПЛАНЫ ВКЛЮЧАЯ.
+  //
+  // Здесь стоял `forceFetch: FULL_SYNC_ENTITIES` — по аналогии с полной
+  // синхронизацией, которая его передаёт. Замер на живом аккаунте с планами
+  // показал, что при нулевой метке он не меняет ничего: наборы `reminder` и
+  // `reminderMarker` совпадают по составу id с точностью до хэша. Оно и
+  // логично — `forceFetch` просит отдать тип «как при первой синхронизации», а
+  // при `serverTimestamp = 0` она и есть первая. Полезен он там, где метка
+  // НЕнулевая: в штатной инкрементальной синхронизации (см. `backfillEntities`).
+  //
+  // Сверено с бэкапом того же аккаунта из партнёрского ZenTable: 97 планов
+  // против 97, маркеры с того же 2023-03-08, `processed` и `deleted` совпадают
+  // до штуки. Никакого окна вокруг «сейчас» нет.
   const raw = await fetchDiff(token, 0);
+  return persistSnapshot(raw, raw.user?.[0]?.id ?? null);
+}
 
-  const now = Date.now();
-  const id = new Date(now).toISOString();
-  const approxBytes = roughByteSize(raw);
-  const summary: CloudSnapshotSummary = {
-    id,
-    createdAt: now,
-    serverTimestamp: raw.serverTimestamp,
-    userId: raw.user?.[0]?.id ?? null,
-    counts: {
-      // Count "live" transactions only — the same filter the forward
-      // mapper (`zenmoneyMap.ts`) applies before they reach the app:
-      //   • drop `deleted: true` tombstones
-      //   • drop entries with both outcome=0 and income=0 (Zen
-      //     keeps these as reminders / system markers, no real money
-      //     movement)
-      // This way the count on the snapshot card matches the number
-      // the user sees in DzenAnalytics after a full sync of the
-      // restored cloud. Restore itself still pushes the full set —
-      // deleted and zero-amount entries included — and the restore
-      // report breaks down the active/deleted mix.
-      transactions:
-        raw.transaction?.filter(
-          (t) => !t.deleted && ((t.outcome || 0) > 0 || (t.income || 0) > 0)
-        ).length ?? 0,
-      accounts: raw.account?.length ?? 0,
-      tags: raw.tag?.length ?? 0,
-      merchants: raw.merchant?.length ?? 0,
-      instruments: raw.instrument?.length ?? 0,
-      companies: (raw.company as unknown[] | undefined)?.length ?? 0,
-      user: raw.user?.length ?? 0,
-    },
-    approxBytes,
-  };
-  const full: CloudSnapshot = { ...summary, raw };
+/**
+ * Выбросить снимки, снятые с ДРУГОГО аккаунта Дзен-мани.
+ *
+ * Слотов всего пять, и снимки прежнего аккаунта занимали их наравне со своими:
+ * подключил другой токен — и место под страховку съедено чужими копиями, а на
+ * экране «1 (+4 с других аккаунтов) из 5 слотов занято».
+ *
+ * Снимки БЕЗ привязки к аккаунту (`userId: null`) не трогаем: так выглядят
+ * копии, снятые до появления этого поля, и вполне возможно, что они как раз
+ * свои. Выбросить чужое — уборка, выбросить неизвестное — потеря страховки.
+ *
+ * Возвращает, сколько снимков убрано.
+ */
+export function foreignSnapshots(
+  index: CloudSnapshotSummary[],
+  currentUserId: number
+): CloudSnapshotSummary[] {
+  return index.filter((s) => s.userId != null && s.userId !== currentUserId);
+}
 
-  await db.saveJSON(snapshotKey(id), full);
-
-  // Update index — prepend new, drop tails past the cap.
-  const prev = await loadSnapshotIndex();
-  const next = [summary, ...prev.filter((s) => s.id !== id)].slice(0, MAX_KEPT);
-  await db.saveJSON(INDEX_KEY, next);
-
-  // Garbage-collect any snapshot blobs not referenced by the new index.
-  const kept = new Set(next.map((s) => s.id));
-  for (const old of prev) {
-    if (!kept.has(old.id)) {
-      await db.saveJSON(snapshotKey(old.id), null);
-    }
-  }
-
-  return full;
+export async function pruneForeignSnapshots(currentUserId: number): Promise<number> {
+  const index = await loadSnapshotIndex();
+  const foreign = foreignSnapshots(index, currentUserId);
+  if (foreign.length === 0) return 0;
+  for (const s of foreign) await db.saveJSON(snapshotKey(s.id), null);
+  const kept = index.filter((s) => !foreign.some((f) => f.id === s.id));
+  await db.saveJSON(INDEX_KEY, kept);
+  devLog(
+    "zen-snapshots",
+    `убрано снимков с других аккаунтов: ${foreign.length}`
+  );
+  return foreign.length;
 }
 
 export async function deleteSnapshot(id: string): Promise<void> {
@@ -177,18 +274,24 @@ export async function downloadSnapshot(id: string): Promise<void> {
       serverTimestamp: snap.serverTimestamp,
       counts: snap.counts,
       note:
-        "Это сырой ответ POST /v8/diff/ от Дзен-мани на момент снимка. " +
-        "Хранится как safety-net на случай неудачной Push-операции из приложения.",
+        "Копия аккаунта Дзен-мани на момент снимка — ответ POST /v8/diff/ " +
+        "как есть. Нужна, чтобы вернуть аккаунт, если отправка правок из " +
+        "DzenAnalytics что-то испортит.",
     },
     diff: snap.raw,
   };
-  const json = JSON.stringify(payload, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
+  // Без отступов: файл читает не человек, а наш же импорт, а «красивый» JSON
+  // на снимке добавляет к 8,6 МБ ещё половину.
+  const json = JSON.stringify(payload);
+  const gz = await compressText(json);
+  const blob = gz
+    ? new Blob([gz as BlobPart], { type: "application/gzip" })
+    : new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  const fname = `dzenanalytics-cloud-snapshot-${snap.id.replace(/[:.]/g, "-")}.json`;
-  a.download = fname;
+  const base = `dzenanalytics-cloud-snapshot-${snap.id.replace(/[:.]/g, "-")}`;
+  a.download = gz ? `${base}.json.gz` : `${base}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -216,6 +319,10 @@ export interface RestoreResult {
     accounts: { active: number; archived: number };
     tags: { active: number; archived: number };
     merchants: number;
+    /** Планы и их операции. Отправляются перед транзакциями: операция,
+     *  выполненная по плану, ссылается на его маркер. */
+    reminders: number;
+    reminderMarkers: number;
   };
   /** Counts of entities present in the snapshot but NOT pushed.
    *  `transactions` = dropped due to broken references (account /
@@ -247,6 +354,14 @@ export interface RestoreContext {
    *  auto-creates) so we can merge instead of trying to create a
    *  duplicate. */
   currentAccounts: ZenAccount[];
+  /**
+   * Заливать снимок ПОД НОВЫМИ id (см. `freshIds` в теле восстановления).
+   *
+   * Нужно для отката в свой же аккаунт: удалённую строку под её прежним id
+   * Дзен-мани обратно не пускает — молча, без ошибки. Ценой становится потеря
+   * привязки к банковским выпискам, поэтому решает вызывающий, а не мы.
+   */
+  freshIds?: boolean;
 }
 
 /**
@@ -254,9 +369,127 @@ export interface RestoreContext {
  * a status bar like "Восстановление: Счета 5 / 31".
  */
 export interface RestoreProgress {
-  phase: "accounts" | "tags" | "merchants" | "transactions" | "done";
+  phase: "accounts" | "tags" | "merchants" | "reminders" | "transactions" | "done";
   current: number;
   total: number;
+}
+
+/** Карты перенумерации, которые нужны переносу планов. */
+export interface PlanRemapMaps {
+  accountIdMap: Map<string, string>;
+  tagIdMap: Map<string, string>;
+  merchantIdMap: Map<string, string>;
+  reminderIdMap: Map<string, string>;
+  markerIdMap: Map<string, string>;
+  /** Долговой счёт снимка, слитый с уже существующим у текущего пользователя. */
+  debtIdRemap: { from: string; to: string } | null;
+  /** Заливаем ли под новыми номерами. Без этого карты не нужны вовсе. */
+  freshIds: boolean;
+}
+
+/**
+ * Перенумеровать планы и их операции для отправки в облако.
+ *
+ * ПОЧЕМУ ОТДЕЛЬНОЙ ФУНКЦИЕЙ. Внутри `restoreSnapshotToCloud` этот код нельзя
+ * ни проверить, ни прочитать: там сеть, IndexedDB и полтысячи строк отправки.
+ * А ошибиться тут легко — ссылок у плана столько же, сколько у операции.
+ *
+ * ПРАВИЛА. План (`reminder`) — шаблон, из которого Дзен-мани порождает плановые
+ * операции (`reminderMarker`); выполненная по плану операция ссылается на свой
+ * маркер. Отсюда порядок отправки: планы → маркеры → операции.
+ *
+ *   • счета — обязательны: без разрешимой ноги запись не отправляем вовсе,
+ *     иначе в чужом аккаунте она указывает в пустоту;
+ *   • категории и контрагент — пометки: неразрешимые снимаем, но запись
+ *     оставляем, терять из-за них план незачем;
+ *   • маркер без своего плана осиротел бы — Дзен-мани показывает плановую
+ *     операцию через план, и из интерфейса её потом не убрать. Такие
+ *     пропускаем вместе с планом.
+ */
+export function remapPlans(
+  reminders: ZenReminder[],
+  markers: ZenReminderMarker[],
+  maps: PlanRemapMaps
+): {
+  reminders: ZenReminder[];
+  markers: ZenReminderMarker[];
+  /** Новый номер маркера для ссылки из операции — либо null, если он не доехал. */
+  markerRef: (id: string) => string | null;
+} {
+  const {
+    accountIdMap,
+    tagIdMap,
+    merchantIdMap,
+    reminderIdMap,
+    markerIdMap,
+    debtIdRemap,
+    freshIds,
+  } = maps;
+  const mapped = (id: string, map: Map<string, string>) =>
+    freshIds ? map.get(id) || id : id;
+  const known = (id: string, map: Map<string, string>) =>
+    freshIds ? map.has(id) : true;
+
+  const remapLegs = <
+    T extends {
+      incomeAccount?: string;
+      outcomeAccount?: string;
+      tag?: string[] | null;
+      merchant?: string | null;
+    },
+  >(
+    e: T
+  ): T | null => {
+    const isDebt = (id: string | undefined) =>
+      debtIdRemap != null && id === debtIdRemap.from;
+    const legOk = (id: string | undefined) =>
+      id === undefined || isDebt(id) || known(id, accountIdMap);
+    if (!legOk(e.incomeAccount) || !legOk(e.outcomeAccount)) return null;
+    const leg = (id: string | undefined) =>
+      id === undefined
+        ? undefined
+        : isDebt(id)
+          ? debtIdRemap!.to
+          : mapped(id, accountIdMap);
+    const tags = e.tag ? e.tag.filter((id) => known(id, tagIdMap)) : e.tag;
+    return {
+      ...e,
+      incomeAccount: leg(e.incomeAccount),
+      outcomeAccount: leg(e.outcomeAccount),
+      tag: tags && tags.length > 0 ? tags.map((id) => mapped(id, tagIdMap)) : null,
+      merchant:
+        e.merchant && known(e.merchant, merchantIdMap)
+          ? mapped(e.merchant, merchantIdMap)
+          : null,
+    };
+  };
+
+  const outReminders: ZenReminder[] = [];
+  for (const r of reminders) {
+    const m = remapLegs(r);
+    if (!m) continue;
+    outReminders.push({ ...m, id: mapped(r.id, reminderIdMap) });
+  }
+  const keptReminders = new Set(outReminders.map((r) => r.id));
+
+  const outMarkers: ZenReminderMarker[] = [];
+  for (const mk of markers) {
+    const m = remapLegs(mk);
+    if (!m) continue;
+    const reminderRef = mapped(mk.reminder, reminderIdMap);
+    if (!keptReminders.has(reminderRef)) continue;
+    outMarkers.push({ ...m, id: mapped(mk.id, markerIdMap), reminder: reminderRef });
+  }
+  const keptMarkers = new Set(outMarkers.map((m) => m.id));
+
+  return {
+    reminders: outReminders,
+    markers: outMarkers,
+    markerRef: (id) => {
+      const next = mapped(id, markerIdMap);
+      return keptMarkers.has(next) ? next : null;
+    },
+  };
 }
 
 /**
@@ -286,8 +519,17 @@ export interface RestoreProgress {
  *   • Does NOT delete entities that exist in the cloud but not in the
  *     snapshot. A true rollback needs to compute a deletion list
  *     separately — out of scope here. This is upsert-only restore.
- *   • Doesn't push `instrument` (server-managed) or `user` (root
- *     account record) — only the four user-mutable entity types.
+ *   • Doesn't push `instrument`, `company` (server-managed reference data)
+ *     or `user` (root account record) — only user-mutable entities.
+ *   • `budget` (Планы месяца) пока не переносится: пуш по нему лоссовый,
+ *     под-теги схлопываются. Планы (`reminder`) — переносятся.
+ *
+ * Приём планов пушем ПРОВЕРЕН на живом API: `{reminder: [...], reminderMarker:
+ * [...]}` возвращает 200 и обе записи в ответе, а `deletion` с `object`
+ * «reminder» / «reminderMarker» их убирает. Документация это разрешает
+ * («пользовательские сущности можно создавать / изменять / удалять»), но в
+ * этом API она уже дважды расходилась с поведением — молчаливый отказ на
+ * удалённые id и клиентское время в `changed`, — поэтому проверено руками.
  */
 export async function restoreSnapshotToCloud(
   id: string,
@@ -304,6 +546,25 @@ export async function restoreSnapshotToCloud(
     ctx.userId != null &&
     snapshotUserId != null &&
     ctx.userId !== snapshotUserId;
+
+  /**
+   * Раздавать сущностям НОВЫЕ id вместо исходных.
+   *
+   * Для переноса в другой аккаунт это обязательно: Дзен-мани привязывает
+   * UUID к создателю, и чужой id возвращает 500. Но то же самое нужно и при
+   * откате в СВОЙ аккаунт, и по другой причине.
+   *
+   * Проверено на живом API: если строку удалили, повторная отправка её же id
+   * — хоть со свежей меткой `changed`, хоть со старой — возвращает 200 без
+   * ошибки и НЕ возвращает строку. Сервер молча оставляет её удалённой.
+   * Именно поэтому восстановление «проходило», ничего не меняя, а отчёт
+   * рапортовал успех: отказа не было. Копия под новым id при этом заводится
+   * нормально — так же, как это делает `buildResurrections` в обычном пуше.
+   *
+   * Поэтому откат заливаем новыми id: он тогда не зависит от того, стирает
+   * ли «Начать всё сначала» записи или помечает их удалёнными.
+   */
+  const freshIds = crossUser || ctx.freshIds === true;
 
   // For cross-account restores, every outgoing entity must carry the
   // *current* account's user id — Zen rejects the request otherwise.
@@ -323,8 +584,19 @@ export async function restoreSnapshotToCloud(
     (raw.account || []).find((a) => a.type === "debt") || null;
   const currentDebt =
     ctx.currentAccounts.find((a) => a.type === "debt") || null;
+  // Долговой счёт у пользователя ровно ОДИН, второй Дзен-мани завести не даёт.
+  // Поэтому свой из снимка мы не шлём никогда, а операции переводим на уже
+  // существующий.
+  //
+  // Раньше здесь стояло `snapshotDebt.id !== currentDebt.id`: при совпадении
+  // id счёт уезжал как есть, и это был безобидный upsert самого себя. С новыми
+  // номерами то же самое стало СОЗДАНИЕМ второго долгового счёта, и сервер
+  // отвечал «It is not allowed to create several user debt accounts». Поймано
+  // живым прогоном: «Начать всё сначала» долговой счёт не уносит, так что
+  // после очистки id как раз совпадают — то есть ломалось в самом обычном
+  // случае. Совпадающие id дают тождественное отображение, и это правильно.
   const debtIdRemap =
-    snapshotDebt && currentDebt && snapshotDebt.id !== currentDebt.id
+    snapshotDebt && currentDebt
       ? { from: snapshotDebt.id, to: currentDebt.id }
       : null;
 
@@ -342,7 +614,9 @@ export async function restoreSnapshotToCloud(
   const accountIdMap = new Map<string, string>();
   const tagIdMap = new Map<string, string>();
   const merchantIdMap = new Map<string, string>();
-  if (crossUser) {
+  const reminderIdMap = new Map<string, string>();
+  const markerIdMap = new Map<string, string>();
+  if (freshIds) {
     for (const a of accountsOut) accountIdMap.set(a.id, crypto.randomUUID());
     // Snapshot's debt account folded into current user's debt id —
     // tx references will resolve via this mapping table.
@@ -350,10 +624,13 @@ export async function restoreSnapshotToCloud(
     for (const t of raw.tag || []) tagIdMap.set(t.id, crypto.randomUUID());
     for (const m of raw.merchant || [])
       merchantIdMap.set(m.id, crypto.randomUUID());
+    for (const r of raw.reminder || []) reminderIdMap.set(r.id, crypto.randomUUID());
+    for (const m of raw.reminderMarker || [])
+      markerIdMap.set(m.id, crypto.randomUUID());
   }
 
   const remapId = (oldId: string, map: Map<string, string>): string =>
-    crossUser ? map.get(oldId) || oldId : oldId;
+    freshIds ? map.get(oldId) || oldId : oldId;
 
   // Transaction remapping + reference validation. For cross-user
   // restores, transactions can reference entities that we DON'T have
@@ -371,15 +648,36 @@ export async function restoreSnapshotToCloud(
   //   • merchant — null if we can't resolve. Same reasoning.
   const brokenRefSkipped: { id: string; reason: string }[] = [];
   const isMapped = (id: string, map: Map<string, string>) =>
-    crossUser ? map.has(id) : true;
+    freshIds ? map.has(id) : true;
+
+  const plans = remapPlans(raw.reminder || [], raw.reminderMarker || [], {
+    accountIdMap,
+    tagIdMap,
+    merchantIdMap,
+    reminderIdMap,
+    markerIdMap,
+    debtIdRemap,
+    freshIds,
+  });
+  const remindersOut = plans.reminders;
+  const markersOut = plans.markers;
+  const remapMarkerRef = plans.markerRef;
 
   const transactionsOut: ZenTransaction[] = [];
-  // Restore is a "full backup → full restore" operation: even
-  // `deleted: true` transactions go to Zen, so the target account
-  // mirrors the source byte-for-byte (tombstones included). The UI
-  // reports the active / deleted split so the user sees the mix.
+  // Удалённые записи отправляем ТОЖЕ — снимок должен быть полной копией.
+  //
+  // Соблазн их отбросить был: под новыми номерами такая запись заводится в
+  // аккаунте заново и сразу помеченной удалённой, то есть «воскрешает» она
+  // ничто. Но это данные, а не мусор: историю удалений Дзен-мани хранит, и
+  // читать её умеют — сегодня сторонние сервисы, завтра, возможно, и мы.
+  // Потерять её при восстановлении значит сделать копию неполной, а этого от
+  // резервной копии не ждут.
+  //
+  // Плата — размер отправки: на живом аккаунте это 1 917 записей из 9 577.
+  // Поэтому их число названо в мастере ЗАРАНЕЕ, чтобы счётчик по ходу переноса
+  // не оказался внезапно больше обещанного.
   for (const t of raw.transaction || []) {
-    if (!crossUser && !debtIdRemap) {
+    if (!freshIds && !debtIdRemap) {
       transactionsOut.push(t);
       continue;
     }
@@ -390,10 +688,10 @@ export async function restoreSnapshotToCloud(
     const outOk =
       isMapped(t.outcomeAccount, accountIdMap) ||
       outIsDebt ||
-      // Same-user case doesn't need the map at all.
-      !crossUser;
+      // Без перенумерации карта не нужна вовсе.
+      !freshIds;
     const inOk =
-      isMapped(t.incomeAccount, accountIdMap) || inIsDebt || !crossUser;
+      isMapped(t.incomeAccount, accountIdMap) || inIsDebt || !freshIds;
     if (!outOk || !inOk) {
       brokenRefSkipped.push({
         id: t.id,
@@ -406,27 +704,27 @@ export async function restoreSnapshotToCloud(
     // Filter tag refs to mapped ones; drop unresolvable ones.
     const cleanedTag = (() => {
       if (!t.tag) return t.tag;
-      if (!crossUser) return t.tag;
+      if (!freshIds) return t.tag;
       const filtered = t.tag.filter((id) => tagIdMap.has(id));
       return filtered.length > 0 ? filtered.map((id) => remapId(id, tagIdMap)) : null;
     })();
     // Merchant — null if unresolvable.
-    const cleanedMerchant = crossUser
+    const cleanedMerchant = freshIds
       ? t.merchant && merchantIdMap.has(t.merchant)
         ? remapId(t.merchant, merchantIdMap)
         : null
       : t.merchant;
     transactionsOut.push({
       ...t,
-      id: crossUser ? crypto.randomUUID() : t.id,
-      outcomeAccount: crossUser
+      id: freshIds ? crypto.randomUUID() : t.id,
+      outcomeAccount: freshIds
         ? outIsDebt
           ? debtIdRemap!.to
           : remapId(t.outcomeAccount, accountIdMap)
         : outIsDebt
           ? debtIdRemap!.to
           : t.outcomeAccount,
-      incomeAccount: crossUser
+      incomeAccount: freshIds
         ? inIsDebt
           ? debtIdRemap!.to
           : remapId(t.incomeAccount, accountIdMap)
@@ -435,8 +733,16 @@ export async function restoreSnapshotToCloud(
           : t.incomeAccount,
       tag: cleanedTag,
       merchant: cleanedMerchant,
-      outcomeBankID: crossUser ? null : t.outcomeBankID,
-      incomeBankID: crossUser ? null : t.incomeBankID,
+      // Привязку к банковской выписке новому id не отдаём: строка уже не
+      // та, и банковская синхронизация приняла бы её за свою.
+      outcomeBankID: freshIds ? null : t.outcomeBankID,
+      incomeBankID: freshIds ? null : t.incomeBankID,
+      // Ссылку на плановую операцию переводим на новый номер. Если её маркер
+      // до облака не доехал — ссылку снимаем, но саму операцию оставляем:
+      // это настоящие деньги, и терять их из-за потерянной пометки нельзя.
+      reminderMarker: t.reminderMarker
+        ? remapMarkerRef(t.reminderMarker)
+        : t.reminderMarker,
     });
   }
   if (brokenRefSkipped.length > 0) {
@@ -470,6 +776,9 @@ export async function restoreSnapshotToCloud(
     id: remapId(m.id, merchantIdMap),
   }));
 
+
+  const finalReminders = rewriteUser(remindersOut);
+  const finalMarkers = rewriteUser(markersOut);
   const finalTxs = rewriteUser(transactionsOut);
   const finalAccounts = rewriteUser(accountsRemapped);
   const finalTags = rewriteUser(tagsRemapped);
@@ -505,6 +814,8 @@ export async function restoreSnapshotToCloud(
     accounts: { active: 0, archived: 0 },
     tags: { active: 0, archived: 0 },
     merchants: 0,
+    reminders: 0,
+    reminderMarkers: 0,
   };
   let lastServerTs = 0;
   let chunkCount = 0;
@@ -527,6 +838,8 @@ export async function restoreSnapshotToCloud(
       account: payload.account?.length ?? 0,
       tag: payload.tag?.length ?? 0,
       merchant: payload.merchant?.length ?? 0,
+      reminder: payload.reminder?.length ?? 0,
+      reminderMarker: payload.reminderMarker?.length ?? 0,
     };
     const subMsg = `phase A.${label}: ${JSON.stringify(sectionSizes)}`;
     if (!import.meta.env.PROD) {
@@ -660,6 +973,42 @@ export async function restoreSnapshotToCloud(
     });
   }
 
+  // ── Phase A.4: планы, затем их операции ───────────────────────────
+  //
+  // Строго в этом порядке и строго до операций: маркер ссылается на план, а
+  // операция — на маркер. Дробим теми же порциями, что и справочники: на
+  // большом аккаунте маркеров сотни (643 в бэкапе ZenTable).
+  const PLAN_CHUNK = 100;
+  for (let i = 0; i < finalReminders.length; i += PLAN_CHUNK) {
+    const slice = finalReminders.slice(i, i + PLAN_CHUNK);
+    onProgress?.({ phase: "reminders", current: i, total: finalReminders.length });
+    await pushSubPhase(`reminders(${i}-${i + slice.length})`, { reminder: slice }, () => {
+      accepted.reminders += slice.length;
+    });
+  }
+  for (let i = 0; i < finalMarkers.length; i += PLAN_CHUNK) {
+    const slice = finalMarkers.slice(i, i + PLAN_CHUNK);
+    onProgress?.({
+      phase: "reminders",
+      current: finalReminders.length + i,
+      total: finalReminders.length + finalMarkers.length,
+    });
+    await pushSubPhase(
+      `reminderMarkers(${i}-${i + slice.length})`,
+      { reminderMarker: slice },
+      () => {
+        accepted.reminderMarkers += slice.length;
+      }
+    );
+  }
+  if (finalReminders.length + finalMarkers.length > 0) {
+    onProgress?.({
+      phase: "reminders",
+      current: finalReminders.length + finalMarkers.length,
+      total: finalReminders.length + finalMarkers.length,
+    });
+  }
+
   // ── Phase B: transaction chunks ───────────────────────────────────
   let txIdx = 0;
   while (txIdx < txWithSize.length) {
@@ -762,7 +1111,9 @@ export async function restoreSnapshotToCloud(
  *
  * Accepts either:
  *   • The downloaded wrapped form `{ _meta, diff }`, or
- *   • A bare `ZenDiffResponse` (e.g. someone pasted raw API output).
+ *   • A bare `ZenDiffResponse` — raw API output, and also what the partner
+ *     service ZenTable writes into its `<login>-<serverTimestamp>.json.gz`
+ *     (decompression happens upstream, in `lib/snapshotFile`).
  *
  * The imported snapshot is stamped with a fresh `id` (current time)
  * and pushed into the rolling 5-slot index just like a fresh capture.
@@ -775,14 +1126,16 @@ export async function importSnapshotFromJson(
   try {
     parsed = JSON.parse(fileContent);
   } catch (e) {
+    // Текст от `JSON.parse` наружу НЕ показываем: он английский и говорит про
+    // позицию неожиданного символа — человеку, выбравшему не тот файл, это
+    // ничего не объясняет. Подробность остаётся в `cause` для отладки.
     throw new Error(
-      "Не удалось разобрать JSON: " +
-        (e instanceof Error ? e.message : String(e)),
+      "Файл не читается как JSON — возможно, он повреждён или это другой файл.",
       { cause: e }
     );
   }
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("Файл не содержит корректный JSON-объект");
+    throw new Error("Файл не похож на JSON");
   }
 
   // Two accepted shapes:
@@ -797,83 +1150,24 @@ export async function importSnapshotFromJson(
   }
   if (!raw || typeof raw !== "object") {
     throw new Error(
-      "Не похоже на снимок DzenAnalytics. Ожидался JSON вида { _meta, diff } " +
-        "или сырой ответ API Дзена."
+      "Не похоже на снимок аккаунта. Подходит снимок, сохранённый здесь, " +
+        "или бэкап ZenTable — в формате json, zip или gz."
     );
   }
   if (typeof raw.serverTimestamp !== "number") {
-    throw new Error("В снимке нет поля serverTimestamp — файл повреждён.");
+    throw new Error("Файл неполный: в нём нет отметки времени, которую ставит Дзен-мани.");
   }
 
-  const now = Date.now();
-  const id = new Date(now).toISOString();
-  const approxBytes = roughByteSize(raw);
-  const summary: CloudSnapshotSummary = {
-    id,
-    createdAt: now,
-    serverTimestamp: raw.serverTimestamp,
-    userId: raw.user?.[0]?.id ?? null,
-    counts: {
-      // Count "live" transactions only — the same filter the forward
-      // mapper (`zenmoneyMap.ts`) applies before they reach the app:
-      //   • drop `deleted: true` tombstones
-      //   • drop entries with both outcome=0 and income=0 (Zen
-      //     keeps these as reminders / system markers, no real money
-      //     movement)
-      // This way the count on the snapshot card matches the number
-      // the user sees in DzenAnalytics after a full sync of the
-      // restored cloud. Restore itself still pushes the full set —
-      // deleted and zero-amount entries included — and the restore
-      // report breaks down the active/deleted mix.
-      transactions:
-        raw.transaction?.filter(
-          (t) => !t.deleted && ((t.outcome || 0) > 0 || (t.income || 0) > 0)
-        ).length ?? 0,
-      accounts: raw.account?.length ?? 0,
-      tags: raw.tag?.length ?? 0,
-      merchants: raw.merchant?.length ?? 0,
-      instruments: raw.instrument?.length ?? 0,
-      companies: (raw.company as unknown[] | undefined)?.length ?? 0,
-      user: raw.user?.length ?? 0,
-    },
-    approxBytes,
-  };
-  // Imported snapshots are intentionally NOT bound to a specific
-  // userId — they're a manual artefact the user uploaded and should
-  // be visible regardless of which Zenmoney account is currently
-  // connected. Cross-user detection at restore time still reads
-  // `raw.user[0].id` (the original owner) from the snapshot body
-  // itself, so safety checks aren't affected.
-  summary.userId = null;
-  const full: CloudSnapshot = { ...summary, raw };
-
-  await db.saveJSON(snapshotKey(id), full);
-
-  // Same rolling-cap logic as `takeSnapshot`.
-  const prev = await loadSnapshotIndex();
-  const next = [summary, ...prev.filter((s) => s.id !== id)].slice(0, MAX_KEPT);
-  await db.saveJSON(INDEX_KEY, next);
-  const kept = new Set(next.map((s) => s.id));
-  for (const old of prev) {
-    if (!kept.has(old.id)) {
-      await db.saveJSON(snapshotKey(old.id), null);
-    }
-  }
-
-  return full;
+  // Тем же путём, что и снятый с облака: сжатие, счётчики, вытеснение старых.
+  //
+  // `userId: null` НАМЕРЕННО. Загруженный файл — ручная вещь, и прятать его
+  // из-за того, что сейчас подключён другой аккаунт, значило бы прятать
+  // единственное, что человек только что принёс. Проверку «снимок чужого
+  // аккаунта» восстановление делает по `raw.user[0].id` в теле снимка, так
+  // что на безопасность это не влияет.
+  return persistSnapshot(raw, null);
 }
 
-/** Best-effort byte size estimate. Avoids the cost of a full stringify
- *  for very large blobs — JSON.stringify is the canonical way but it
- *  duplicates the data in memory. UTF-8 string length × 2 is the rough
- *  worst case for non-ASCII; we sample-stringify to get a real number. */
-function roughByteSize(obj: unknown): number {
-  try {
-    return new Blob([JSON.stringify(obj)]).size;
-  } catch {
-    return 0;
-  }
-}
 
 /** Окно «свежести» снимка для политики «раз в сутки». */
 export const DAILY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -892,16 +1186,16 @@ export async function snapshotPromiseText(
 ): Promise<string> {
   if (policy === "never") return "";
   if (policy === "always") {
-    return "Перед отправкой сохраним копию облачного состояния. ";
+    return "Перед отправкой сделаем снимок аккаунта. ";
   }
   const newest = (await loadSnapshotIndex())[0];
   const fresh = newest && Date.now() - newest.createdAt < DAILY_WINDOW_MS;
-  if (!fresh) return "Перед отправкой сохраним копию облачного состояния. ";
+  if (!fresh) return "Перед отправкой сделаем снимок аккаунта. ";
   const when = new Date(newest.createdAt).toLocaleString("ru-RU", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `Копия облака уже есть — от ${when}, новую сегодня делать не будем. `;
+  return `Снимок аккаунта уже есть — от ${when}, новый сегодня делать не будем. `;
 }

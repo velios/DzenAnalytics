@@ -7,6 +7,7 @@
 // the device unencrypted.
 
 import * as db from "./db";
+import { compressText } from "./snapshotFile";
 
 // Версия 2 добавила настройки и правки, которых в списке не было: правки
 // счетов, контрагентов и категорий, планы бюджета, разрезы данных, оформление.
@@ -278,22 +279,41 @@ export function parseAndValidateBackup(text: string): BackupPayload {
   try {
     parsed = JSON.parse(text);
   } catch (e) {
-    throw new Error("Файл не является корректным JSON", { cause: e });
+    throw new Error("Файл не похож на JSON", { cause: e });
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Бэкап должен быть JSON-объектом");
+    throw new Error("Это не копия данных сервиса: внутри не тот вид файла");
   }
   const obj = parsed as Record<string, unknown>;
   if (!obj.version) {
-    throw new Error("Не похоже на бэкап DzenAnalytics (нет поля version)");
+    // Похоже на облачный снимок? Их легко перепутать: оба файла — JSON, оба
+    // лежат во вкладке «Бэкапы» и оба скачиваются кнопкой, только на соседних
+    // подвкладках. Скажем, куда нести, вместо «не похоже на бэкап
+    // DzenAnalytics» — про файл, внутри которого написано ровно обратное
+    // (issue #93).
+    //
+    // Проверяем ТОЛЬКО когда `version` нет: `diff` — обычное слово, и бэкап,
+    // у которого такое поле просто есть, обязан пройти.
+    const meta = obj._meta as Record<string, unknown> | null | undefined;
+    const looksLikeSnapshot =
+      (!!meta && typeof meta === "object" && meta.schema === "cloud-snapshot/v1") ||
+      (obj.diff != null && typeof obj.diff === "object" && !Array.isArray(obj.diff));
+    if (looksLikeSnapshot) {
+      throw new Error(
+        "Это снимок аккаунта Дзен-мани, а не копия данных сервиса. " +
+          "Его загружают в «Снимках аккаунта Дзен-мани»: «Восстановить» → " +
+          "«Загрузить файл»."
+      );
+    }
+    throw new Error("Не похоже на копию данных DzenAnalytics");
   }
   // transactions, if present, must be an array of bounded length.
   if (obj.transactions !== undefined) {
     if (!Array.isArray(obj.transactions)) {
-      throw new Error("Поле «transactions» повреждено (ожидался массив)");
+      throw new Error("Копия повреждена: список операций внутри неё испорчен");
     }
     if (obj.transactions.length > MAX_TRANSACTIONS) {
-      throw new Error("Слишком много операций в бэкапе");
+      throw new Error("В копии слишком много операций — файл повреждён");
     }
   }
   // rates, if present, must be an object (base + rates map).
@@ -302,33 +322,53 @@ export function parseAndValidateBackup(text: string): BackupPayload {
     obj.rates !== null &&
     (typeof obj.rates !== "object" || Array.isArray(obj.rates))
   ) {
-    throw new Error("Поле «rates» повреждено");
+    throw new Error("Копия повреждена: испорчены курсы валют");
   }
   return deepSanitize(obj) as BackupPayload;
 }
 
-export function backupFileName(now: Date = new Date(), tag?: string): string {
+export function backupFileName(
+  now: Date = new Date(),
+  tag?: string,
+  compressed = false
+): string {
   const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
   const stamp =
     `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
     `_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
   const suffix = tag ? `-${tag}` : "";
-  return `dzenanalytics-backup-${stamp}${suffix}.json`;
+  // `.json.gz`, а не `.gz`: имя должно говорить, что внутри именно json —
+  // иначе в папке загрузок это просто «архив непонятно чего».
+  const ext = compressed ? ".json.gz" : ".json";
+  return `dzenanalytics-backup-${stamp}${suffix}${ext}`;
 }
 
 /**
- * Build the backup payload and trigger a browser download.
- * Returns the byte size of the downloaded JSON.
+ * Собрать копию и отдать её браузеру на скачивание.
+ *
+ * Копия уезжает сжатой: это тот же JSON, только в разы меньше, а папка
+ * загрузок у человека копится месяцами — при расписании «каждый час» тем
+ * более. Восстановление распаковывает обратно само (`readSnapshotFile`), так
+ * что руками с архивом делать ничего не нужно.
+ *
+ * Если браузер сжимать не умеет, кладём как раньше: копия важнее экономии.
+ *
+ * Возвращает размер того, что реально ушло в файл, и его имя.
  */
 export async function downloadBackup(tag?: string): Promise<{
   size: number;
   fileName: string;
 }> {
   const payload = await buildBackupPayload();
-  const json = JSON.stringify(payload, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
+  // Без отступов: файл читает наш же импорт, а «красивый» JSON — это лишняя
+  // треть объёма ещё до сжатия.
+  const json = JSON.stringify(payload);
+  const gz = await compressText(json);
+  const blob = gz
+    ? new Blob([gz as BlobPart], { type: "application/gzip" })
+    : new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  const fileName = backupFileName(new Date(), tag);
+  const fileName = backupFileName(new Date(), tag, gz != null);
   const a = document.createElement("a");
   a.href = url;
   a.download = fileName;
@@ -337,5 +377,5 @@ export async function downloadBackup(tag?: string): Promise<{
   document.body.removeChild(a);
   // Release the blob URL after the click had a chance to take effect.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return { size: json.length, fileName };
+  return { size: gz ? gz.byteLength : new Blob([json]).size, fileName };
 }

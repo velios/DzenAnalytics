@@ -52,10 +52,11 @@ export function InfoPopover({
   );
 
   useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
+    // Сбрасывать `pos` не нужно: список живёт только при `open`, а при
+    // следующем открытии `useLayoutEffect` пересчитает координаты ДО того,
+    // как браузер нарисует кадр, — старое значение показать некому. Лишний
+    // сброс стоил перерисовки на каждом закрытии.
+    if (!open) return;
     const place = () => {
       const a = btnRef.current?.getBoundingClientRect();
       if (!a) return;
@@ -116,13 +117,18 @@ export function InfoPopover({
         aria-label={label}
         title={label}
         className={clsx(
-          "p-1.5 rounded-full shrink-0",
+          "p-1 rounded-full shrink-0",
           open
             ? "text-accent bg-accent/10"
             : "text-muted hover:text-accent hover:bg-panel2"
         )}
       >
-        <HelpCircle className="w-5 h-5" />
+        {/* 16px, а не 20: рядом со строкой в 14px значок в 20px оказывался выше
+            самой строки, а вместе с отступами кнопка выходила 32×32 — заметно
+            крупнее того, что ею поясняется. По всему сервису значки в строке
+            набраны в 16px, знак вопроса выбивался один. Отступ ужат до 4px,
+            область нажатия остаётся 24×24. */}
+        <HelpCircle className="w-4 h-4" />
       </button>
       {open &&
         createPortal(
