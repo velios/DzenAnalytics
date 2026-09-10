@@ -13,7 +13,9 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { getZenCache, peekZenCache, subscribeZenCache } from "../lib/zenCacheMemo";
-import { plannedOps, type PlannedOp } from "../lib/plannedOps";
+import { plannedOps, ownPlannedOps, type PlannedOp } from "../lib/plannedOps";
+
+import { useMembersStore } from "../store/useMembersStore";
 import { useDataStore } from "../store/useDataStore";
 
 /**
@@ -38,6 +40,7 @@ export function useZenPlanned(
 ): PlannedOp[] | null {
   const cache = useSyncExternalStore(subscribeZenCache, peekZenCache, peekZenCache);
   const rates = useDataStore((s) => s.rates);
+  const ownerId = useMembersStore((s) => s.ownerId);
 
   useEffect(() => {
     if (cache === undefined) void getZenCache();
@@ -45,7 +48,11 @@ export function useZenPlanned(
 
   return useMemo(() => {
     if (!cache) return cache === undefined ? [] : null;
-    return plannedOps(cache, rates)
+    // Только свои: на общем аккаунте по одному токену приезжают планы всех
+    // подключённых людей, а мобильное приложение чужие не показывает (#92).
+    // Прячем только по ЯВНОМУ выбору участника: угадать владельца токена по
+    // ответу API нельзя, а ошибка спрятала бы свои планы и показала чужие.
+    return ownPlannedOps(plannedOps(cache, rates), ownerId)
       .filter(
         (p) =>
           p.date <= toIso && (p.date >= fromIso || (withOverdue && !p.forecast))
@@ -53,5 +60,5 @@ export function useZenPlanned(
       // По дате: просроченные старше всех, поэтому они и встают первыми — там,
       // где на них смотрят.
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [cache, rates, fromIso, toIso, withOverdue]);
+  }, [cache, rates, fromIso, toIso, withOverdue, ownerId]);
 }

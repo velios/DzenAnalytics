@@ -16,8 +16,11 @@ import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { detectRecurring, type RecurringCandidate } from "../lib/aggregations";
 import { loadZenCache, type ZenCache } from "../lib/zenmoneyCache";
-import { plannedOps, type PlannedOp } from "../lib/plannedOps";
+import { plannedOps, ownPlannedOps, type PlannedOp } from "../lib/plannedOps";
+
+import { useMembersStore } from "../store/useMembersStore";
 import { formatMoney, formatDate, formatNum } from "../lib/format";
+import { pluralRu } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
@@ -84,6 +87,19 @@ function plannedPeriodEnd(period: PlannedPeriod): string | null {
   }
 }
 
+
+/**
+ * Сколько дней операция просрочена — целыми сутками, по местному календарю.
+ *
+ * Считаем по датам, а не по миллисекундам: план стоит на дату без времени, и
+ * «вчера» должно быть вчера независимо от того, сколько сейчас на часах.
+ */
+function daysOverdue(iso: string, todayIso: string): number {
+  const d = new Date(`${iso}T00:00:00`);
+  const t = new Date(`${todayIso}T00:00:00`);
+  return Math.max(0, Math.round((t.getTime() - d.getTime()) / 86_400_000));
+}
+
 /** Signed, coloured amount for a planned op (shared by table + overdue list). */
 function plannedAmount(p: PlannedOp, base: string) {
   const sign = p.kind === "income" ? "+" : p.kind === "expense" ? "−" : "";
@@ -115,7 +131,14 @@ export function RecurringPage() {
       cancelled = true;
     };
   }, [transactions]);
-  const planned = useMemo(() => plannedOps(zenCache, rates), [zenCache, rates]);
+  // Только свои планы: на общем аккаунте по одному токену приезжают планы
+  // всех подключённых людей, а мобильное приложение чужие не показывает (#92).
+  const ownerId = useMembersStore((s) => s.ownerId);
+  const allPlanned = useMemo(() => plannedOps(zenCache, rates), [zenCache, rates]);
+  // Только по явному выбору участника — см. `useZenPlanned`.
+  const planned = useMemo(() => ownPlannedOps(allPlanned, ownerId), [allPlanned, ownerId]);
+  /** Сколько планов спрятано как чужие — нужно пустому экрану, чтобы не врать. */
+  const hiddenPlanned = allPlanned.length - planned.length;
   const [pageTab, setPageTab] = useState<PageTab>("zen");
   const [plannedTab, setPlannedTab] = useState<"all" | "plan" | "forecast">("all");
   const [plannedPeriod, setPlannedPeriod] = useState<PlannedPeriod>("month");
@@ -341,6 +364,81 @@ export function RecurringPage() {
     [base]
   );
 
+  /**
+   * Колонки просроченного — те же, что в таблице ниже, с двумя отличиями.
+   *
+   * Вместо «Типа» — «Задержка»: прогнозы сюда не попадают, и колонка со
+   * сплошным «План» была бы пустой тратой места, а «сколько уже висит» — ровно
+   * то, ради чего на просроченное смотрят. Ширина та же, так что колонки обеих
+   * таблиц стоят по одной линии.
+   *
+   * И колонка действий в конце: снять операцию можно только отсюда. Место под
+   * неё взято у суммы — иначе съехали бы все колонки разом.
+   *
+   * Без `useMemo`: строк здесь единицы, а зависимостей (кнопка удаления,
+   * очередь снятий, сегодняшняя дата) столько, что список вышел бы длиннее
+   * самих колонок.
+   */
+  const overdueColumns: Column<PlannedOp>[] = [
+    ...plannedColumns.filter((c) => c.key === "date"),
+    {
+      key: "late",
+      label: "Задержка",
+      align: "center",
+      width: "8%",
+      // Сортировать нечего: порядок по задержке — это порядок по дате наоборот.
+      sortable: false,
+      render: (p) => {
+        const d = daysOverdue(p.date, todayIso);
+        return (
+          <span className="text-warn tabular-nums whitespace-nowrap">
+            {formatNum(d)} {pluralRu(d, ["день", "дня", "дней"])}
+          </span>
+        );
+      },
+    },
+    ...plannedColumns.filter((c) =>
+      ["payee", "category", "comment", "account"].includes(c.key)
+    ),
+    ...plannedColumns
+      .filter((c) => c.key === "amount")
+      .map((c) => ({ ...c, width: "10%" })),
+    {
+      key: "act",
+      label: "",
+      align: "right",
+      width: "3%",
+      sortable: false,
+      exportSkip: true,
+      render: (p) =>
+        queuedDeletions[p.id] !== undefined ? (
+          <button
+            type="button"
+            className="btn-icon"
+            aria-label="Вернуть операцию"
+            title="Удаление ждёт отправки — вернуть"
+            onClick={() => usePlannedDeletionsStore.getState().restore(p.id)}
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn-icon-danger"
+            aria-label="Удалить операцию"
+            title={
+              p.repeating === false
+                ? "Удалить разовый план в Дзен-мани"
+                : "Убрать эту дату из плана в Дзен-мани"
+            }
+            onClick={() => askDeletePlanned(p)}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        ),
+    },
+  ];
+
   const recurringColumns = useMemo<Column<RecurringCandidate>[]>(
     () => [
       {
@@ -520,37 +618,47 @@ export function RecurringPage() {
       <PageHeader
         title="Регулярные платежи"
         icon={Repeat}
-        hint="Планы из Дзен-мани и автодетект подписок по вашей истории — глобальные фильтры здесь не применяются"
+        hint="Плановые операции из Дзен-мани и подписки, найденные по вашей истории"
         right={
-          <InfoPopover label="Как находятся регулярные платежи">
+          <InfoPopover label="Что на этой странице">
             <p>
-              Вкладка <InfoTerm>«Планы»</InfoTerm> — то, что вы сами завели в
-              Дзен-мани. Вкладка <InfoTerm>«Найденные»</InfoTerm> — наша догадка:
-              подписки и абонентские платежи, которые видно по истории, даже если
-              вы их нигде не отмечали.
+              <InfoTerm>«Планы Дзен-мани»</InfoTerm> — то, что стоит в самом
+              Дзен-мани: и заведённое вами вручную (<InfoTerm>План</InfoTerm>),
+              и достроенное Дзеном по регулярности (
+              <InfoTerm>Прогноз</InfoTerm>).
+            </p>
+            <p>
+              <InfoTerm>«Планы DzenAnalytics»</InfoTerm> — наша догадка:
+              подписки и абонентские платежи, которые видны по вашей истории,
+              даже если вы их нигде не отмечали. В Дзен-мани о них ничего не
+              знают, и наружу отсюда ничего не уходит.
             </p>
             <p>
               Ищем так: берём расходы, группируем по получателю и валюте и
-              оставляем те, где набралось хотя бы{" "}
-              <InfoTerm>3 платежа</InfoTerm> в{" "}
-              <InfoTerm>двух разных месяцах</InfoTerm>, а промежуток между ними —
-              от <InfoTerm>5 до 95 дней</InfoTerm>. Разовая покупка и платежи раз
-              в год под это не подходят. Дальше смотрим, насколько ровные суммы и
-              промежутки: если и то и другое сильно скачет, платёж не считается
-              регулярным.
+              оставляем те, где набралось хотя бы <InfoTerm>3 платежа</InfoTerm>{" "}
+              в <InfoTerm>двух разных месяцах</InfoTerm>, а средний промежуток
+              между ними — от <InfoTerm>5 до 95 дней</InfoTerm>. Разовая покупка
+              и платежи раз в год так не находятся. Дальше смотрим, насколько
+              ровные суммы и промежутки: если скачет и то и другое, платёж
+              регулярным не считаем.
             </p>
             <p>
-              <InfoTerm>«≈ в месяц»</InfoTerm> — сумма всех найденных платежей,
-              приведённая к месяцу: недельный считается как четыре с небольшим,
-              квартальный — как треть.{" "}
-              <InfoTerm>«≈ в год»</InfoTerm> — это же число, умноженное на 12,
-              то есть оценка при неизменных подписках, а не факт за прошлый год.
+              <InfoTerm>«≈ в месяц»</InfoTerm> — все найденные платежи,
+              приведённые к месяцу: недельный считается за четыре с небольшим,
+              квартальный — за треть. <InfoTerm>«≈ в год»</InfoTerm> — это же
+              число, умноженное на двенадцать, то есть оценка при неизменных
+              подписках, а не факт за прошлый год.
             </p>
             <p>
-              Пометка <InfoTerm>«Затих»</InfoTerm> означает, что платёж молчит
-              дольше двух своих циклов плюс две недели: для месячной подписки это
-              примерно 75 дней. Скорее всего, её уже отменили — такие не попадают
-              в ближайшие списания.
+              Кружок в колонке <InfoTerm>«Статус»</InfoTerm>: зелёный — платежи
+              идут по графику, красный — пропущено больше двух ожидаемых подряд,
+              и подписку, скорее всего, уже отменили. Такие спрятаны, пока
+              включён переключатель <InfoTerm>«Только активные»</InfoTerm>.
+            </p>
+            <p>
+              Верхние фильтры — счета, категории, валюта, период — на эту
+              страницу не действуют: план ещё не операция, фильтровать его не по
+              чему, а регулярность видна только по всей истории целиком.
             </p>
           </InfoPopover>
         }
@@ -575,17 +683,25 @@ export function RecurringPage() {
       {/* ══ Планы из Дзен-мани (issue #47) ══════════════════════════════════ */}
       {pageTab === "zen" && (
         <>
-          <p className="text-sm text-muted">
-            Операции из Дзен-мани: запланированные вами вручную (план) и достроенные Дзеном
-            по регулярности (прогноз).
-          </p>
           {plannedUpcoming.length === 0 && plannedOverdue.length === 0 ? (
             <div className="card-tray card-pad text-center py-12">
               <CalendarClock className="w-10 h-10 text-muted mx-auto mb-3" />
               <div className="font-medium mb-1">Нет запланированных операций из Дзен-мани</div>
               <div className="text-sm text-muted max-w-md mx-auto">
-                Планы и прогнозы появятся после синхронизации с Дзен-мани. Автоопределённые
-                регулярные платежи — во вкладке «Планы DzenAnalytics».
+                {hiddenPlanned > 0 ? (
+                  <>
+                    Все планы этого аккаунта стоят на личных счетах других
+                    участников, поэтому здесь их нет — как и в приложении
+                    Дзен-мани. Кого считать собой и показывать ли чужое,
+                    задаётся в «Настройки → Данные → Участники аккаунта».
+                  </>
+                ) : (
+                  <>
+                    Планы и прогнозы появятся после синхронизации с Дзен-мани.
+                    Автоопределённые регулярные платежи — во вкладке «Планы
+                    DzenAnalytics».
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -639,72 +755,55 @@ export function RecurringPage() {
               ))}
             </div>
 
-            {/* Overdue plans — the ones that actually need action. Shown above the
-                upcoming table and independent of the tab/period filter. */}
+            {/* Просроченное — та же таблица, что и ниже: разбирать его удобнее
+                в привычных колонках, чем в собственной вёрстке со своими
+                правилами. Стоит выше и не зависит ни от вкладки, ни от
+                выбранного периода — это то, что просит действия. */}
             {plannedOverdue.length > 0 && (
-              <div className="rounded-lg border border-warn/40 bg-warn/5 p-3">
-                <div className="text-xs font-semibold text-warn mb-2 flex items-center gap-1.5">
+              /* Боковых отступов у рамки нет намеренно: ячейки таблицы уже
+                 набраны с отступом 12px, и ещё столько же у рамки сдвигали
+                 колонки относительно таблицы ниже — две таблицы подряд читались
+                 бы как сбитая сетка. Заголовку отступ возвращён вручную. */
+              <div className="rounded-xl border border-warn/40 bg-warn/5 py-3">
+                <div className="text-xs font-semibold text-warn flex items-center gap-1.5 mb-1 px-3">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                   Просрочено: {formatNum(plannedOverdue.length)}
+                  <InfoPopover label="Что это за операции">
+                    <p>
+                      Дзен-мани поставил их на прошедшие даты, но никто не
+                      провёл. Обычно это значит одно из двух: платёж прошёл, а
+                      отметить забыли, — или его не было вовсе.
+                    </p>
+                    <p>
+                      В первом случае проведите операцию{" "}
+                      <InfoTerm>в Дзен-мани</InfoTerm>: здесь она только
+                      показывается, провести её отсюда нельзя. Во втором —
+                      удалите строку кнопкой справа: у повторяющегося плана
+                      снимется одна эта дата, у разового удалится сам план.
+                    </p>
+                    <p>
+                      Прогнозов тут нет — Дзен-мани достраивает их по
+                      регулярности, и «просроченным» такое называть незачем.
+                    </p>
+                  </InfoPopover>
                 </div>
-                <div className="space-y-1.5">
-                  {plannedOverdue.slice(0, 8).map((p) => {
-                    const queued = queuedDeletions[p.id] !== undefined;
-                    return (
-                      <div key={p.id} className="flex items-center gap-3 text-sm">
-                        <span
-                          className={`tabular-nums w-20 shrink-0 ${
-                            queued ? "text-muted line-through" : "text-warn"
-                          }`}
-                        >
-                          {formatDate(p.date, "short")}
-                        </span>
-                        <span
-                          className={`flex-1 min-w-0 truncate ${
-                            queued ? "text-muted line-through" : ""
-                          }`}
-                        >
-                          {plannedTitle(p)}
-                        </span>
-                        <span className={`shrink-0 ${queued ? "text-muted line-through" : ""}`}>
-                          {plannedAmount(p, base)}
-                        </span>
-                        {queued ? (
-                          <button
-                            type="button"
-                            className="btn-icon shrink-0"
-                            aria-label="Вернуть операцию"
-                            title="Удаление ждёт отправки — вернуть"
-                            onClick={() =>
-                              usePlannedDeletionsStore.getState().restore(p.id)
-                            }
-                          >
-                            <Undo2 className="w-3.5 h-3.5" />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn-icon-danger shrink-0"
-                            aria-label="Удалить операцию"
-                            title={
-                              p.repeating === false
-                                ? "Удалить разовый план в Дзен-мани"
-                                : "Убрать эту дату из плана в Дзен-мани"
-                            }
-                            onClick={() => askDeletePlanned(p)}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {plannedOverdue.length > 8 && (
-                  <div className="text-[11px] text-muted pt-1.5">
-                    и ещё {formatNum(plannedOverdue.length - 8)}
-                  </div>
-                )}
+                <SortableTable<PlannedOp>
+                  data={plannedOverdue}
+                  columns={overdueColumns}
+                  rowKey={(p) => p.id}
+                  defaultSortKey="date"
+                  defaultSortDir="asc"
+                  limit={10}
+                  exportable={false}
+                  // Снятое ждёт отправки в облако: строка ещё здесь, но уже
+                  // вычеркнута — видно, что она на выходе, и её можно вернуть.
+                  rowClassName={(p) =>
+                    queuedDeletions[p.id] !== undefined
+                      ? "line-through opacity-50"
+                      : ""
+                  }
+                  fixed
+                />
               </div>
             )}
 
@@ -738,11 +837,6 @@ export function RecurringPage() {
       {/* ══ Планы DzenAnalytics — автодетект по истории (#4) ════════════════ */}
       {pageTab === "dzen" && (
         <>
-          <p className="text-sm text-muted">
-            Подписки и регулярные траты, найденные DzenAnalytics по вашей истории:
-            одинаковый получатель, стабильная сумма, интервал 5–95 дней, минимум 3 повтора.
-          </p>
-
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat
           dense

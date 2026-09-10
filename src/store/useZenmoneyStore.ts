@@ -17,6 +17,8 @@ import {
   cacheToDiffResponse,
   forceFetchFor,
 } from "../lib/zenmoneyCache";
+import { zenUsers, type ZenUserOption } from "../lib/zenUsers";
+import { useMembersStore } from "./useMembersStore";
 import {
   buildPushItems,
   buildBudgetPush,
@@ -242,6 +244,15 @@ export interface LiveAccount {
   bank: string | null;
   /** «Личный счёт» — hidden from a shared/family view in Zenmoney. */
   private: boolean;
+  /**
+   * Чей это личный счёт — участник общего аккаунта (#92, #95).
+   *
+   * `null` — общий счёт, он виден всем. Номер — личный счёт этого участника.
+   * Это `ZenAccount.role`, а НЕ `private`: на живом общем аккаунте `private`
+   * оказался `false` у ВСЕХ счетов, включая помеченные личными, — различает
+   * участников только `role`.
+   */
+  member: number | null;
   /** Credit limit (native currency); 0 for accounts without one. */
   creditLimit: number;
   /** Заполнен ли полный набор параметров вклада/кредита (дата открытия, срок,
@@ -343,7 +354,16 @@ async function readLiveAccounts(): Promise<LiveAccount[] | null> {
   if (!cache) return null;
   const instrumentsById = new Map(cache.instruments.map((i) => [i.id, i]));
   const companiesById = new Map((cache.companies || []).map((c) => [c.id, c]));
-  return cache.accounts.map((a) => ({
+  // Чужие личные счета не показываем НИГДЕ, где показываются счета: иначе из
+  // списков и фильтров видны их названия и балансы, даже когда операции по ним
+  // уже скрыты (#95). Условия те же, что у операций: знаем, кто мы, и режим
+  // включён. Общие счета (`role: null`) остаются всегда.
+  const { ownerId, hideForeignPrivate } = useMembersStore.getState();
+  const visible =
+    ownerId != null && hideForeignPrivate
+      ? cache.accounts.filter((a) => a.role == null || a.role === ownerId)
+      : cache.accounts;
+  return visible.map((a) => ({
     id: a.id,
     title: a.title,
     balance: a.balance || 0,
@@ -365,6 +385,7 @@ async function readLiveAccounts(): Promise<LiveAccount[] | null> {
       (f) => (a as unknown as Record<string, unknown>)[f] != null
     ),
     private: a.private ?? false,
+    member: a.role ?? null,
     creditLimit: a.creditLimit || 0,
   }));
 }
@@ -436,6 +457,19 @@ export interface CategoryTag {
   icon: string | null;
   /** Raw Zenmoney packed-RGB colour int, or null. */
   color: number | null;
+}
+
+/**
+ * Люди на аккаунте из кэша Дзен-мани (#92).
+ *
+ * Нужен только для подписей: сам список тех, кого показывать, собирается по
+ * операциям — на общем аккаунте человек мог не завести ни одной, и пустая
+ * строка в фильтре только мешала бы. `null` в режиме CSV.
+ */
+export async function getZenUsersFromCache(): Promise<ZenUserOption[] | null> {
+  const cache = await loadZenCache();
+  if (!cache) return null;
+  return zenUsers(cache.user);
 }
 
 /**

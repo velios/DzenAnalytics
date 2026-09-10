@@ -7,6 +7,8 @@ import {
   SlidersHorizontal,
   Coins,
   Users,
+  UserRound,
+  UsersRound,
 } from "lucide-react";
 import { DateField } from "./DateField";
 import { MultiSelect } from "./MultiSelect";
@@ -18,13 +20,25 @@ import { MonthPicker } from "./MonthPicker";
 import { currencySymbol } from "../lib/format";
 import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
-import { getLiveAccountsFromCache, getCategoryTagsFromCache } from "../store/useZenmoneyStore";
+import {
+  getLiveAccountsFromCache,
+  getCategoryTagsFromCache,
+  getZenUsersFromCache,
+} from "../store/useZenmoneyStore";
 import { accountOptions } from "../lib/accountOptions";
 import { useFiltersStore, type DatePreset } from "../store/useFiltersStore";
 import type { PeriodController } from "../hooks/useLocalPeriod";
 import { FiltersMenu } from "./FiltersMenu";
 import { NO_CATEGORY } from "../lib/zenmoneyMap";
 import { currencyFlagEmoji } from "../lib/currencyFlag";
+import {
+  membersInData,
+  hasSharedItems,
+  userLabel,
+  MEMBER_SHARED,
+  type ZenUserOption,
+} from "../lib/zenUsers";
+import { useMembersStore } from "../store/useMembersStore";
 
 const PRESETS: { value: DatePreset; label: string; title?: string }[] = [
   { value: "30d", label: "30 дней" },
@@ -278,6 +292,31 @@ export function GlobalFilters({
     ];
   }, [transactions, tagKinds]);
 
+  // Люди на аккаунте (#92). Считаем по самим операциям, а не по списку
+  // аккаунта: на общем аккаунте человек мог не завести ни одной операции, и
+  // пустая строка в фильтре только мешала бы. На личном список выйдет из
+  // одного человека — тогда фильтр не показываем вовсе, выбирать не из кого.
+  const memberIds = useMemo(() => membersInData(transactions), [transactions]);
+  // «Общие» — отдельным пунктом: операция на общем счёте не принадлежит
+  // никому, и выбрасывать её из выбора нельзя. Пункт добавляем только если
+  // общие счета в данных есть.
+  const userOptions = useMemo(() => {
+    const out = memberIds.map(String);
+    if (hasSharedItems(transactions)) out.push(MEMBER_SHARED);
+    return out;
+  }, [memberIds, transactions]);
+  const userAliases = useMembersStore((s) => s.aliases);
+  const [zenUserList, setZenUserList] = useState<ZenUserOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getZenUsersFromCache().then((list) => {
+      if (!cancelled && list) setZenUserList(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
+
   const currencies = useMemo(() => {
     const set = new Set<string>();
     for (const t of transactions) if (t.currency) set.add(t.currency);
@@ -328,6 +367,7 @@ export function GlobalFilters({
     f.accounts.size > 0 ||
     f.categories.size > 0 ||
     f.currencies.size > 0 ||
+    f.users.size > 0 ||
     f.search.length > 0 ||
     hasExtra ||
     !(f.preset === "month" && f.monthYM === defaultMonthYM);
@@ -481,8 +521,11 @@ export function GlobalFilters({
 
         {
           <>
-            {/* Date controls — set apart from the rest with dividers. */}
-            <span className="w-px h-6 bg-border mx-1" />
+            {/* Разделителя перед периодом нет: «Дополнительно» и пресеты и так
+                разной формы — пилюля с подписью против сегментов, — а лишняя
+                черта дробила ряд на куски там, где граница видна сама. Тот, что
+                ПОСЛЕ дат, оставлен: он отделяет сброс, а сброс относится ко
+                всей панели, а не к периоду. */}
             {/* Обёртка НЕ инертна: на ней висит подсказка, объясняющая, почему
                 даты погашены. Инертен только внутренний слой — он убирает
                 контролы и из мыши, и из обхода с клавиатуры, иначе по ним можно
@@ -632,8 +675,19 @@ export function GlobalFilters({
 
         {currencies.length > 1 && (
           <MultiSelect
-            className="w-52 shrink-0"
-            menuMinWidth={0}
+            // Ширина подобрана так, чтобы пара «Валюта + Участники» кончалась
+            // ровно там же, где ряд пресетов периода сверху: 174 + 8 (зазор) +
+            // 208 = 390, а 390 — это ширина ряда «30 дней … Всё». Оба ряда
+            // начинаются с одной точки (перед ними по два контрола шириной
+            // 13rem), поэтому совпадают и правые края. Меняются подписи
+            // пресетов — придётся пересчитать; других способов связать ширины
+            // из разных строк у CSS нет.
+            //
+            // МЕНЮ по кнопке равнять нельзя: при `menuMinWidth={0}` оно
+            // повторяло её ширину, и шапка «4 валюты · Выбрать все» ломалась на
+            // две строки. Поэтому кнопке узко, а меню просторно.
+            className="w-[174px] shrink-0"
+            menuMinWidth={208}
             label="Валюта"
             options={currencies}
             selected={f.currencies}
@@ -647,6 +701,33 @@ export function GlobalFilters({
                 <Coins className="w-4 h-4 text-muted" />
               );
             }}
+          />
+        )}
+
+        {userOptions.length > 1 && (
+          <MultiSelect
+            className="w-52 shrink-0"
+            menuMinWidth={0}
+            label="Участники"
+            options={userOptions}
+            selected={f.users}
+            onChange={(s) => f.setSet("users", s)}
+            labelOf={(id) =>
+              id === MEMBER_SHARED ? "Общие счета" : userLabel(Number(id), zenUserList, userAliases)
+            }
+            unitForms={["участник", "участника", "участников"]}
+            searchPlaceholder="Поиск участника"
+            /* «Общие счета» — не человек, а строка «всё остальное»: с тем же
+               значком, что у участников, она читалась как ещё один человек по
+               имени «Общие счета». Значок из той же семьи, но с людьми во
+               множественном числе. */
+            renderIcon={(id) =>
+              id === MEMBER_SHARED ? (
+                <UsersRound className="w-[18px] h-[18px] text-muted" />
+              ) : (
+                <UserRound className="w-[18px] h-[18px] text-muted" />
+              )
+            }
           />
         )}
 

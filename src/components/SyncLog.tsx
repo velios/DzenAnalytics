@@ -17,6 +17,7 @@ import {
   type SyncLogStatus,
 } from "../store/useSyncLogStore";
 import { confirm } from "../store/useConfirmStore";
+import { useDisplayStore } from "../store/useDisplayStore";
 import { pluralRu } from "../lib/plural";
 
 /**
@@ -60,6 +61,11 @@ export function SyncLog({ embedded, status }: SyncLogProps = {}) {
   const loaded = useSyncLogStore((s) => s.loaded);
   const hydrate = useSyncLogStore((s) => s.hydrate);
   const clear = useSyncLogStore((s) => s.clear);
+
+  // Раскрыт ли журнал. Живёт в настройках оформления: вид должен пережить
+  // перезагрузку, вернуться при следующем заходе и попасть в копию данных.
+  const open = useDisplayStore((d) => d.syncLogOpen);
+  const setOpen = useDisplayStore((d) => d.setSyncLogOpen);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
@@ -106,8 +112,20 @@ export function SyncLog({ embedded, status }: SyncLogProps = {}) {
 
   return (
     <div className={embedded ? undefined : "card card-pad"}>
-      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        {/* Заголовок — кнопка: журнал свёрнут по умолчанию, это отладочная
+            история, её открывают, когда что-то пошло не так. */}
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="flex items-center gap-2 text-left"
+        >
+          <ChevronRight
+            className={`w-4 h-4 shrink-0 text-muted transition-transform duration-500 ease-in-out ${
+              open ? "rotate-90" : ""
+            }`}
+          />
           <History className={embedded ? "w-5 h-5 text-accent" : "w-5 h-5 text-accent2"} />
           <span className="font-medium">
             {embedded ? "Журнал синхронизаций" : "Лог синхронизаций"}
@@ -120,7 +138,7 @@ export function SyncLog({ embedded, status }: SyncLogProps = {}) {
               {pluralRu(entries.length, ["запись", "записи", "записей"])}
             </span>
           )}
-        </div>
+        </button>
         {/* Live status sits on the heading line. The slot keeps its height even
             while empty, so the row never jumps as the text changes. */}
         {status !== undefined && (
@@ -128,7 +146,22 @@ export function SyncLog({ embedded, status }: SyncLogProps = {}) {
             {status}
           </div>
         )}
-        <div className="flex items-center gap-3">
+        {/* Размер страницы и очистка относятся к самому списку: пока он
+            свёрнут, чистить вслепую незачем. Но и выдёргивать их из потока
+            нельзя: `hidden` возвращал их в раскладку ровно в тот кадр, когда
+            поехала высота, и кнопки выскакивали рывком. Гасим прозрачностью —
+            место остаётся за ними, шапка не перестраивается.
+
+            На узком экране всё же убираем совсем: там шапка переносится, и
+            невидимая строка кнопок держала бы у свёрнутого журнала лишние
+            полсантиметра высоты — ровно та пустота, от которой избавляемся.
+            `inert` убирает их из обхода клавиатурой, пока они не видны. */}
+        <div
+          inert={!open}
+          className={`flex items-center gap-3 transition-opacity duration-500 ease-in-out ${
+            open ? "opacity-100" : "opacity-0 pointer-events-none max-sm:hidden"
+          }`}
+        >
           <label className="text-xs text-muted flex items-center gap-2">
             Записей на странице:
             <select
@@ -168,6 +201,24 @@ export function SyncLog({ embedded, status }: SyncLogProps = {}) {
         </div>
       </div>
 
+      {/* Раскрытие через сетку `0fr → 1fr`: `max-height` наугад либо режет
+          длинный список, либо тормозит на коротком, а `<details>` высоту не
+          анимирует вовсе. Тот же приём, что у таблицы сравнения бэкапов. */}
+      <div
+        className={`grid transition-[grid-template-rows] duration-500 ease-in-out ${
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        {/* Отступ под заголовком — ВНУТРИ раскрывающейся части, а не `mb-3` у
+            шапки: снаружи он оставался и в свёрнутом виде, и под строкой висела
+            пустая полоса. Прозрачность идёт вместе с высотой — содержимое
+            проявляется, а не проступает разом в щели. */}
+        <div
+          className={`overflow-hidden transition-opacity duration-500 ease-in-out ${
+            open ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <div className="pt-3">
       {entries.length === 0 ? (
         <p className="text-xs text-muted">
           История пуста. После первой синхронизации, push'а или снимка
@@ -272,6 +323,9 @@ export function SyncLog({ embedded, status }: SyncLogProps = {}) {
           )}
         </>
       )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -33,6 +33,15 @@ export interface PlannedOp {
   category: string;
   /** true = прогноз Дзена, false = запланировано вручную. */
   forecast: boolean;
+  /**
+   * Чей счёт, на котором стоит план, — участник общего аккаунта (#92, #95).
+   *
+   * НЕ `ZenReminderMarker.user`: тот у всех записей одинаков — это владелец
+   * подписки. Различает участников `role` СЧЁТА: `null` — общий, номер —
+   * личный счёт участника. Мобильное приложение планы на чужих личных счетах
+   * не показывает, а по API они приезжают.
+   */
+  member?: number | null;
 }
 
 /**
@@ -119,6 +128,7 @@ export function plannedOps(
       comment: (m.comment || "").trim(),
       category: involvesDebt ? "Долг" : categoryOf(m.tag),
       forecast: m.isForecast === true,
+      member: outAcc?.role ?? inAcc?.role ?? null,
     });
   }
   out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -142,4 +152,19 @@ export function plannedBreakdown(
   if (plan > 0) out.push({ label: "План", amount: plan });
   if (forecast > 0) out.push({ label: "Прогноз", amount: forecast });
   return out;
+}
+
+/**
+ * Убрать планы на ЧУЖИХ личных счетах.
+ *
+ * Мобильное приложение Дзен-мани их не показывает, а мы показывали все: на
+ * общем аккаунте виджет на главной и «Регулярные» выдавали вперемешку планы
+ * всех участников, и понять, почему в списке чужая аренда, было нельзя (#92).
+ *
+ * Планы на ОБЩИХ счетах остаются: они на то и общие. `ownerId === null` —
+ * человек ещё не сказал, кто он, и прятать наугад нельзя (см. `zenUsers`).
+ */
+export function ownPlannedOps(ops: PlannedOp[], ownerId: number | null): PlannedOp[] {
+  if (ownerId == null) return ops;
+  return ops.filter((p) => p.member == null || p.member === ownerId);
 }
