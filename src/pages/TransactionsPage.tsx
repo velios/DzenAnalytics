@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ExtraCategoriesLine } from "../components/ExtraCategoriesLine";
 import {
   Search,
   Download,
@@ -333,7 +334,7 @@ export function TransactionsPage() {
     const q = pageSearch.trim().toLowerCase();
     if (!q) return filtered;
     return filtered.filter((t) =>
-      `${payeeSearchText(t)} ${t.comment} ${t.categoryFull} ${t.account}`
+      `${payeeSearchText(t)} ${t.comment} ${t.categoryFull} ${(t.extraCategories ?? []).join(" ")} ${t.account}`
         .toLowerCase()
         .includes(q)
     );
@@ -1294,6 +1295,9 @@ function Row({
               {tx.subcategory}
             </div>
           )}
+          {/* Вторые категории — своей строкой: второй без подкатегории,
+              третьей с ней (#69). */}
+          <ExtraCategoriesLine extras={tx.extraCategories} />
         </div>
       </div>
       <div className="truncate text-muted" title={tx.account}>
