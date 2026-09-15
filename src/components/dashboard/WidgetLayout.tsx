@@ -39,6 +39,7 @@ import {
 import { navSection } from "../../lib/navSections";
 import { useDashboardLayoutStore } from "../../store/useDashboardLayoutStore";
 import { pluralRu } from "../../lib/plural";
+import { SectionEmpty } from "../SectionEmpty";
 
 /* ─────────────────────────────  обойма виджета  ───────────────────────────── */
 
@@ -204,7 +205,9 @@ export function WidgetShell({
    */
   const views = meta.views;
   const viewTrack = editing && views && views.length > 1 && (
-    <span className="absolute top-2 right-2 z-20 flex items-center gap-0.5 rounded-full bg-panel border border-border shadow-tray p-1">
+    // Общая дорожка `.seg-*`, но с белой подложкой: она лежит поверх самой
+    // плитки, и серая сливалась бы с её графиком.
+    <span className="seg-track absolute top-2 right-2 z-20 !bg-panel">
       {views.map((v, i) => {
         const on = v.id === (widgetView(meta, placement.view)?.id ?? v.id);
         return (
@@ -215,12 +218,8 @@ export function WidgetShell({
             aria-label={`Вид ${i + 1}: ${v.title}`}
             onClick={() => void setView(placement.key, v.id)}
             className={clsx(
-              "w-6 h-6 rounded-full text-[12px] font-semibold leading-none tabular-nums",
-              "transition-colors duration-200",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
-              on
-                ? "bg-accent text-accent-fg shadow-[0_6px_16px_-8px_rgb(var(--c-accent))]"
-                : "text-muted hover:text-text"
+              "seg-item w-6 h-6 text-[12px] font-semibold leading-none tabular-nums",
+              on && "seg-on"
             )}
           >
             {i + 1}
@@ -664,26 +663,27 @@ export function EmptyDashboard() {
   const setEditing = useDashboardLayoutStore((s) => s.setEditing);
   const reset = useDashboardLayoutStore((s) => s.reset);
   return (
-    <div className="card card-pad text-center py-16">
-      <h2 className="font-semibold text-[17px]">На главной ничего не осталось</h2>
-      <p className="text-sm text-muted mt-1.5">
-        Все {WIDGETS.length}{" "}
-        {pluralRu(WIDGETS.length, ["виджет", "виджета", "виджетов"])} убраны.
-        Верните нужные или соберите главную заново.
-      </p>
-      <div className="flex items-center justify-center gap-2 mt-5">
-        {/* В самом режиме кнопка звала бы туда, где человек уже стоит. */}
-        {!editing && (
-          <button type="button" className="btn-ghost text-sm" onClick={() => setEditing(true)}>
-            <LayoutTemplate className="w-3.5 h-3.5" aria-hidden="true" />
-            Настроить главную
+    <SectionEmpty
+      icon={LayoutTemplate}
+      title="На главной ничего не осталось"
+      action={
+        <>
+          {/* В самом режиме кнопка звала бы туда, где человек уже стоит. */}
+          {!editing && (
+            <button type="button" className="btn-ghost text-sm" onClick={() => setEditing(true)}>
+              <LayoutTemplate className="w-3.5 h-3.5" aria-hidden="true" />
+              Настроить главную
+            </button>
+          )}
+          <button type="button" className="btn-primary text-sm" onClick={() => void reset()}>
+            <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+            Вернуть стандартную
           </button>
-        )}
-        <button type="button" className="btn-primary text-sm" onClick={() => void reset()}>
-          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-          Вернуть стандартную
-        </button>
-      </div>
-    </div>
+        </>
+      }
+    >
+      Все {WIDGETS.length} {pluralRu(WIDGETS.length, ["виджет", "виджета", "виджетов"])} убраны.
+      Верните нужные или соберите главную заново.
+    </SectionEmpty>
   );
 }

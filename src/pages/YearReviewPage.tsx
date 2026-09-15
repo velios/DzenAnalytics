@@ -43,18 +43,26 @@ import {
   chartTooltipProps,
   chartGridStroke,
   chartAxisStroke,
+  chartColor,
 } from "../lib/format";
 import { pluralRu } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-import { MonthPicker } from "../components/MonthPicker";
+import { YearPicker } from "../components/MonthPicker";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
 import { ChartTooltipCard, TooltipFacts, type TooltipFact } from "../components/TooltipFacts";
-import { SectionCard, StatCell } from "../components/SectionCard";
+import type { LucideIcon } from "lucide-react";
+import type { CardHeaderTone } from "../components/CardHeader";
+import { SectionCard, StatCell, StatRow } from "../components/SectionCard";
 import { MeterRow, MeterHead, type MeterCell } from "../components/MeterRow";
+import { nextSort, sortRows, type SortState } from "../components/table/tableKit";
+import { SectionEmpty } from "../components/SectionEmpty";
+import { SectionControls } from "../components/SectionControls";
+import { ProgressBar } from "../components/ProgressBar";
+import { Badge } from "../components/Badge";
 
-const INCOME = "#10B981";
-const EXPENSE = "#EF4444";
+const INCOME = chartColor.income;
+const EXPENSE = chartColor.expense;
 
 /** «14 марта» — дата без года: год и так в заголовке страницы. */
 function dayLabel(iso: string): string {
@@ -85,6 +93,9 @@ export function YearReviewPage() {
 
   const years = useMemo(() => availableYears(transactions), [transactions]);
   const [year, setYear] = useState<number>(() => years[0] || new Date().getFullYear());
+  // `years` отсортированы по убыванию: первый — самый свежий.
+  const yearMax = years[0] ?? year;
+  const yearMin = years[years.length - 1] ?? year;
 
   // Clamp the selected year to the available list when it changes
   // (e.g. after a data reload). Keeps the picker on a valid value.
@@ -156,14 +167,14 @@ export function YearReviewPage() {
   if (transactions.length === 0) return <EmptyState />;
   if (!review.hasData) {
     return (
-      <div className="space-y-4">
-        <PageHeader icon={Sparkles} title="Год в цифрах" />
-        <div className="card-tray card-pad text-center text-muted py-12">
-          В данных нет операций за {year} год.
-        </div>
+      <div className="space-y-6">
+        <PageHeader icon={Sparkles} title="Год в цифрах" hint="Как прошёл год в деньгах и чем отличался от прошлого" />
         {years.length > 0 && (
-          <YearSwitcher year={year} years={years} onChange={setYear} />
+          <SectionControls>
+            <YearPicker year={year} minYear={yearMin} maxYear={yearMax} onChange={setYear} size="md" />
+          </SectionControls>
         )}
+        <SectionEmpty icon={Sparkles} title={`В данных нет операций за ${year} год`} />
       </div>
     );
   }
@@ -174,112 +185,108 @@ export function YearReviewPage() {
   const partial = review.window.to < `${year}-12-31`;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <PageHeader
         icon={Sparkles}
         title={`Год в цифрах: ${year}`}
-        hint="Итоги, рекорды и любопытные факты за выбранный год"
-        right={
-          <div className="flex items-center gap-2">
-            <YearSwitcher year={year} years={years} onChange={setYear} />
-            <InfoPopover>
-              <p>
-                Всё на странице считается за <InfoTerm>календарный год</InfoTerm> —
-                с 1 января по 31 декабря, независимо от того, с какого числа у вас
-                начинается месяц в других отчётах. Проценты рядом с суммами —
-                сравнение с тем же периодом прошлого года; если данных за прошлый
-                год нет, их и не показываем.
-              </p>
-              <p>
-                Переводы между своими счетами в доход и расход не идут. Операции,
-                исключённые из аналитики на странице «Категории» (обороты,
-                взаимозачёты), сюда тоже не попадают — иначе рекорды набирались бы
-                из перекладываний между своими же счетами.
-              </p>
-              <p>
-                Всё, что считается «по дням» — средний расход, перерывы без трат, —
-                мерится по <InfoTerm>отрезку с данными</InfoTerm>: от первой
-                операции в вашей истории до сегодняшнего дня, а не по календарю.
-                Иначе у идущего года будущее засчитывалось бы за долгий перерыв в
-                тратах, а средний расход делился бы на дни, которых ещё не было.
-              </p>
-              <p>
-                Имя контрагента берётся из справочника, а не из банковской строки:
-                «DOSTAVKA PYATEROCHKA» и «DOSTAVKA IZ PYATEROCHK» — это одна
-                «Пятёрочка». Строка банка остаётся только там, где контрагент к
-                операции не привязан; такие можно разобрать в{" "}
-                <InfoTerm>Настройки → Справочники → Контрагенты</InfoTerm>.
-              </p>
-            </InfoPopover>
-          </div>
+        hint="Как прошёл год в деньгах и чем отличался от прошлого"
+        info={
+          <InfoPopover>
+            <p>
+              Всё на странице считается за <InfoTerm>календарный год</InfoTerm> —
+              с 1 января по 31 декабря, независимо от того, с какого числа у вас
+              начинается месяц в других отчётах. Проценты рядом с суммами —
+              сравнение с тем же периодом прошлого года; если данных за прошлый
+              год нет, их и не показываем.
+            </p>
+            <p>
+              Переводы между своими счетами в доход и расход не идут. Операции,
+              исключённые из аналитики на странице «Категории» (обороты,
+              взаимозачёты), сюда тоже не попадают — иначе рекорды набирались бы
+              из перекладываний между своими же счетами.
+            </p>
+            <p>
+              Всё, что считается «по дням» — средний расход, перерывы без трат, —
+              мерится по <InfoTerm>отрезку с данными</InfoTerm>: от первой
+              операции в вашей истории до сегодняшнего дня, а не по календарю.
+              Иначе у идущего года будущее засчитывалось бы за долгий перерыв в
+              тратах, а средний расход делился бы на дни, которых ещё не было.
+            </p>
+            <p>
+              Имя контрагента берётся из справочника, а не из банковской строки:
+              «DOSTAVKA PYATEROCHKA» и «DOSTAVKA IZ PYATEROCHK» — это одна
+              «Пятёрочка». Строка банка остаётся только там, где контрагент к
+              операции не привязан; такие можно разобрать в{" "}
+              <InfoTerm>Настройки → Справочники → Контрагенты</InfoTerm>.
+            </p>
+          </InfoPopover>
         }
       />
 
+      {/* Год — рядом контролов раздела, над итогами: он меняет всю страницу.
+          В шапке он стоял в правом углу рядом с «?», а без данных за год —
+          вообще под пустым состоянием. */}
+      <SectionControls>
+        <YearPicker year={year} minYear={yearMin} maxYear={yearMax} onChange={setYear} size="md" />
+      </SectionControls>
+
       {/* Итоги года */}
-      <div className="tray">
-        <div className="tray-core px-5 py-4">
-          {/* Пять чисел в ряд с разделителями. Число операций стояло мелкой
-              служебной строчкой над ними, хотя это такой же итог года, как
-              доход и расход, — просто не в рублях. */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-x-4 gap-y-4 divide-border lg:divide-x">
-            <StatCell
-              label="Доход"
-              value={formatMoney(review.totalIncome, baseCurrency)}
-              note={review.prev.available ? incomeDelta.text : undefined}
-              noteCls={review.prev.available ? incomeDelta.cls : undefined}
-              icon={<TrendingUp className="w-4 h-4" />}
-              tone="income"
-            />
-            <StatCell
-              label="Расход"
-              value={formatMoney(review.totalExpense, baseCurrency)}
-              note={review.prev.available ? expenseDelta.text : undefined}
-              noteCls={review.prev.available ? expenseDelta.cls : undefined}
-              icon={<TrendingDown className="w-4 h-4" />}
-              tone="expense"
-              pad
-            />
-            <StatCell
-              label="Чистый поток"
-              value={formatMoney(review.netFlow, baseCurrency, { signed: true })}
-              note={review.prev.available ? netDelta.text : undefined}
-              noteCls={review.prev.available ? netDelta.cls : undefined}
-              icon={<Trophy className="w-4 h-4" />}
-              tone={review.netFlow >= 0 ? "income" : "expense"}
-              pad
-            />
-            <StatCell
-              label="Норма сбережений"
-              value={review.totalIncome > 0 ? formatPct(review.savingsRate, 0) : "—"}
-              // «−290 800 ₽ остаётся» — не по-русски и не по смыслу: при
-              // отрицательном потоке ничего не остаётся, его не хватило.
-              note={
-                review.totalIncome > 0
-                  ? review.netFlow >= 0
-                    ? `${formatMoney(review.netFlow, baseCurrency)} осталось`
-                    : `${formatMoney(-review.netFlow, baseCurrency)} не хватило`
-                  : undefined
-              }
-              icon={<PiggyBank className="w-4 h-4" />}
-              tone={review.netFlow >= 0 ? "income" : "expense"}
-              pad
-            />
-            <StatCell
-              label="Операций"
-              value={formatNum(review.txCount)}
-              // Честная граница данных: иначе «за 2026 год» читается как «за
-              // весь 2026», а год ещё идёт и итоги неизбежно скромнее.
-              note={partial ? `данные по ${dayLabel(review.window.to)}` : "год целиком"}
-              icon={<Receipt className="w-4 h-4" />}
-              pad
-            />
-          </div>
-        </div>
-      </div>
+      {/* Пять чисел в ряд с разделителями. Число операций стояло мелкой
+          служебной строчкой над ними, хотя это такой же итог года, как
+          доход и расход, — просто не в рублях. */}
+      <StatRow>
+        <StatCell
+          label="Доход"
+          value={formatMoney(review.totalIncome, baseCurrency)}
+          note={review.prev.available ? incomeDelta.text : undefined}
+          noteCls={review.prev.available ? incomeDelta.cls : undefined}
+          icon={<TrendingUp className="w-4 h-4" />}
+          tone="income"
+        />
+        <StatCell
+          label="Расход"
+          value={formatMoney(review.totalExpense, baseCurrency)}
+          note={review.prev.available ? expenseDelta.text : undefined}
+          noteCls={review.prev.available ? expenseDelta.cls : undefined}
+          icon={<TrendingDown className="w-4 h-4" />}
+          tone="expense"
+        />
+        <StatCell
+          label="Чистый поток"
+          value={formatMoney(review.netFlow, baseCurrency, { signed: true })}
+          note={review.prev.available ? netDelta.text : undefined}
+          noteCls={review.prev.available ? netDelta.cls : undefined}
+          icon={<Trophy className="w-4 h-4" />}
+          tone={review.netFlow >= 0 ? "income" : "expense"}
+        />
+        <StatCell
+          label="Норма сбережений"
+          value={review.totalIncome > 0 ? formatPct(review.savingsRate, 0) : "—"}
+          // «−290 800 ₽ остаётся» — не по-русски и не по смыслу: при
+          // отрицательном потоке ничего не остаётся, его не хватило.
+          note={
+            review.totalIncome > 0
+              ? review.netFlow >= 0
+                ? `${formatMoney(review.netFlow, baseCurrency)} осталось`
+                : `${formatMoney(-review.netFlow, baseCurrency)} не хватило`
+              : undefined
+          }
+          icon={<PiggyBank className="w-4 h-4" />}
+          tone={review.netFlow >= 0 ? "income" : "expense"}
+        />
+        <StatCell
+          label="Операций"
+          value={formatNum(review.txCount)}
+          // Честная граница данных: иначе «за 2026 год» читается как «за
+          // весь 2026», а год ещё идёт и итоги неизбежно скромнее.
+          note={partial ? `данные по ${dayLabel(review.window.to)}` : "год целиком"}
+          icon={<Receipt className="w-4 h-4" />}
+        />
+      </StatRow>
 
       {/* Год по месяцам и профиль недели — половина ширины каждому: на широком
           мониторе двенадцать столбцов растягивались в пустое поле. */}
-      <div className="grid lg:grid-cols-2 gap-3">
+      <div className="grid lg:grid-cols-2 gap-4">
         <YearBars review={review} base={baseCurrency} onMonth={drillMonth} />
         <WeekProfile review={review} base={baseCurrency} onDay={drillWeekday} />
       </div>
@@ -288,7 +295,7 @@ export function YearReviewPage() {
       <Quarters review={review} base={baseCurrency} onQuarter={drillQuarter} />
 
       {/* Рекорды месяцев */}
-      <div className="grid sm:grid-cols-3 gap-3">
+      <div className="grid sm:grid-cols-3 gap-4">
         <Record
           label="Лучший месяц"
           icon={<PiggyBank className="w-4 h-4 text-income" />}
@@ -328,7 +335,7 @@ export function YearReviewPage() {
       </div>
 
       {/* Куда уходили деньги */}
-      <div className="grid lg:grid-cols-2 gap-3">
+      <div className="grid lg:grid-cols-2 gap-4">
         <TopList
           title="Куда уходили деньги"
           info={
@@ -338,7 +345,7 @@ export function YearReviewPage() {
               расходные операции за год.
             </p>
           }
-          icon={<Tags className="w-4 h-4 text-accent" />}
+          icon={Tags}
           items={review.topCategories}
           baseCurrency={baseCurrency}
           total={review.totalExpense}
@@ -355,7 +362,7 @@ export function YearReviewPage() {
               остаётся там, где контрагент к операции не привязан.
             </p>
           }
-          icon={<Users className="w-4 h-4 text-accent2" />}
+          icon={Users} tone="accent2"
           items={review.topPayees}
           baseCurrency={baseCurrency}
           total={review.totalExpense}
@@ -369,9 +376,9 @@ export function YearReviewPage() {
           высота уходит в промежутки между рядами плиток, а их три — прибавка
           расходится по двум зазорам и не превращается в дыру, как это было у
           сетки из двух рядов с `content-between`. */}
-      <div className="grid lg:grid-cols-2 gap-3">
+      <div className="grid lg:grid-cols-2 gap-4">
         <SectionCard
-          icon={<Coins className="w-4 h-4 text-expense" />}
+          icon={Coins} tone="expense"
           title="Самые дорогие покупки"
           info={
             <p>
@@ -381,7 +388,9 @@ export function YearReviewPage() {
           }
         >
           {review.topTransactions.length === 0 ? (
-            <div className="text-sm text-muted py-6 text-center">Покупок за год нет.</div>
+            <SectionEmpty variant="compact">
+              Покупок за год нет.
+            </SectionEmpty>
           ) : (
             <div className="space-y-0.5">
               {review.topTransactions.map((t, i) => (
@@ -425,7 +434,7 @@ export function YearReviewPage() {
         </SectionCard>
 
         <SectionCard
-          icon={<Sparkles className="w-4 h-4 text-accent2" />}
+          icon={Sparkles} tone="accent2"
           title="Любопытные факты"
           info={
             <p>
@@ -528,7 +537,7 @@ function YearBars({
 
   return (
     <SectionCard
-      icon={<TrendingUp className="w-4 h-4 text-accent" />}
+      icon={TrendingUp}
       title="Год по месяцам"
       info={
         <p>
@@ -654,10 +663,10 @@ function YearBars({
  */
 /** Колонки профиля недели: у дня нет числа операций, только доля и сумма. */
 const WEEK_COLUMNS: MeterCell[] = [
-  { text: "Доля", width: "w-11" },
+  { text: "Доля", width: "3.5rem", type: "pct" },
   // Полной суммой, а не «490,3 тыс. ₽»: сокращение экономило десяток пикселей
   // и отнимало у числа точность там, где место под него есть.
-  { text: "Расход", width: "w-28" },
+  { text: "Расход", width: "7rem" },
 ];
 
 function WeekProfile({
@@ -673,7 +682,7 @@ function WeekProfile({
   const sum = review.weekdays.reduce((n, d) => n + d.total, 0);
   return (
     <SectionCard
-      icon={<CalendarDays className="w-4 h-4 text-accent" />}
+      icon={CalendarDays}
       title="Расходы по дням недели"
       info={
         <p>
@@ -693,8 +702,8 @@ function WeekProfile({
             share={d.total / max}
             strong={d.total > 0 && d.total === max}
             cells={[
-              { text: sum > 0 ? formatPct(d.total / sum, 0) : "—", width: "w-11", muted: true },
-              { text: formatMoney(d.total, base), width: "w-28" },
+              { text: sum > 0 ? formatPct(d.total / sum, 0) : "—", width: WEEK_COLUMNS[0].width, type: "pct", muted: true },
+              { text: formatMoney(d.total, base), width: WEEK_COLUMNS[1].width },
             ]}
             barCls="bg-accent"
             onClick={d.total > 0 ? () => onDay(i, d.dative) : undefined}
@@ -734,7 +743,7 @@ function Quarters({
   const ROMAN = ["I", "II", "III", "IV"];
   return (
     <SectionCard
-      icon={<CalendarRange className="w-4 h-4 text-accent2" />}
+      icon={CalendarRange} tone="accent2"
       title="По кварталам"
       info={
         <p>
@@ -762,9 +771,9 @@ function Quarters({
                   <span className="font-semibold text-text">{ROMAN[q.q - 1]}</span> квартал
                 </span>
                 {!empty && q.expense === peak && (
-                  <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-expense/10 text-expense">
-                    пик
-                  </span>
+                  <Badge tone="expense">
+                    Пик
+                  </Badge>
                 )}
               </div>
               {/* Квартал, который ещё не наступил, — это не «ноль рублей». Три
@@ -830,12 +839,11 @@ function QuarterBar({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 flex-1 rounded-full bg-panel2 overflow-hidden">
-        <div
-          className={`h-full rounded-full ${cls}`}
-          style={{ width: `${Math.max(1.5, Math.min(100, (value / scale) * 100))}%` }}
-        />
-      </div>
+      <ProgressBar
+        value={Math.max(0.015, value / scale)}
+        fillClassName={cls}
+        className="flex-1"
+      />
       <span className={`text-[11px] tabular-nums whitespace-nowrap w-16 text-right ${tone}`}>
         {label}
       </span>
@@ -844,44 +852,6 @@ function QuarterBar({
 }
 
 /* ─────────────────────────────  Мелочи  ───────────────────────────────── */
-
-/**
- * Выбор года — тем же контролом, что и выбор месяца во всём остальном продукте.
- *
- * Был `Select`: год прижат влево, шеврон справа, и цифра в поле стояла не по
- * центру. У `MonthPicker` в режиме года ровно то, что нужно, — стрелки
- * перелистывания по бокам и год посередине, — и он уже знаком по другим
- * разделам. Своего контрола заводить незачем.
- */
-function YearSwitcher({
-  year,
-  years,
-  onChange,
-}: {
-  year: number;
-  years: number[];
-  onChange: (y: number) => void;
-}) {
-  // `years` отсортированы по убыванию: первый — самый свежий.
-  const maxY = years[0] ?? year;
-  const minY = years[years.length - 1] ?? year;
-  return (
-    <MonthPicker
-      value={`${year}-01`}
-      minYM={`${minY}-01`}
-      maxYM={`${maxY}-12`}
-      active
-      mode="year"
-      onSelect={(ym) => onChange(Number(ym.slice(0, 4)))}
-      onSelectYear={onChange}
-      onStep={(dir) => {
-        const next = year + dir;
-        if (next >= minY && next <= maxY) onChange(next);
-      }}
-    />
-  );
-}
-
 
 /** Месяц-рекордсмен: подпись, месяц и одна поясняющая строка. */
 function Record({
@@ -926,15 +896,16 @@ function Record({
 
 /** Колонки топов: доля, операции, сумма — ширины общие у шапки и строк. */
 const TOP_COLUMNS: MeterCell[] = [
-  { text: "Доля", width: "w-11" },
-  { text: "Опер.", width: "w-10" },
-  { text: "Сумма", width: "w-24" },
+  { text: "Доля", width: "3.5rem", sortKey: "share", type: "pct" },
+  { text: "Опер.", width: "3.5rem", sortKey: "count", type: "count" },
+  { text: "Сумма", width: "7rem", sortKey: "amount" },
 ];
 
 function TopList({
   title,
   info,
   icon,
+  tone,
   items,
   baseCurrency,
   total,
@@ -943,33 +914,49 @@ function TopList({
 }: {
   title: string;
   info: React.ReactNode;
-  icon: React.ReactNode;
+  icon: LucideIcon;
+  tone?: CardHeaderTone;
   items: { name: string; amount: number; count: number }[];
   baseCurrency: string;
   total: number;
   barCls: string;
   onOpen: (name: string) => void;
 }) {
+  // Место в топе — по сумме и не меняется, когда список пересортировали.
+  const [sort, setSort] = useState<SortState>({ key: "amount", dir: "desc" });
+  const ranked = items.map((item, i) => ({ ...item, rank: i + 1 }));
+  const valueOf = (key: string | undefined) => (item: (typeof ranked)[number]) =>
+    key === "name" ? item.name : key === "count" ? item.count : item.amount;
+  const sorted = sortRows(ranked, valueOf(sort.key), sort.dir);
   return (
-    <SectionCard icon={icon} title={title} info={info}>
+    <SectionCard icon={icon} tone={tone} title={title} info={info}>
       {items.length === 0 ? (
-        <div className="text-sm text-muted py-6 text-center">Расходов за год нет.</div>
+        <SectionEmpty variant="compact">
+          Расходов за год нет.
+        </SectionEmpty>
       ) : (
         <>
-          <MeterHead columns={TOP_COLUMNS} />
+          <MeterHead
+            columns={TOP_COLUMNS}
+            nameLabel="Название"
+            sort={sort.key ? { key: sort.key, dir: sort.dir } : undefined}
+            onSort={(key) =>
+              setSort((cur) => nextSort(cur, key, key === "name" ? "text" : "money"))
+            }
+          />
           <div className="space-y-0.5">
-            {items.map((item, i) => {
+            {sorted.map((item) => {
               const share = total > 0 ? item.amount / total : 0;
               return (
                 <MeterRow
                   key={item.name}
-                  rank={i + 1}
+                  rank={item.rank}
                   label={item.name}
                   share={share}
-                  strong={i === 0}
+                  strong={item.rank === 1}
                   cells={[
-                    { text: formatPct(share, 1), width: TOP_COLUMNS[0].width, muted: true },
-                    { text: formatNum(item.count), width: TOP_COLUMNS[1].width, muted: true },
+                    { text: formatPct(share, 1), width: TOP_COLUMNS[0].width, type: "pct", muted: true },
+                    { text: formatNum(item.count), width: TOP_COLUMNS[1].width, type: "count", muted: true },
                     {
                       text: formatMoney(item.amount, baseCurrency),
                       width: TOP_COLUMNS[2].width,
@@ -1019,7 +1006,7 @@ function Fact({
 }) {
   return (
     <div className="card-sunken px-3 py-2.5 min-w-0">
-      <div className="text-[11px] uppercase tracking-wide text-muted leading-tight truncate">
+      <div className="caps-label truncate">
         {label}
       </div>
       <div className="stat-num text-xl font-bold tabular-nums leading-tight mt-1 truncate">

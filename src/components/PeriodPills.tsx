@@ -1,4 +1,5 @@
 import type { DatePreset } from "../store/useFiltersStore";
+import { Segmented } from "./Segmented";
 
 const PRESETS: { value: DatePreset; label: string }[] = [
   { value: "30d", label: "30 дней" },
@@ -10,9 +11,9 @@ const PRESETS: { value: DatePreset; label: string }[] = [
 ];
 
 /**
- * Compact period selector (preset pills) for the history charts (Cash-flow,
- * Trends) that want their own period independent of the global «месяц» filter,
- * so they default to a meaningful span instead of a single current month.
+ * Свой период раздела — пресеты пилюлями, независимо от периода в общем
+ * фильтре: раздел по умолчанию смотрит на осмысленный отрезок, а не на один
+ * текущий месяц. Стоит в ряду контролов раздела, поэтому ступень крупная, 42.
  */
 export function PeriodPills({
   value,
@@ -22,21 +23,12 @@ export function PeriodPills({
   onChange: (p: DatePreset) => void;
 }) {
   return (
-    <div className="flex gap-0.5 bg-panel2 rounded-full p-1 border border-border shadow-tray flex-wrap">
-      {PRESETS.map((p) => (
-        <button
-          key={p.value}
-          onClick={() => onChange(p.value)}
-          aria-pressed={value === p.value}
-          className={`px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors duration-200 ${
-            value === p.value
-              ? "bg-accent text-accent-fg shadow-[0_6px_16px_-8px_rgb(var(--c-accent))]"
-              : "text-muted hover:text-text hover:bg-panel/70"
-          }`}
-        >
-          {p.label}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      label="Период"
+      value={value}
+      onChange={onChange}
+      className="flex-wrap"
+      options={PRESETS}
+    />
   );
 }

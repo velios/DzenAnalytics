@@ -12,7 +12,6 @@ import {
   ReferenceLine,
 } from "recharts";
 import { Activity, BarChart3, LineChart as LineChartIcon } from "lucide-react";
-import clsx from "clsx";
 import { useDataStore } from "../store/useDataStore";
 import { useFiltersStore, applyFilters, FILTER_NONE } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -45,9 +44,11 @@ import { pluralRu } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { Segmented } from "../components/Segmented";
 import { ChartTooltipCard, TooltipFacts } from "../components/TooltipFacts";
 import { MultiSelect } from "../components/MultiSelect";
 import { InfoPopover } from "../components/InfoPopover";
+import { SectionEmpty } from "../components/SectionEmpty";
 
 const METRICS: DynamicsMetric[] = ["expense", "income", "net", "balance"];
 const GRANULARITIES: Granularity[] = ["day", "week", "month", "year"];
@@ -218,48 +219,32 @@ export function DynamicsPage() {
   const avgLabel = `Среднее за ${GRANULARITY_UNIT[granularity]}`;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <PageHeader
         icon={Activity}
         title="Динамика"
-        hint="Отобранные операции на временной оси — сколько и как часто"
+        hint="Как менялись траты и доходы — в целом или у одного получателя"
       />
 
       <GlobalFilters period={lp} />
 
       <div className="card-tray card-pad space-y-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-            {METRICS.map((m) => (
-              <button
-                key={m}
-                onClick={() => setMetric(m)}
-                className={clsx(
-                  "px-2.5 py-1 text-xs rounded-full transition-colors",
-                  metric === m ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
-                )}
-              >
-                {METRIC_LABELS[m]}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            size="sm"
+            label="Что показывать"
+            value={metric}
+            onChange={setMetric}
+            options={METRICS.map((m) => ({ value: m, label: METRIC_LABELS[m] }))}
+          />
 
-          <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-            {GRANULARITIES.map((g) => (
-              <button
-                key={g}
-                onClick={() => setGranularity(g)}
-                className={clsx(
-                  "px-2.5 py-1 text-xs rounded-full transition-colors",
-                  granularity === g
-                    ? "bg-accent text-accent-fg"
-                    : "text-muted hover:text-text"
-                )}
-              >
-                {GRANULARITY_LABELS[g]}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            size="sm"
+            label="Шаг графика"
+            value={granularity}
+            onChange={setGranularity}
+            options={GRANULARITIES.map((g) => ({ value: g, label: GRANULARITY_LABELS[g] }))}
+          />
 
           <MultiSelect
             label="Получатель"
@@ -277,7 +262,7 @@ export function DynamicsPage() {
           <button
             type="button"
             onClick={() => setAsBars((v) => !v)}
-            className="btn-ghost !p-1.5 text-muted hover:text-accent shrink-0"
+            className="btn-ghost btn-square text-muted hover:text-accent"
             title={asBars ? "Показать линией" : "Показать столбцами"}
             aria-label={asBars ? "Показать линией" : "Показать столбцами"}
           >
@@ -324,9 +309,9 @@ export function DynamicsPage() {
         </div>
 
         {series.points.length === 0 ? (
-          <div className="text-sm text-muted text-center py-16">
+          <SectionEmpty variant="inline">
             За выбранный период нет подходящих операций — измените фильтр выше.
-          </div>
+          </SectionEmpty>
         ) : (
           <>
             <div className="h-80">

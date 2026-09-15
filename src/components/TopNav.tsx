@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useLocation } from "react-router-dom";
 import {
   PieChart,
   Wallet,
@@ -12,6 +13,9 @@ import {
   LayoutTemplate,
   Menu,
   X,
+  Moon,
+  Sun,
+  CloudDownload,
 } from "lucide-react";
 import clsx from "clsx";
 import { useThemeStore } from "../store/useThemeStore";
@@ -20,9 +24,14 @@ import { HeaderSyncActions } from "./HeaderSyncActions";
 import { SliceSwitcher } from "./SliceSwitcher";
 import { useSlicesStore } from "../store/useSlicesStore";
 import { useDashboardLayoutStore } from "../store/useDashboardLayoutStore";
+import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { useSyncCommands } from "../hooks/useSyncCommands";
+import { useSmoothNavigate } from "../hooks/useSmoothNavigate";
+import { SmoothNavLink } from "./SmoothNavLink";
 import { SECONDARY, SECONDARY_GROUPS } from "../lib/navSections";
 import logoHorizontal from "../assets/logo-horizontal.svg";
 import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
+import logoMark from "../assets/logo-mark.svg";
 
 const PRIMARY = [
   { to: "/", label: "Главная", icon: LayoutDashboard },
@@ -33,12 +42,19 @@ const PRIMARY = [
 
 
 
-/** Пункт меню в дорожке: те же размеры и та же пилюля, что у `Segmented`. */
-const NAV_ITEM =
-  "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[14px] font-medium whitespace-nowrap transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
-const NAV_ITEM_ACTIVE =
-  "bg-accent text-accent-fg shadow-[0_6px_16px_-8px_rgb(var(--c-accent))]";
-const NAV_ITEM_IDLE = "text-muted hover:text-text hover:bg-panel/70";
+/**
+ * Пункт меню и кнопка-значок в дорожке — общими классами `.seg-*`: та же
+ * пилюля, что у `Segmented`, и та же ступень 42, что у дорожек значков рядом.
+ * Прежде меню выходило 43, а дорожка значков — 38.
+ */
+const navItem = (active: boolean) => clsx("seg-item seg-item-nav", active && "seg-on");
+const iconItem = (active = false) => clsx("seg-icon seg-icon-md group relative", active && "seg-on");
+/** Строка меню телефона — раздел или действие. */
+const sheetRow = (active = false) =>
+  clsx(
+    "flex items-center gap-3 px-4 py-2.5 text-sm text-left",
+    active ? "bg-accent/10 text-accent" : "text-muted hover:text-text hover:bg-panel2"
+  );
 
 export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -51,6 +67,9 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
   // зависит, нужен ли разделитель внутри панели.
   const hasSlices = useSlicesStore((s) => s.slices.length) > 1;
   const theme = useThemeStore((s) => s.resolved);
+  const setThemeMode = useThemeStore((s) => s.setMode);
+  const zenToken = useZenmoneyStore((s) => s.token);
+  const { busy: syncBusy, runFull } = useSyncCommands();
 
   const inSecondary = SECONDARY.some((s) => loc.pathname === s.to);
 
@@ -64,7 +83,7 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
   // Работает только на самих четырёх разделах: с «Отчёта» или «Календаря»
   // прыжок в «Операции» был бы неожиданностью. Кольца нет — на «Главной» левая
   // стрелка ничего не делает, иначе с края экрана улетаешь на другой край.
-  const navigate = useNavigate();
+  const smoothNavigate = useSmoothNavigate();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -91,11 +110,11 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
       // выглядит как два выбранных пункта сразу. Обработчик висит на окне и
       // фокуса не требует — листать это не мешает.
       if (ae && ae.closest("nav")) ae.blur();
-      navigate(PRIMARY[next].to);
+      smoothNavigate(PRIMARY[next].to);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [moreOpen, mobileOpen, loc.pathname, navigate]);
+  }, [moreOpen, mobileOpen, loc.pathname, smoothNavigate]);
 
   // Панель закрывается по Escape — она большая, накрывает пол-экрана, и уводить
   // руку к мыши ради «передумал» незачем.
@@ -132,9 +151,9 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
   return (
     <header
       ref={headerRef}
-      className="relative border-b border-border bg-panel/80 backdrop-blur sticky top-0 z-30"
+      className="app-header relative border-b border-border bg-panel/80 backdrop-blur sticky top-0 z-30"
     >
-      <div className="w-full px-4 md:px-6 py-3 flex items-center gap-3 md:gap-6">
+      <div className="w-full px-4 md:px-6 py-3 flex items-center gap-2 sm:gap-3 md:gap-6">
         {/* Меню стоит посередине СВОБОДНОГО МЕСТА — между знаком и кнопками, —
             а не посередине шапки. Разница видна сразу: знак занимает 275
             пикселей, кнопки справа под 450, и меню, выставленное по центру
@@ -145,7 +164,16 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
           <img
             src={theme === "dark" ? logoHorizontalDark : logoHorizontal}
             alt="DzenAnalytics"
-            className="h-12 w-auto shrink-0"
+            className="hidden sm:block lg:hidden xl:block h-12 w-auto shrink-0"
+          />
+          {/* Там, где тесно, — только знак. На телефоне полный логотип занимал
+              216 пикселей из 375, и кнопки справа уезжали за край: страница
+              становилась шире окна и мельчала целиком. При 1024–1279 рядом с
+              ним не помещалось меню разделов — оно налезало на кнопки. */}
+          <img
+            src={logoMark}
+            alt="DzenAnalytics"
+            className="sm:hidden lg:block xl:hidden h-[42px] w-[42px] shrink-0"
           />
         </div>
 
@@ -161,22 +189,21 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
             одинаково. Выбранный пункт залит целиком, а не десятью процентами
             цвета, — прежнюю бледную заливку на светлой теме приходилось искать
             глазами. */}
-        <nav className="hidden lg:inline-flex items-center gap-0.5 shrink-0 rounded-full p-1 bg-panel2 border border-border shadow-tray">
+        {/* До `xl` у пунктов меню нет значков: при ширине 1024–1279 меню со
+            значками налезало на кнопки справа. Подписи короткие и без значков
+            читаются. */}
+        <nav className="seg-track hidden lg:inline-flex shrink-0">
           {PRIMARY.map(({ to, label, icon: Icon }) => (
-            <NavLink
+            <SmoothNavLink
               key={to}
               to={to}
               end={to === "/"}
-              className={({ isActive }) =>
-                clsx(
-                  NAV_ITEM,
-                  isActive ? NAV_ITEM_ACTIVE : NAV_ITEM_IDLE
-                )
-              }
+              onNavigate={() => setMoreOpen(false)}
+              className={({ isActive }) => navItem(isActive)}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="w-4 h-4 max-xl:hidden" />
               {label}
-            </NavLink>
+            </SmoothNavLink>
           ))}
 
           <div>
@@ -184,12 +211,9 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
               onClick={() => setMoreOpen((o) => !o)}
               aria-expanded={moreOpen}
               aria-haspopup="true"
-              className={clsx(
-                NAV_ITEM,
-                moreOpen || inSecondary ? NAV_ITEM_ACTIVE : NAV_ITEM_IDLE
-              )}
+              className={navItem(moreOpen || inSecondary)}
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <MoreHorizontal className="w-4 h-4 max-xl:hidden" />
               Ещё
             </button>
           </div>
@@ -203,39 +227,36 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
             со скруглением 8, обойма-пилюля, пилюля темы и два голых значка, —
             и правый край читался собранным из разных наборов. */}
         <div className="flex items-center gap-2 md:gap-3 shrink-0">
-        <HeaderSyncActions leading={hasSlices ? <SliceSwitcher inline /> : undefined} />
+        <HeaderSyncActions leading={hasSlices ? <SliceSwitcher /> : undefined} />
 
         {/* Системная дорожка. Поиск живёт здесь же: он открывает палитру
             команд, то есть тоже про приложение, а не про данные на экране. */}
-        <div className="inline-flex items-center gap-0.5 shrink-0 rounded-full p-1 bg-panel2 border border-border shadow-tray">
+        <div className="seg-track shrink-0">
         <button
           onClick={onOpenPalette}
-          className="p-1.5 rounded-full text-muted hover:text-accent hover:bg-panel/70 transition-colors duration-200"
+          className={iconItem()}
           title="Команды и поиск (⌘K / Ctrl+K)"
           aria-label="Команды и поиск"
         >
           <Search className="w-4 h-4" />
         </button>
+        {/* Тема, настройки, главная и справка — ниже `md` в меню: вместе с
+            обменом с облаком они не помещались в узкую шапку. На месте
+            остаются поиск и само меню. */}
+        <div className="hidden md:contents">
         <ThemeSwitcher />
 
-        {/* Settings — gear icon. Active style matches PRIMARY nav (bg-accent/10
-            text-accent) so the whole header speaks one design language. */}
-        <NavLink
+        {/* Settings — gear icon. Выбранный — той же заливкой, что пункт меню. */}
+        <SmoothNavLink
           to="/settings"
+          onNavigate={() => setMoreOpen(false)}
           title="Настройки"
-          className={({ isActive }) =>
-            clsx(
-              "group relative p-1.5 rounded-full transition-colors duration-200",
-              isActive
-                ? "bg-accent text-accent-fg"
-                : "text-muted hover:text-accent hover:bg-panel/70"
-            )
-          }
+          className={({ isActive }) => iconItem(isActive)}
         >
           <Settings
             className="w-4 h-4 transition-transform duration-500 ease-out group-hover:rotate-90"
           />
-        </NavLink>
+        </SmoothNavLink>
 
         {/* Настройка главной. Стоит здесь, а не на самой странице: это действие
             над экраном, как тема и настройки, а не ещё один его блок. Работает
@@ -259,42 +280,35 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
           }
           aria-label="Настроить главную"
           aria-pressed={editingLayout}
-          className={clsx(
-            "group relative p-1.5 rounded-full transition-colors duration-200",
-            !onDashboard && "text-muted/40 cursor-not-allowed",
-            onDashboard && editingLayout
-              ? "bg-accent text-accent-fg"
-              : onDashboard && "text-muted hover:text-accent hover:bg-panel/70"
-          )}
+          className={iconItem(!!onDashboard && editingLayout)}
         >
           <LayoutTemplate className="w-4 h-4" />
         </button>
 
         {/* Help — question icon. Same active treatment as Settings. */}
-        <NavLink
+        <SmoothNavLink
           to="/help"
+          onNavigate={() => setMoreOpen(false)}
           title="Справка"
-          className={({ isActive }) =>
-            clsx(
-              "group relative p-1.5 rounded-full transition-colors duration-200",
-              isActive
-                ? "bg-accent text-accent-fg"
-                : "text-muted hover:text-accent hover:bg-panel/70"
-            )
-          }
+          className={({ isActive }) => iconItem(isActive)}
         >
           <HelpCircle className="w-4 h-4 transition-transform duration-300 ease-out group-hover:scale-110" />
-        </NavLink>
+        </SmoothNavLink>
         </div>
 
-        {/* Mobile burger */}
+        {/* Меню узкого экрана — последним значком той же дорожки. Отдельной
+            кнопкой оно было ниже соседних (30 против 42) и занимало лишний
+            промежуток. */}
         <button
           onClick={() => setMobileOpen(true)}
-          className="lg:hidden p-1.5 rounded-full border border-border bg-panel2 text-muted"
+          className={clsx(iconItem(mobileOpen), "lg:hidden")}
           title="Меню"
+          aria-label="Меню"
+          aria-expanded={mobileOpen}
         >
           <Menu className="w-4 h-4" />
         </button>
+        </div>
         </div>
       </div>
 
@@ -326,10 +340,10 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
                       {group.title}
                     </div>
                     {group.items.map(({ to, label, hint, icon: Icon }) => (
-                      <NavLink
+                      <SmoothNavLink
                         key={to}
                         to={to}
-                        onClick={() => setMoreOpen(false)}
+                        onNavigate={() => setMoreOpen(false)}
                         className={({ isActive }) =>
                           clsx(
                             "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[14px] transition-colors duration-200",
@@ -348,7 +362,7 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
                             </span>
                           )}
                         </span>
-                      </NavLink>
+                      </SmoothNavLink>
                     ))}
                   </div>
                 ))}
@@ -358,8 +372,11 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </>
       )}
 
-      {/* Mobile drawer */}
-      {mobileOpen && (
+      {/* Меню узкого экрана — порталом в body. Внутри шапки `fixed` считался
+          бы от неё, а не от окна: размытие фона (`backdrop-blur`) делает
+          шапку контейнером для фиксированных потомков, и меню сжималось до её
+          высоты — 66 пикселей вместо всего экрана. */}
+      {mobileOpen && createPortal(
         <div className="lg:hidden fixed inset-0 z-40">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -370,62 +387,122 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
               <span className="font-semibold">Меню</span>
               <button
                 onClick={() => setMobileOpen(false)}
-                className="p-1.5 text-muted hover:text-text"
+                className="btn-icon"
+                aria-label="Закрыть меню"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto py-2">
-              <div className="text-[10px] uppercase tracking-wider text-muted px-4 pt-2 pb-1">
+              <div className="caps-label px-4 pt-2 pb-1">
                 Основное
               </div>
               {PRIMARY.map(({ to, label, icon: Icon }) => (
-                <NavLink
+                <SmoothNavLink
                   key={to}
                   to={to}
                   end={to === "/"}
-                  onClick={() => setMobileOpen(false)}
-                  className={({ isActive }) =>
-                    clsx(
-                      "flex items-center gap-3 px-4 py-2.5 text-sm",
-                      isActive
-                        ? "bg-accent/10 text-accent"
-                        : "text-muted hover:text-text hover:bg-panel2"
-                    )
-                  }
+                  onNavigate={() => setMobileOpen(false)}
+                  className={({ isActive }) => sheetRow(isActive)}
                 >
                   <Icon className="w-4 h-4" />
                   {label}
-                </NavLink>
+                </SmoothNavLink>
               ))}
               {SECONDARY_GROUPS.map((group) => (
                 <div key={group.title}>
-                  <div className="text-[10px] uppercase tracking-wider text-muted px-4 pt-3 pb-1">
+                  <div className="caps-label px-4 pt-3 pb-1">
                     {group.title}
                   </div>
                   {group.items.map(({ to, label, icon: Icon }) => (
-                    <NavLink
+                    <SmoothNavLink
                       key={to}
                       to={to}
-                      onClick={() => setMobileOpen(false)}
-                      className={({ isActive }) =>
-                        clsx(
-                          "flex items-center gap-3 px-4 py-2.5 text-sm",
-                          isActive
-                            ? "bg-accent/10 text-accent"
-                            : "text-muted hover:text-text hover:bg-panel2"
-                        )
-                      }
+                      onNavigate={() => setMobileOpen(false)}
+                      className={({ isActive }) => sheetRow(isActive)}
                     >
                       <Icon className="w-4 h-4" />
                       {label}
-                    </NavLink>
+                    </SmoothNavLink>
                   ))}
                 </div>
               ))}
             </nav>
+
+            {/* Что не поместилось в узкую шапку. Прижато к низу, чтобы не
+                листать до него через два десятка разделов. */}
+            <div className="md:hidden border-t border-border py-2">
+              {zenToken && (
+                <div className="sm:hidden">
+                  <div className="caps-label px-4 pt-1 pb-1">Дзен-мани</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileOpen(false);
+                      void runFull();
+                    }}
+                    disabled={syncBusy}
+                    className={clsx(sheetRow(), "w-full disabled:opacity-40")}
+                  >
+                    <CloudDownload className="w-4 h-4" />
+                    Полная синхронизация
+                  </button>
+                </div>
+              )}
+              <div className="caps-label px-4 pt-1 pb-1">Приложение</div>
+              <SmoothNavLink
+                to="/settings"
+                onNavigate={() => setMobileOpen(false)}
+                className={({ isActive }) => sheetRow(isActive)}
+              >
+                <Settings className="w-4 h-4" />
+                Настройки
+              </SmoothNavLink>
+              <SmoothNavLink
+                to="/help"
+                onNavigate={() => setMobileOpen(false)}
+                className={({ isActive }) => sheetRow(isActive)}
+              >
+                <HelpCircle className="w-4 h-4" />
+                Справка
+              </SmoothNavLink>
+              {/* Подпись — то, на что переключит, как значок в шапке. Меню не
+                  закрывается: смену темы видно сразу за ним. */}
+              <button
+                type="button"
+                onClick={() => setThemeMode(theme === "dark" ? "light" : "dark")}
+                className={clsx(sheetRow(), "w-full")}
+              >
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+              </button>
+              {/* Как в шапке: вне главной пункт не пропадает, а гаснет — и
+                  говорит, где он работает. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!onDashboard) return;
+                  setEditingLayout(!editingLayout);
+                  setMobileOpen(false);
+                }}
+                aria-disabled={!onDashboard}
+                aria-pressed={onDashboard && editingLayout}
+                className={clsx(
+                  sheetRow(onDashboard && editingLayout),
+                  "w-full",
+                  !onDashboard && "opacity-40 cursor-not-allowed"
+                )}
+              >
+                <LayoutTemplate className="w-4 h-4 shrink-0" />
+                <span>
+                  Настроить главную
+                  {!onDashboard && <span className="block text-xs">Доступно на главной</span>}
+                </span>
+              </button>
+            </div>
           </aside>
-        </div>
+        </div>,
+        document.body
       )}
     </header>
   );

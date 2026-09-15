@@ -12,7 +12,7 @@ import { useSlicesStore, activeSlice } from "../store/useSlicesStore";
  * и постоянная плашка «Все данные» была бы шумом. Пока разрез один, всё
  * работает как раньше, и в шапке ничего не прибавляется.
  */
-export function SliceSwitcher({ inline = false }: { inline?: boolean }) {
+export function SliceSwitcher() {
   const slices = useSlicesStore((s) => s.slices);
   const activeId = useSlicesStore((s) => s.activeId);
   const setActive = useSlicesStore((s) => s.setActive);
@@ -73,24 +73,20 @@ export function SliceSwitcher({ inline = false }: { inline?: boolean }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         title="Разрез данных — что учитывается в аналитике"
+        aria-label={`Разрез данных: ${current.name}`}
+        // Живёт только внутри дорожки шапки: пункт той же высоты, что значки
+        // рядом (32), — прежде он был 28 и без скругления, и подсветка под
+        // курсором выходила прямоугольником внутри пилюли.
+        //
+        // На телефоне — один значок, без названия: иначе шапка не помещалась
+        // в экран. Какой разрез выбран, видно в самом списке.
         className={clsx(
-          "flex items-center gap-1.5 text-xs max-w-[10rem]",
-          // Внутри общей панели своя рамка не нужна — её даёт панель.
-          inline
-            ? clsx(
-                "px-2.5 py-1.5",
-                open ? "bg-accent/10 text-accent" : "text-muted hover:text-accent hover:bg-accent/10"
-              )
-            : clsx(
-                "px-2 py-1.5 rounded-lg border",
-                open
-                  ? "bg-accent/10 border-accent/30 text-accent"
-                  : "border-border bg-panel2 text-muted hover:text-accent hover:border-accent/50"
-              )
+          "seg-item px-2.5 max-sm:px-2 py-2 text-xs leading-4 max-w-[10rem]",
+          open && "!bg-accent/10 !text-accent"
         )}
       >
         <Layers className="w-3.5 h-3.5 shrink-0" />
-        <span className="truncate">{current.name}</span>
+        <span className="truncate max-sm:hidden">{current.name}</span>
       </button>
       {open &&
         createPortal(
@@ -103,7 +99,7 @@ export function SliceSwitcher({ inline = false }: { inline?: boolean }) {
               visibility: pos ? "visible" : "hidden",
             }}
           >
-          <div className="px-2 py-1 text-[11px] uppercase tracking-wide text-muted">
+          <div className="caps-label px-2 py-1">
             Разрез данных
           </div>
           {slices.map((s) => (

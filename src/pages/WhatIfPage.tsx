@@ -18,10 +18,15 @@ import {
   type WhatIfInputs,
 } from "../lib/whatif";
 import { netWorthSeries } from "../lib/aggregations";
-import { formatMoney, formatPct } from "../lib/format";
+import { CardHeader } from "../components/CardHeader";
+import { Slider } from "../components/Slider";
+import { HeadCell } from "../components/table/TableParts";
+import { cellClass } from "../components/table/tableKit";
+import { formatMoney, formatPct, formatFixed } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
+import { Callout } from "../components/Callout";
 
 const INITIAL: WhatIfInputs = {
   incomeMul: 1,
@@ -36,7 +41,7 @@ function years(v: number): string {
   if (v < 0) return "0";
   if (v < 1) return `${(v * 12).toFixed(0)} мес`;
   if (v >= 100) return "100+";
-  return `${v.toFixed(1)}`;
+  return formatFixed(v);
 }
 
 export function WhatIfPage() {
@@ -104,41 +109,32 @@ export function WhatIfPage() {
       <PageHeader
         icon={FlaskConical}
         title="Что-если — сценарии"
-        hint="Норма сбережений, срок до FIRE и капитал через 1/5/10 лет при разных вводных"
-        hintWrap
-        right={
-          <div className="flex items-center gap-2">
-            {dirty && (
-              <button onClick={reset} className="btn-ghost text-xs">
-                <RotateCcw className="w-3.5 h-3.5" />
-                Сбросить
-              </button>
-            )}
-            <InfoPopover>
-              <p>
-                За точку отсчёта берём ваши{" "}
-                <InfoTerm>средние доход и расход за 6 месяцев</InfoTerm>.
-                Слайдеры меняют именно их: «расходы −10%» — это десять процентов
-                от среднего месячного расхода, а не от какой-то одной покупки.
-              </p>
-              <p>
-                Дальше всё считается в лоб, без процентов на остаток:{" "}
-                <InfoTerm>откладываете в месяц = доход − расход + «отложить
-                дополнительно»</InfoTerm>, а капитал через год — это стартовый
-                капитал плюс двенадцать таких месяцев. Инвестиционной доходности
-                здесь нет намеренно: это прикидка «что будет, если жить так же»,
-                а не прогноз портфеля.
-              </p>
-              <p>
-                <InfoTerm>Срок до FIRE</InfoTerm> — сколько лет копить до суммы,
-                на проценты с которой можно жить: годовые расходы{" "}
-                <InfoTerm>× 25</InfoTerm> (это правило 4%). Обратите внимание:
-                цель считается от НОВЫХ расходов, поэтому урезание трат
-                приближает FIRE дважды — и копится больше, и цель становится
-                меньше.
-              </p>
-            </InfoPopover>
-          </div>
+        hint="Как изменятся сбережения, капитал и срок до FIRE"
+        info={
+          <InfoPopover>
+            <p>
+              За точку отсчёта берём ваши{" "}
+              <InfoTerm>средние доход и расход за 6 месяцев</InfoTerm>.
+              Слайдеры меняют именно их: «расходы −10%» — это десять процентов
+              от среднего месячного расхода, а не от какой-то одной покупки.
+            </p>
+            <p>
+              Дальше всё считается в лоб, без процентов на остаток:{" "}
+              <InfoTerm>откладываете в месяц = доход − расход + «отложить
+              дополнительно»</InfoTerm>, а капитал через год — это стартовый
+              капитал плюс двенадцать таких месяцев. Инвестиционной доходности
+              здесь нет намеренно: это прикидка «что будет, если жить так же»,
+              а не прогноз портфеля.
+            </p>
+            <p>
+              <InfoTerm>Срок до FIRE</InfoTerm> — сколько лет копить до суммы,
+              на проценты с которой можно жить: годовые расходы{" "}
+              <InfoTerm>× 25</InfoTerm> (это правило 4%). Обратите внимание:
+              цель считается от НОВЫХ расходов, поэтому урезание трат
+              приближает FIRE дважды — и копится больше, и цель становится
+              меньше.
+            </p>
+          </InfoPopover>
         }
       />
 
@@ -146,41 +142,56 @@ export function WhatIfPage() {
         {/* Inputs */}
         <div className="card-tray card-pad space-y-5">
           <div>
-            <div className="font-semibold mb-3 flex items-center gap-2">
-              <Coins className="w-4 h-4 text-accent" />
-              Основные параметры
+            {/* «Сбросить» — в шапке карточки с бегунками, которые он
+                возвращает: в шапке раздела он появлялся через экран от них. */}
+            <CardHeader
+              icon={Coins}
+              title="Основные параметры"
+              right={
+                dirty && (
+                  <button onClick={reset} className="btn-ghost text-xs">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Сбросить
+                  </button>
+                )
+              }
+            />
+            <div className="space-y-4">
+              <Slider
+                layout="stacked"
+                label="Изменение дохода"
+                value={inputs.incomeMul}
+                min={0.5}
+                max={2.0}
+                step={0.05}
+                format={(v) => `${v >= 1 ? "+" : ""}${formatPct(v - 1, 0)}`}
+                hint={`Текущий: ${formatMoney(baseScenario.avgIncome, base)}/мес → ${formatMoney(out.newIncome, base)}/мес`}
+                onChange={(v) => setInputs((prev) => ({ ...prev, incomeMul: v }))}
+              />
+              <Slider
+                layout="stacked"
+                label="Изменение расхода"
+                value={inputs.expenseMul}
+                min={0.5}
+                max={1.5}
+                step={0.05}
+                format={(v) => `${v >= 1 ? "+" : ""}${formatPct(v - 1, 0)}`}
+                hint={`Текущий: ${formatMoney(baseScenario.avgExpense, base)}/мес → ${formatMoney(out.newExpense, base)}/мес`}
+                onChange={(v) => setInputs((prev) => ({ ...prev, expenseMul: v }))}
+              />
+              <Slider
+                layout="stacked"
+                label="Дополнительно отложить в месяц"
+                value={inputs.extraMonthlySave}
+                min={0}
+                max={Math.max(50000, baseScenario.avgIncome * 0.5)}
+                step={500}
+                format={(v) => `+${formatMoney(v, base)}`}
+                hint="Фиксированная сумма поверх нынешнего баланса доход−расход"
+                onChange={(v) => setInputs((prev) => ({ ...prev, extraMonthlySave: v }))}
+              />
             </div>
-            <Slider
-              label="Изменение дохода"
-              value={inputs.incomeMul}
-              min={0.5}
-              max={2.0}
-              step={0.05}
-              format={(v) => `${v >= 1 ? "+" : ""}${formatPct(v - 1, 0)}`}
-              hint={`Текущий: ${formatMoney(baseScenario.avgIncome, base)}/мес → ${formatMoney(out.newIncome, base)}/мес`}
-              onChange={(v) => setInputs((prev) => ({ ...prev, incomeMul: v }))}
-            />
-            <Slider
-              label="Изменение расхода"
-              value={inputs.expenseMul}
-              min={0.5}
-              max={1.5}
-              step={0.05}
-              format={(v) => `${v >= 1 ? "+" : ""}${formatPct(v - 1, 0)}`}
-              hint={`Текущий: ${formatMoney(baseScenario.avgExpense, base)}/мес → ${formatMoney(out.newExpense, base)}/мес`}
-              onChange={(v) => setInputs((prev) => ({ ...prev, expenseMul: v }))}
-            />
-            <Slider
-              label="Дополнительно отложить в месяц"
-              value={inputs.extraMonthlySave}
-              min={0}
-              max={Math.max(50000, baseScenario.avgIncome * 0.5)}
-              step={500}
-              format={(v) => `+${formatMoney(v, base)}`}
-              hint="Фиксированная сумма поверх нынешнего баланса доход−расход"
-              onChange={(v) => setInputs((prev) => ({ ...prev, extraMonthlySave: v }))}
-            />
-            <div className="mt-3">
+            <div className="mt-4">
               <label className="label block mb-1">Стартовый капитал</label>
               <div className="flex items-center gap-2">
                 <input
@@ -207,16 +218,14 @@ export function WhatIfPage() {
 
           {categories.length > 0 && (
             <div>
-              <div className="font-semibold mb-3 flex items-center gap-2">
-                <TrendingDown className="w-4 h-4 text-accent" />
-                Категории расходов (топ-{categories.length})
-              </div>
+              <CardHeader icon={TrendingDown} title={`Категории расходов (топ-${categories.length})`} />
               <div className="space-y-3">
                 {categories.map((c) => {
                   const mul = inputs.categoryMul?.[c.category] ?? 1;
                   return (
                     <Slider
                       key={c.category}
+                      layout="stacked"
                       label={c.category}
                       value={mul}
                       min={0}
@@ -244,54 +253,56 @@ export function WhatIfPage() {
         {/* Outputs */}
         <div className="space-y-4">
           {/* Compare scenarios */}
-          <div className="card-tray card-pad">
-            <div className="font-semibold mb-3">Сравнение</div>
-            <table className="w-full text-base">
+          <div className="card-tray px-4 py-3">
+            <CardHeader title="Сравнение" />
+            {/* Две строки сценария — порядок метрик и есть смысл, сортировать нечего. */}
+            <table className="w-full table-fixed">
               <thead>
                 <tr>
-                  <th className="table-th">Метрика</th>
-                  <th className="table-th text-right">Сейчас</th>
-                  <th className="table-th text-right">Если так</th>
+                  <HeadCell type="text" label="Метрика" />
+                  <HeadCell type="money" label="Сейчас" width="9.5rem" />
+                  <HeadCell type="main" label="Если так" width="9.5rem" />
                 </tr>
               </thead>
-              <tbody className="tabular-nums">
-                <tr className="align-middle">
-                  <td className="table-td">Доход / мес</td>
-                  <td className="table-td text-right">
+              <tbody>
+                <tr>
+                  <td className={cellClass("text")}>Доход / мес</td>
+                  <td className={cellClass("money", { muted: true })}>
                     {formatMoney(baseScenario.avgIncome, base)}
                   </td>
-                  <td className="table-td text-right">
-                    {formatMoney(out.newIncome, base)}
-                  </td>
+                  <td className={cellClass("main")}>{formatMoney(out.newIncome, base)}</td>
                 </tr>
-                <tr className="align-middle">
-                  <td className="table-td">Расход / мес</td>
-                  <td className="table-td text-right">
+                <tr>
+                  <td className={cellClass("text")}>Расход / мес</td>
+                  <td className={cellClass("money", { muted: true })}>
                     {formatMoney(baseScenario.avgExpense, base)}
                   </td>
-                  <td className="table-td text-right">
-                    {formatMoney(out.newExpense, base)}
-                  </td>
+                  <td className={cellClass("main")}>{formatMoney(out.newExpense, base)}</td>
                 </tr>
-                <tr className="align-middle">
-                  <td className="table-td">Сбережения / мес</td>
-                  <td className="table-td text-right">
+                <tr>
+                  <td className={cellClass("text")}>Сбережения / мес</td>
+                  <td className={cellClass("money", { muted: true })}>
                     {formatMoney(baseScenario.avgSavings, base)}
                   </td>
+                  {/* Цвет — только у итога сценария: стало лучше или хуже, чем сейчас. */}
                   <td
-                    className={`table-td text-right font-semibold ${out.newSavings > baseScenario.avgSavings ? "text-income" : out.newSavings < baseScenario.avgSavings ? "text-expense" : ""}`}
+                    className={cellClass("main", {
+                      tone:
+                        out.newSavings > baseScenario.avgSavings
+                          ? "income"
+                          : out.newSavings < baseScenario.avgSavings
+                            ? "expense"
+                            : "neutral",
+                    })}
                   >
                     {formatMoney(out.newSavings, base)}
                   </td>
                 </tr>
-                <tr className="align-middle">
-                  <td className="table-td">Норма сбережений</td>
-                  <td className="table-td text-right">
-                    {formatPct(baseScenario.savingsRate, 0)}
-                  </td>
-                  <td className="table-td text-right font-semibold">
-                    {formatPct(out.newRate, 0)}
-                  </td>
+                <tr>
+                  <td className={cellClass("text")}>Норма сбережений</td>
+                  {/* Процент в колонке сумм — тем же выравниванием, что суммы над ним. */}
+                  <td className={cellClass("money", { muted: true })}>{formatPct(baseScenario.savingsRate, 0)}</td>
+                  <td className={cellClass("main")}>{formatPct(out.newRate, 0)}</td>
                 </tr>
               </tbody>
             </table>
@@ -299,10 +310,7 @@ export function WhatIfPage() {
 
           {/* FIRE */}
           <div className="card-tray card-pad">
-            <div className="flex items-center gap-2 font-semibold mb-3">
-              <Flame className="w-4 h-4 text-warn" />
-              FIRE
-            </div>
+            <CardHeader icon={Flame} tone="warn" title="FIRE" />
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="label">Лет до FIRE сейчас</div>
@@ -321,12 +329,12 @@ export function WhatIfPage() {
               <div className="mt-3 text-sm">
                 {out.yearsSavedOnFire > 0 ? (
                   <span className="text-income">
-                    Сэкономлено {out.yearsSavedOnFire.toFixed(1)} лет до финансовой
+                    Сэкономлено {formatFixed(out.yearsSavedOnFire)} лет до финансовой
                     свободы
                   </span>
                 ) : (
                   <span className="text-expense">
-                    Срок отодвинется на {Math.abs(out.yearsSavedOnFire).toFixed(1)} лет
+                    Срок отодвинется на {formatFixed(Math.abs(out.yearsSavedOnFire))} лет
                   </span>
                 )}
               </div>
@@ -335,14 +343,11 @@ export function WhatIfPage() {
 
           {/* Projected capital */}
           <div className="card-tray card-pad">
-            <div className="flex items-center gap-2 font-semibold mb-3">
-              <PiggyBank className="w-4 h-4 text-accent2" />
-              Прогноз капитала
-            </div>
+            <CardHeader icon={PiggyBank} tone="accent2" title="Прогноз капитала" />
             <div className="grid grid-cols-3 gap-3">
-              <MoneyStat label="через 1 год" value={out.projected1y} base={base} />
-              <MoneyStat label="через 5 лет" value={out.projected5y} base={base} />
-              <MoneyStat label="через 10 лет" value={out.projected10y} base={base} />
+              <MoneyStat label="Через 1 год" value={out.projected1y} base={base} />
+              <MoneyStat label="Через 5 лет" value={out.projected5y} base={base} />
+              <MoneyStat label="Через 10 лет" value={out.projected10y} base={base} />
             </div>
             <div className="text-[11px] text-muted mt-3">
               Линейный прогноз без учёта доходности инвестиций. Реальные суммы при
@@ -352,25 +357,18 @@ export function WhatIfPage() {
 
           {/* Annual delta */}
           {Math.abs(out.annualSavingsDelta) > 100 && (
-            <div className="card card-pad bg-accent/5 border-accent/40">
-              <div className="flex items-center gap-2 text-sm">
-                {out.annualSavingsDelta > 0 ? (
-                  <TrendingUp className="w-4 h-4 text-income shrink-0" />
-                ) : (
-                  <TrendingDown className="w-4 h-4 text-expense shrink-0" />
-                )}
-                <span>
-                  За год это{" "}
-                  <strong
-                    className={out.annualSavingsDelta > 0 ? "text-income" : "text-expense"}
-                  >
-                    {out.annualSavingsDelta > 0 ? "+" : ""}
-                    {formatMoney(out.annualSavingsDelta, base)}
-                  </strong>{" "}
-                  к текущей траектории.
-                </span>
-              </div>
-            </div>
+            <Callout
+              size="banner"
+              tone={out.annualSavingsDelta > 0 ? "income" : "expense"}
+              icon={out.annualSavingsDelta > 0 ? TrendingUp : TrendingDown}
+            >
+              За год это{" "}
+              <strong className={out.annualSavingsDelta > 0 ? "text-income" : "text-expense"}>
+                {out.annualSavingsDelta > 0 ? "+" : ""}
+                {formatMoney(out.annualSavingsDelta, base)}
+              </strong>{" "}
+              к текущей траектории.
+            </Callout>
           )}
         </div>
       </div>
@@ -378,47 +376,8 @@ export function WhatIfPage() {
   );
 }
 
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  format,
-  hint,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  format: (v: number) => string;
-  hint?: string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="mb-3 last:mb-0">
-      <div className="flex items-center justify-between text-sm">
-        <span>{label}</span>
-        <span className="font-mono tabular-nums text-accent [word-spacing:-0.22em]">{format(value)}</span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-accent"
-      />
-      {hint && <div className="text-[11px] text-muted">{hint}</div>}
-    </div>
-  );
-}
-
-// Inline label/value pair used INSIDE a card (not a standalone card tile), so it
-// deliberately does not use the design-system `Stat` (which renders its own card).
+// Inline label/value pair used INSIDE a card, so it deliberately is not a
+// `StatRow` cell (the row renders its own card).
 function MoneyStat({ label, value, base }: { label: string; value: number; base: string }) {
   return (
     <div>

@@ -19,9 +19,11 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
 import { Segmented } from "../components/Segmented";
-import { SectionCard, StatCell } from "../components/SectionCard";
+import { SectionCard, StatCell, StatRow } from "../components/SectionCard";
 import { MeterRow, MeterHead, type MeterCell } from "../components/MeterRow";
+import { nextSort, sortRows, type SortState } from "../components/table/tableKit";
 import type { Transaction } from "../types";
+import { SectionEmpty } from "../components/SectionEmpty";
 
 
 type Tab = "week" | "month";
@@ -48,12 +50,12 @@ export function DigestPage() {
   if (transactions.length === 0) return <EmptyState />;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <PageHeader
         icon={Newspaper}
         title="Дайджест"
-        hint="Итоги завершённых недель и месяцев со сравнением с предыдущим"
-        right={
+        hint="Что изменилось по сравнению с предыдущей неделей или месяцем"
+        info={
           <InfoPopover>
             <p>
               Итоги считаются только по <InfoTerm>завершённым периодам</InfoTerm>:
@@ -95,9 +97,7 @@ export function DigestPage() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="card-tray card-pad text-center text-muted py-12">
-          Нет завершённых периодов для дайджеста.
-        </div>
+        <SectionEmpty icon={Newspaper} title="Нет завершённых периодов для дайджеста" />
       ) : (
         <div className="grid md:grid-cols-[260px_1fr] gap-4">
           {/* Список периодов. На широком экране панель тянется во всю высоту
@@ -164,9 +164,10 @@ export function DigestPage() {
  * выделенной строки, а её правый край обрывался посреди пустоты.
  */
 const MOVER_COLUMNS: MeterCell[] = [
-  { text: "Доля", width: "w-14" },
-  { text: "Было → стало", width: "w-36" },
-  { text: "Изменение", width: "w-24" },
+  // «Рост», а не «Доля»: здесь процент изменения к прошлому периоду.
+  { text: "Рост", width: "4rem", sortKey: "pct" },
+  { text: "Было → стало", width: "13rem", sortKey: "current" },
+  { text: "Разница", width: "7rem", sortKey: "diff" },
 ];
 
 function DigestDetail({
@@ -205,57 +206,67 @@ function DigestDetail({
     1
   );
 
+  // Движители сортируются по любой колонке; по умолчанию — по величине разницы.
+  const [sort, setSort] = useState<SortState>({ key: "diff", dir: "desc" });
+  const movers = sortRows(
+    entry.movers,
+    (m) =>
+      sort.key === "name"
+        ? m.category
+        : sort.key === "pct"
+          ? m.previous > 0
+            ? m.delta
+            : null
+          : sort.key === "current"
+            ? m.current
+            : Math.abs(m.current - m.previous),
+    sort.dir
+  );
+
   return (
-    <div className="space-y-3">
-      <div className="tray">
-        <div className="tray-core px-5 py-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-4 divide-border lg:divide-x">
-            <StatCell
-              label="Доход"
-              value={formatMoney(entry.income, baseCurrency)}
-              icon={<TrendingUp className="w-4 h-4" />}
-              tone="income"
-              note={deltaNote(entry.incomeDelta)}
-              noteCls={incCls}
-            />
-            <StatCell
-              label="Расход"
-              value={formatMoney(entry.expense, baseCurrency)}
-              icon={<TrendingDown className="w-4 h-4" />}
-              tone="expense"
-              note={deltaNote(entry.expenseDelta)}
-              noteCls={expCls}
-              pad
-            />
-            <StatCell
-              label="Чистый поток"
-              value={formatMoney(entry.net, baseCurrency, { signed: true })}
-              icon={<Trophy className="w-4 h-4" />}
-              tone={entry.net >= 0 ? "income" : "expense"}
-              note={deltaNote(
-                Math.abs(entry.prevNet) > 0.01
-                  ? (entry.net - entry.prevNet) / Math.abs(entry.prevNet)
-                  : 0
-              )}
-              noteCls={netCls}
-              pad
-            />
-            {/* Число операций было мелкой служебной строчкой над числами —
-                такой же итог периода, просто не в рублях. */}
-            <StatCell
-              label="Операций"
-              value={formatNum(entry.txCount)}
-              icon={<Coins className="w-4 h-4" />}
-              note={entry.label}
-              pad
-            />
-          </div>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <StatRow>
+        <StatCell
+          label="Доход"
+          value={formatMoney(entry.income, baseCurrency)}
+          icon={<TrendingUp className="w-4 h-4" />}
+          tone="income"
+          note={deltaNote(entry.incomeDelta)}
+          noteCls={incCls}
+        />
+        <StatCell
+          label="Расход"
+          value={formatMoney(entry.expense, baseCurrency)}
+          icon={<TrendingDown className="w-4 h-4" />}
+          tone="expense"
+          note={deltaNote(entry.expenseDelta)}
+          noteCls={expCls}
+        />
+        <StatCell
+          label="Чистый поток"
+          value={formatMoney(entry.net, baseCurrency, { signed: true })}
+          icon={<Trophy className="w-4 h-4" />}
+          tone={entry.net >= 0 ? "income" : "expense"}
+          note={deltaNote(
+            Math.abs(entry.prevNet) > 0.01
+              ? (entry.net - entry.prevNet) / Math.abs(entry.prevNet)
+              : 0
+          )}
+          noteCls={netCls}
+        />
+        {/* Число операций было мелкой служебной строчкой над числами —
+            такой же итог периода, просто не в рублях. */}
+        <StatCell
+          label="Операций"
+          value={formatNum(entry.txCount)}
+          icon={<Coins className="w-4 h-4" />}
+          note={entry.label}
+        />
+      </StatRow>
 
       {entry.movers.length > 0 && (
         <SectionCard
-          icon={<TrendingUp className="w-4 h-4 text-accent" />}
+          icon={TrendingUp}
           title="Категории, где «выстрелило»"
           info={
             <p>
@@ -267,9 +278,16 @@ function DigestDetail({
             </p>
           }
         >
-          <MeterHead columns={MOVER_COLUMNS} lead="" bar="track" />
+          <MeterHead
+            columns={MOVER_COLUMNS}
+            lead=""
+            bar="track"
+            nameLabel="Статья"
+            sort={sort.key ? { key: sort.key, dir: sort.dir } : undefined}
+            onSort={(key) => setSort((cur) => nextSort(cur, key, key === "name" ? "text" : "money"))}
+          />
           <div className="space-y-0.5">
-            {entry.movers.map((m) => {
+            {movers.map((m) => {
               const up = m.current > m.previous;
               const diff = Math.abs(m.current - m.previous);
               return (
@@ -316,7 +334,7 @@ function DigestDetail({
 
       {entry.topTransactions.length > 0 && (
         <SectionCard
-          icon={<Coins className="w-4 h-4 text-expense" />}
+          icon={Coins} tone="expense"
           title="Самое дорогое за период"
           info={<p>Пять самых крупных расходов периода с комментарием к операции.</p>}
         >

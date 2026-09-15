@@ -14,7 +14,6 @@ import { categoryKeysOf, hasCategory } from "../lib/operationTags";
 import { useLazyList } from "../hooks/useLazyList";
 import { Link } from "react-router-dom";
 import {
-  Search,
   RotateCcw,
   Eye,
   EyeOff,
@@ -48,6 +47,9 @@ import {
 } from "./CategoryDeleteModal";
 import { InfoPopover } from "./InfoPopover";
 import { CountSortHeader, type SortMode } from "./CountSortHeader";
+import { SectionEmpty } from "./SectionEmpty";
+import { SearchInput } from "./SearchInput";
+import { Badge } from "./Badge";
 
 /** What the edit/create modal is currently doing. */
 type ModalState =
@@ -318,24 +320,12 @@ export function CategoryManager() {
     <div className="space-y-3">
       {/* Toolbar: search + «?» info popover + pending/reset/push + Добавить. */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex items-center gap-2 bg-panel2 rounded-lg px-2 py-1 border border-border flex-1 min-w-[200px]">
-          <Search className="w-3.5 h-3.5 text-muted shrink-0" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Поиск категории…"
-            className="bg-transparent text-sm flex-1 outline-none min-w-0"
-          />
-          {query && (
-            <button
-              onClick={() => setQuery("")}
-              className="text-xs text-muted hover:text-text"
-              aria-label="Очистить поиск"
-            >
-              ✕
-            </button>
-          )}
-        </div>
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Поиск категории…"
+          className="flex-1 min-w-[200px]"
+        />
 
         <InfoPopover label="Как это работает">
                 <p>
@@ -387,7 +377,7 @@ export function CategoryManager() {
             className="text-xs flex items-center gap-1 text-muted hover:text-text shrink-0"
             title="Сбросить несохранённые правки (облако не меняется)"
           >
-            <RotateCcw className="w-3.5 h-3.5" /> сбросить
+            <RotateCcw className="w-3.5 h-3.5" /> Сбросить
           </button>
         )}
         <button
@@ -408,12 +398,12 @@ export function CategoryManager() {
           // Obeys the «Размер текста в таблицах» slider — rows inherit this.
           style={{ fontSize: "var(--tbl-font)" }}
         >
-          <div className="sticky top-0 z-10 bg-panel border-b border-border flex items-center gap-3 px-3 py-2 text-[0.85em] text-muted uppercase tracking-wide">
+          <div className="list-head sticky top-0 z-10 bg-panel flex items-center gap-3 px-3 py-2">
             <span className="flex-1 min-w-0">Категория</span>
             <span className="hidden sm:block w-24 shrink-0 text-center">Расходная</span>
             <span className="hidden sm:block w-24 shrink-0 text-center">Доходная</span>
             <span className="hidden md:block w-36 shrink-0">Обязательность</span>
-            <span className="hidden lg:flex w-20 shrink-0 items-center justify-center">
+            <span className="hidden lg:flex w-20 shrink-0 items-center justify-end">
               <CountSortHeader sort={sort} onChange={setSort} />
             </span>
             <span className="w-28 shrink-0 text-center whitespace-nowrap">В аналитике</span>
@@ -421,9 +411,9 @@ export function CategoryManager() {
           </div>
 
           {groups.length === 0 ? (
-            <div className="text-sm text-muted py-6 text-center">
+            <SectionEmpty variant="compact">
               {tags.length === 0 ? "Категории не найдены." : "Ничего не найдено."}
-            </div>
+            </SectionEmpty>
           ) : (
             <div className="divide-y divide-border/60">
               {visibleGroups.map(({ root, children }) => {
@@ -458,14 +448,14 @@ export function CategoryManager() {
                           {rEdit?.title ?? root.title}
                         </span>
                         {rIsNew && !rDeleted && (
-                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">
-                            новая
-                          </span>
+                          <Badge tone="accent" className="shrink-0">
+                            Новая
+                          </Badge>
                         )}
                         {rDeleted && (
-                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-expense/10 text-expense shrink-0">
-                            удалена
-                          </span>
+                          <Badge tone="expense" className="shrink-0">
+                            Удалена
+                          </Badge>
                         )}
                       </span>
                       <span className="hidden sm:flex w-24 shrink-0 items-center justify-center">
@@ -477,12 +467,12 @@ export function CategoryManager() {
                       <span className="hidden md:block w-36 shrink-0 text-muted truncate">
                         {rObl ? "Обязательная" : "Необязательная"}
                       </span>
-                      <span className="hidden lg:flex w-20 shrink-0 items-center justify-center">
+                      <span className="hidden lg:flex w-20 shrink-0 items-center justify-end">
                         {rCount ? (
                           <button
                             onClick={() => openOperations(root.title)}
                             title="Показать операции категории"
-                            className="tabular-nums text-muted hover:text-accent hover:underline px-1 rounded"
+                            className="tabular-nums text-muted hover:text-accent hover:underline px-1 -mr-1 rounded"
                           >
                             {formatNum(rCount)}
                           </button>
@@ -502,12 +492,7 @@ export function CategoryManager() {
                           aria-label={
                             rExcluded ? "Вернуть категорию в аналитику" : "Исключить категорию из аналитики"
                           }
-                          className={clsx(
-                            "p-1.5 rounded-md",
-                            rExcluded
-                              ? "text-warn bg-warn/10"
-                              : "text-muted hover:text-accent hover:bg-panel2"
-                          )}
+                          className={clsx("btn-icon", rExcluded && "text-warn bg-warn/10 hover:text-warn")}
                         >
                           {rExcluded ? (
                             <EyeOff className="w-4 h-4" />
@@ -525,7 +510,7 @@ export function CategoryManager() {
                           disabled={rDeleted}
                           title="Редактировать категорию"
                           aria-label="Редактировать категорию"
-                          className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="btn-icon disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
@@ -534,7 +519,7 @@ export function CategoryManager() {
                             onClick={() => useTagDeletionsStore.getState().restore(root.id)}
                             title="Отменить удаление"
                             aria-label="Отменить удаление категории"
-                            className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                            className="btn-icon"
                           >
                             <Undo2 className="w-4 h-4" />
                           </button>
@@ -543,7 +528,7 @@ export function CategoryManager() {
                             onClick={() => onDelete(root)}
                             title="Удалить категорию"
                             aria-label="Удалить категорию"
-                            className="p-1.5 rounded-md text-muted hover:text-expense hover:bg-expense/10"
+                            className="btn-icon-danger"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -599,14 +584,14 @@ export function CategoryManager() {
                                   {cEdit?.title ?? c.title}
                                 </span>
                                 {cIsNew && !cDeleted && (
-                                  <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">
-                                    новая
-                                  </span>
+                                  <Badge tone="accent" className="shrink-0">
+                                    Новая
+                                  </Badge>
                                 )}
                                 {cDeleted && (
-                                  <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-expense/10 text-expense shrink-0">
-                                    удалена
-                                  </span>
+                                  <Badge tone="expense" className="shrink-0">
+                                    Удалена
+                                  </Badge>
                                 )}
                               </span>
                               <span className="hidden sm:flex w-24 shrink-0 items-center justify-center">
@@ -618,12 +603,12 @@ export function CategoryManager() {
                               <span className="hidden md:block w-36 shrink-0 text-muted truncate">
                                 {cObl ? "Обязательная" : "Необязательная"}
                               </span>
-                              <span className="hidden lg:flex w-20 shrink-0 items-center justify-center">
+                              <span className="hidden lg:flex w-20 shrink-0 items-center justify-end">
                                 {cCount ? (
                                   <button
                                     onClick={() => openOperations(cKey)}
                                     title="Показать операции подкатегории"
-                                    className="tabular-nums text-muted hover:text-accent hover:underline px-1 rounded"
+                                    className="tabular-nums text-muted hover:text-accent hover:underline px-1 -mr-1 rounded"
                                   >
                                     {formatNum(cCount)}
                                   </button>
@@ -649,11 +634,9 @@ export function CategoryManager() {
                                       : "Исключить подкатегорию из аналитики"
                                   }
                                   className={clsx(
-                                    "p-1.5 rounded-md",
+                                    "btn-icon",
                                     rExcluded && "opacity-40 cursor-not-allowed",
-                                    cExcluded
-                                      ? "text-warn bg-warn/10"
-                                      : "text-muted hover:text-accent hover:bg-panel2"
+                                    cExcluded && "text-warn bg-warn/10 hover:text-warn"
                                   )}
                                 >
                                   {cExcluded ? (
@@ -669,7 +652,7 @@ export function CategoryManager() {
                                   disabled={cDeleted}
                                   title="Редактировать подкатегорию"
                                   aria-label="Редактировать подкатегорию"
-                                  className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2 disabled:opacity-40 disabled:cursor-not-allowed"
+                                  className="btn-icon disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </button>
@@ -678,7 +661,7 @@ export function CategoryManager() {
                                     onClick={() => useTagDeletionsStore.getState().restore(c.id)}
                                     title="Отменить удаление"
                                     aria-label="Отменить удаление подкатегории"
-                                    className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                                    className="btn-icon"
                                   >
                                     <Undo2 className="w-4 h-4" />
                                   </button>
@@ -692,7 +675,7 @@ export function CategoryManager() {
                                         : "Удалить подкатегорию"
                                     }
                                     aria-label="Удалить подкатегорию"
-                                    className="p-1.5 rounded-md text-muted hover:text-expense hover:bg-expense/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    className="btn-icon-danger disabled:opacity-40 disabled:cursor-not-allowed"
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>

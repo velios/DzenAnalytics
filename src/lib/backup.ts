@@ -125,6 +125,7 @@ export const BACKUP_META_KEYS = [
   // файла нечем было бы узнать.
   "importBatches",
   "deletedTransactions",
+  "deletedTransactionsAt", // когда спрятаны — порядок в разделе «Удалённые»
   "deletedPayloads",
   "tagEdits",
   "tagDeletions",
@@ -140,9 +141,10 @@ export const BACKUP_META_KEYS = [
  *
  * Всё остальное приложение хранит в IndexedDB, но тема выбирается до того,
  * как база успевает открыться (иначе страница мигала бы светлым), и живёт
- * отдельно. В бэкапе она едет своим разделом.
+ * отдельно. В бэкапе она едет своим разделом — вместе с выбранными светлой и
+ * тёмной темой.
  */
-export const BACKUP_LOCAL_KEYS = ["dzen.theme"] as const;
+export const BACKUP_LOCAL_KEYS = ["dzen.theme", "dzen.lightScheme", "dzen.darkScheme"] as const;
 
 export interface BackupPayload {
   version: number;

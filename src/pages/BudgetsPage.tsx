@@ -11,7 +11,6 @@ import {
   Check,
   X,
   ArrowUp,
-  HelpCircle,
   Wand2,
   Download,
   CalendarClock,
@@ -71,6 +70,7 @@ import {
   type BudgetLine,
 } from "../lib/budgets";
 import { formatMoney } from "../lib/format";
+import { StatCell, StatRow, type StatTone } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { DateField } from "../components/DateField";
@@ -79,6 +79,8 @@ import {
   budgetExportFileName,
   type BudgetExportFormat,
 } from "../lib/budgetExportName";
+import { InfoPopover } from "../components/InfoPopover";
+import { Badge, type BadgeTone } from "../components/Badge";
 
 function currentMonth(): string {
   const d = new Date();
@@ -878,7 +880,7 @@ export function BudgetsPage() {
           </button>
         </Tooltip>
         <Tooltip content="Отмена">
-          <button onClick={resetForm} className="text-muted hover:text-text shrink-0 p-1">
+          <button onClick={resetForm} className="btn-icon shrink-0">
             <X className="w-5 h-5" />
           </button>
         </Tooltip>
@@ -895,7 +897,7 @@ export function BudgetsPage() {
     <Tooltip content={kind === "expense" ? "Добавить категорию расходов" : "Добавить категорию доходов"}>
       <button
         onClick={() => startDraft(kind)}
-        className="btn-primary !p-2"
+        className="btn-primary btn-square"
         aria-label="Добавить категорию"
       >
         <Plus className="w-4 h-4" />
@@ -908,14 +910,13 @@ export function BudgetsPage() {
       <PageHeader
         icon={Wallet}
         title="Бюджет"
-        hint="План и факт по статьям — за месяц и за год"
+        hint="Сколько ещё можно потратить по каждой статье"
       />
 
       {/* Панель: вид и период (слева), действия (справа). */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
           <Segmented
-            size="sm"
             label="Вид бюджета"
             value={view}
             onChange={(v) => setView(v)}
@@ -935,10 +936,9 @@ export function BudgetsPage() {
           <Tooltip content={monthPeriod ? "Предыдущий месяц" : "Предыдущий год"}>
             <button
               onClick={() => (monthPeriod ? setYm((m) => addMonths(m, -1)) : shiftYear(-1))}
-              // Поле в 10 пикселей, а не 8: в одной строке шапки стоят
-              // переключатель вида, выбор месяца и «Заполнить по среднему» —
-              // все ростом 38, и кнопка в 34 читалась осевшей.
-              className="btn-ghost !p-2.5"
+              // Ряд переключателей раздела — крупная ступень 42: вид бюджета,
+              // стрелки, месяц и действия стоят вровень.
+              className="btn-ghost btn-square-lg"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -964,17 +964,17 @@ export function BudgetsPage() {
               // Пилюля, а не скруглённое поле: вокруг одни пилюли, и
               // двенадцатипиксельный радиус посреди них был единственным на всю
               // строку.
-              className="input text-sm font-medium w-[132px] !px-3 !rounded-full"
+              className="input text-sm font-medium w-[132px] !px-3 !py-2.5 !rounded-full"
             />
           ) : (
-            <span className="text-sm font-medium tabular-nums px-4 py-2 rounded-full bg-panel2 border border-border">
+            <span className="text-sm font-medium tabular-nums px-4 py-2.5 rounded-full bg-panel2 border border-border">
               {year}
             </span>
           )}
           <Tooltip content={monthPeriod ? "Следующий месяц" : "Следующий год"}>
             <button
               onClick={() => (monthPeriod ? setYm((m) => addMonths(m, 1)) : shiftYear(1))}
-              className="btn-ghost !p-2.5"
+              className="btn-ghost btn-square-lg"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -993,35 +993,25 @@ export function BudgetsPage() {
               экране: два из трёх фактов видно и так (заголовки плиток и сам
               период в шапке), а третий нужен раз в жизни. */}
           {view === "dashboard" && (
-            <Tooltip
-              content={
-                <TooltipFacts
-                  title="Показатели на этом экране"
-                  facts={[
-                    { label: "За месяц", value: `${monthOf(dashboardMonth, true)} ${year}` },
-                    {
-                      label: "С начала года",
-                      value: `Январь — ${monthOf(dashboardMonth)}`,
-                    },
-                  ]}
-                  note={<span className="italic">Прошлый год берётся тем же отрезком</span>}
-                />
-              }
-            >
-              <button
-                type="button"
-                aria-label="За какой период показатели на этом экране"
-                className="text-muted hover:text-text"
-              >
-                <HelpCircle className="w-4 h-4" />
-              </button>
-            </Tooltip>
+            <InfoPopover label="За какой период показатели на этом экране">
+              <TooltipFacts
+                title="Показатели на этом экране"
+                facts={[
+                  { label: "За месяц", value: `${monthOf(dashboardMonth, true)} ${year}` },
+                  {
+                    label: "С начала года",
+                    value: `Январь — ${monthOf(dashboardMonth)}`,
+                  },
+                ]}
+                note={<span className="italic">Прошлый год берётся тем же отрезком</span>}
+              />
+            </InfoPopover>
           )}
         </div>
         <div className="flex items-center gap-2">
           {yearView && (
             <Tooltip content="Годовой отчёт файлом: таблицами в Excel или сводкой в PDF">
-              <button onClick={() => setExportOpen(true)} className="btn-ghost text-sm">
+              <button onClick={() => setExportOpen(true)} className="btn-ghost btn-lg text-sm">
                 <Download className="w-4 h-4" />
                 Экспорт
               </button>
@@ -1034,7 +1024,7 @@ export function BudgetsPage() {
               отчёт, а не место, где правят планы. */}
           {view === "month" && (
             <Tooltip content="Подставить суммы по истории операций">
-              <button onClick={() => setFillOpen(true)} className="btn-ghost text-sm">
+              <button onClick={() => setFillOpen(true)} className="btn-ghost btn-lg text-sm">
                 <Wand2 className="w-4 h-4" />
                 Заполнить по среднему
               </button>
@@ -1099,12 +1089,12 @@ export function BudgetsPage() {
       {view === "month" && (
         <>
       {/* Summary: расходы / доходы / дельта — у каждого явные «Факт» и «План» */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <StatRow>
         <PlanFactCard
           title="Расходы за месяц"
           fact={expFact}
           plan={expPlan}
-          factClass="text-expense"
+          tone="expense"
           base={base}
           kind="expense"
           withTransfers={settings.perimeterTransfers ? expFact + expTransfers : undefined}
@@ -1113,7 +1103,7 @@ export function BudgetsPage() {
           title="Доходы за месяц"
           fact={incFact}
           plan={incPlan}
-          factClass="text-income"
+          tone="income"
           base={base}
           kind="income"
           withTransfers={settings.perimeterTransfers ? incFact + incTransfers : undefined}
@@ -1122,13 +1112,13 @@ export function BudgetsPage() {
           title="Разница (доходы − расходы)"
           fact={factDelta}
           plan={planDelta}
-          factClass={factDelta >= 0 ? "text-income" : "text-expense"}
+          tone={factDelta >= 0 ? "income" : "expense"}
           signed
           base={base}
           kind="delta"
           withTransfers={settings.perimeterTransfers ? factDelta : undefined}
         />
-      </div>
+      </StatRow>
 
       {/* Full-width cash-flow widget: cumulative income/expense over the month
           with a linear end-of-month forecast (Zen «Планы» style). */}
@@ -1217,7 +1207,7 @@ function PlanFactCard({
   title,
   fact,
   plan,
-  factClass,
+  tone,
   base,
   signed = false,
   kind,
@@ -1226,70 +1216,57 @@ function PlanFactCard({
   title: string;
   fact: number;
   plan: number;
-  factClass: string;
+  tone: StatTone;
   base: string;
   signed?: boolean;
   kind: "expense" | "income" | "delta";
   /**
    * Тот же факт, но вместе с переводами. Задан — под суммой появляется вторая
-   * строка; ЗАДАВАТЬ ЕГО НАДО ВСЕМ ТРЁМ карточкам сразу, когда переводы
-   * учитываются. Иначе у одной карточки строка есть, у другой нет — и пилюли
-   * «План» и «%» встают на разной высоте, хотя карточки стоят в один ряд.
+   * строка; ЗАДАВАТЬ ЕГО НАДО ВСЕМ ТРЁМ ячейкам сразу, когда переводы
+   * учитываются. Иначе у одной ячейки строка есть, у другой нет — и пилюли
+   * «План» и «%» встают на разной высоте, хотя ячейки стоят в один ряд.
    */
   withTransfers?: number;
 }) {
   return (
-    <div className="tray">
-    <div className="tray-core card-pad">
-      <div className="label mb-1.5">{title}</div>
-      <div className={`stat-num ${factClass} mb-3`}>
-        {formatMoney(fact, base, { signed })}
-      </div>
-      {/* Оборот по счетам показываем ОТДЕЛЬНОЙ строкой, а не вместо факта:
-          перекладывание денег между своими счетами тратой не является. У
-          «Дельты» переводы внутри бюджета гасят друг друга, и вторая сумма
-          совпадает с первой — там строка держит место пустой, чтобы ряд
-          карточек не разъезжался. */}
-      {withTransfers !== undefined && (
-        <div
-          className="-mt-2 mb-3 text-[13px] text-muted tabular-nums"
-          aria-hidden={withTransfers === fact}
-        >
-          {withTransfers === fact ? (
-            <span className="invisible">—</span>
-          ) : (
-            <>
-              {formatMoney(withTransfers, base, { signed })} включая переводы
-            </>
-          )}
-        </div>
-      )}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-sm px-3 py-1 rounded-full bg-panel2 text-muted tabular-nums whitespace-nowrap">
-          План {formatMoney(plan, base, { signed })}
-        </span>
-        {kind === "delta" ? (
-          <span
-            className={`text-sm font-medium px-3 py-1 rounded-full whitespace-nowrap ${
-              fact >= 0 ? PILL_TONE.income : PILL_TONE.expense
-            }`}
-          >
-            {fact >= 0 ? "Профицит" : "Дефицит"}
+    <StatCell
+      label={title}
+      value={formatMoney(fact, base, { signed })}
+      tone={tone}
+      // Оборот по счетам показываем ОТДЕЛЬНОЙ строкой, а не вместо факта:
+      // перекладывание денег между своими счетами тратой не является. У
+      // «Разницы» переводы внутри бюджета гасят друг друга, и вторая сумма
+      // совпадает с первой — там строка держит место пустой, чтобы пилюли
+      // соседних ячеек стояли на одной высоте.
+      note={
+        withTransfers === undefined ? undefined : withTransfers === fact ? (
+          <span className="invisible" aria-hidden>
+            —
           </span>
         ) : (
+          <span className="tabular-nums">
+            {formatMoney(withTransfers, base, { signed })} включая переводы
+          </span>
+        )
+      }
+    >
+      <div className="flex items-center gap-2 flex-wrap mt-3">
+        <Badge size="md" className="tabular-nums font-normal">
+          План {formatMoney(plan, base, { signed })}
+        </Badge>
+        {kind === "delta" ? (
+          <Badge size="md" tone={fact >= 0 ? PILL_TONE.income : PILL_TONE.expense}>
+            {fact >= 0 ? "Профицит" : "Дефицит"}
+          </Badge>
+        ) : (
           plan > 0 && (
-            <span
-              className={`text-sm font-medium px-3 py-1 rounded-full tabular-nums ${
-                PILL_TONE[summaryTone(fact / plan, kind === "income")]
-              }`}
-            >
+            <Badge size="md" tone={PILL_TONE[summaryTone(fact / plan, kind === "income")]} className="tabular-nums">
               {Math.round((fact / plan) * 100)}%
-            </span>
+            </Badge>
           )
         )}
       </div>
-    </div>
-    </div>
+    </StatCell>
   );
 }
 
@@ -1634,49 +1611,38 @@ function BarLegend({ isIncome, showTick }: { isIncome: boolean; showTick: boolea
         { c: "bg-expense", t: "Лимит превышен — больше 100%" },
       ];
   return (
-    <Tooltip
-      placement="bottom"
-      content={
-        <div className="space-y-1.5 text-left leading-snug">
-          <div className="font-medium">Как читать полоску</div>
-          {swatches.map((s) => (
-            <div key={s.t} className="flex items-center gap-2">
-              <span className={`inline-block w-3.5 h-2 rounded-full ${s.c}`} />
-              <span>{s.t}</span>
-            </div>
-          ))}
-          <div className="space-y-1.5 pt-1.5 mt-1 border-t border-border/60">
-            <div className="flex items-center gap-2">
-              <span className="inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border" />
-              <span>Серый фон — сколько ещё осталось до плана</span>
-            </div>
-            {showTick && (
-              <div className="flex items-center gap-2">
-                <span className="relative inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border">
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-0 h-4 border-l-2 border-solid border-text/80" />
-                </span>
-                <span>Засечка — сегодняшний день месяца</span>
-              </div>
-            )}
+    <InfoPopover label="Как читать полоску бюджета">
+      <div className="space-y-1.5 text-left leading-snug">
+        <div className="font-medium">Как читать полоску</div>
+        {swatches.map((s) => (
+          <div key={s.t} className="flex items-center gap-2">
+            <span className={`inline-block w-3.5 h-2 rounded-full ${s.c}`} />
+            <span>{s.t}</span>
           </div>
+        ))}
+        <div className="space-y-1.5 pt-1.5 mt-1 border-t border-border/60">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border" />
+            <span>Серый фон — сколько ещё осталось до плана</span>
+          </div>
+          {showTick && (
+            <div className="flex items-center gap-2">
+              <span className="relative inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border">
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-0 h-4 border-l-2 border-solid border-text/80" />
+              </span>
+              <span>Засечка — сегодняшний день месяца</span>
+            </div>
+          )}
         </div>
-      }
-    >
-      <button
-        type="button"
-        aria-label="Как читать полоску бюджета"
-        className="text-muted hover:text-text shrink-0"
-      >
-        <HelpCircle className="w-4 h-4" />
-      </button>
-    </Tooltip>
+      </div>
+    </InfoPopover>
   );
 }
 
-const PILL_TONE: Record<string, string> = {
-  income: "text-income bg-income/15",
-  warn: "text-warn bg-warn/15",
-  expense: "text-expense bg-expense/15",
+const PILL_TONE: Record<string, BadgeTone> = {
+  income: "income",
+  warn: "warn",
+  expense: "expense",
 };
 
 /**
@@ -1752,11 +1718,9 @@ function PctPill({
   return (
     <span className="w-16 shrink-0 flex justify-center">
       {planned > 0 ? (
-        <span
-          className={`text-xs font-medium tabular-nums px-2 py-0.5 rounded-full ${PILL_TONE[summaryTone(ratio, isIncome)]}`}
-        >
+        <Badge tone={PILL_TONE[summaryTone(ratio, isIncome)]} className="tabular-nums">
           {(ratio * 100).toFixed(0)}%
-        </span>
+        </Badge>
       ) : (
         <span className="text-xs text-muted">—</span>
       )}
@@ -1934,7 +1898,7 @@ function BudgetRow({
       {hasSubs ? (
         <button
           onClick={onToggle}
-          className="shrink-0 text-muted hover:text-text"
+          className="btn-icon btn-icon-sm -m-1 shrink-0"
           aria-expanded={expanded}
           aria-label={expanded ? "Свернуть подкатегории" : "Показать подкатегории"}
         >
@@ -2050,7 +2014,7 @@ function BudgetRow({
               меню и фокус с клавиатуры тоже держат её видимой. */}
           <button
             onClick={() => setMenuOpen((o) => !o)}
-            className={`btn-ghost !p-1.5 text-muted hover:text-text transition-opacity sm:opacity-0 sm:group-hover/row:opacity-100 sm:focus-visible:opacity-100 ${
+            className={`btn-icon transition-[color,background-color,opacity] sm:opacity-0 sm:group-hover/row:opacity-100 sm:focus-visible:opacity-100 ${
               menuOpen ? "sm:opacity-100" : ""
             }`}
             aria-label="Действия с бюджетом"

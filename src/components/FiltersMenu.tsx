@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Checkbox } from "./Checkbox";
 import {
   Filter,
   ChevronDown,
@@ -175,11 +176,12 @@ export function FiltersMenu() {
   }
 
   return (
-    <div className="relative">
+    // На телефоне делит строку с «Дополнительно» поровну (см. GlobalFilters).
+    <div className="relative max-sm:flex-1 max-sm:min-w-0">
       <button
         onClick={() => setOpen((o) => !o)}
         className={clsx(
-          "relative btn-ghost text-xs py-1.5 h-[30px] w-52",
+          "relative btn-ghost text-xs w-52 max-sm:w-full",
           activeView && "text-accent2"
         )}
         title="Фильтры"
@@ -263,14 +265,14 @@ export function FiltersMenu() {
                         setRenamingId(v.id);
                         setRenameVal(v.name);
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted hover:text-text"
+                      className="btn-icon opacity-0 group-hover:opacity-100"
                       title="Переименовать"
                     >
                       <Pencil className="w-3 h-3" />
                     </button>
                     <button
                       onClick={() => del(v)}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted hover:text-expense"
+                      className="btn-icon-danger opacity-0 group-hover:opacity-100"
                       title="Удалить"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -327,11 +329,10 @@ export function FiltersMenu() {
                   </div>
                 )}
                 <label className="flex items-center gap-2 text-xs text-muted">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={withPeriod}
-                    onChange={(e) => setWithPeriod(e.target.checked)}
-                    className="accent-accent"
+                    onChange={(on) => setWithPeriod(on)}
+                    label="Сохранять вместе с периодом"
                   />
                   Включить период (месяц/диапазон)
                 </label>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Checkbox } from "../components/Checkbox";
 import { Tag, AlertCircle, Sparkles, Wand2, CheckCircle2 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
@@ -11,14 +12,16 @@ import {
 } from "../lib/aggregations";
 import { formatMoney, formatDate, formatNum, formatPct } from "../lib/format";
 import { pluralRu } from "../lib/plural";
-import { kindColorClass, kindGlyphClass, kindSignGlyph } from "../lib/txKindStyle";
+import { kindGlyphClass, kindSignGlyph, kindTone } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-import { Stat } from "../components/Stat";
+import { CardHeader } from "../components/CardHeader";
+import { StatCell, StatRow } from "../components/SectionCard";
 import { Tooltip } from "../components/Tooltip";
-import { SortableTable, type Column } from "../components/SortableTable";
+import { DataTable } from "../components/DataTable";
 import type { Transaction } from "../types";
 import type { RuleField } from "../store/useCategoryRulesStore";
+import { SectionEmpty } from "../components/SectionEmpty";
 
 /** Build the rule key for a suggestion: by получатель when present, otherwise
  *  by the comment. Some operations (dividend payouts, bank fees) have no payee
@@ -154,68 +157,66 @@ export function UncategorizedPage() {
       <PageHeader
         icon={Tag}
         title="Без категории"
-        hint="Операции без категории в одном месте: подсказки помогут их разнести, а правила — категоризировать похожие автоматически"
-        hintWrap
+        hint="Примите предложенные категории или выберите свои"
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <Stat
+      <StatRow>
+        <StatCell
           label="Найдено"
           value={formatNum(list.length)}
-          hint={`из ${formatNum(transactions.length)} всего`}
+          note={`из ${formatNum(transactions.length)} всего`}
         />
-        <Stat label="Сумма" value={formatMoney(total, base)} tone="warn" />
-        <Stat label="Доля от всех потоков" value={`${(share * 100).toFixed(1)}%`} />
-      </div>
+        <StatCell label="Сумма" value={formatMoney(total, base)} tone="warn" />
+        <StatCell label="Доля от всех потоков" value={formatPct(share, 1)} />
+      </StatRow>
 
       {/* Smart suggestions */}
       {list.length > 0 && suggestions.length > 0 && (
         <div className="card card-pad bg-accent2/5 border-accent2/40">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
-            <div>
-              <div className="font-semibold flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-accent2" />
-                Подсказки категорий ({suggestions.length})
-              </div>
-              <div className="text-xs text-muted mt-1">
+          <CardHeader
+            icon={Sparkles}
+            tone="accent2"
+            title={<>Подсказки категорий ({suggestions.length})</>}
+            infoLabel="Как подбираются подсказки"
+            info={
+              <p>
                 Подобраны по похожести получателя, комментария и категории. Применение
                 создаёт правило (по получателю, а если его нет — по комментарию) —
-                можно отменить на странице «Правила».
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Tooltip content="Создаст правила (по получателю или комментарию) для выбранных подсказок и применит их">
-                <button
-                  onClick={applySelected}
-                  disabled={busy || selectedCount === 0}
-                  className="btn-primary text-xs"
-                >
-                  <Wand2 className="w-3.5 h-3.5" />
-                  Применить подсказки ({selectedCount})
-                </button>
-              </Tooltip>
-              <Tooltip content="Скрыть подсказки">
-                <button
-                  onClick={() => setShowSuggestions(false)}
-                  className="btn-ghost text-xs text-muted"
-                >
-                  ×
-                </button>
-              </Tooltip>
-            </div>
-          </div>
+                его можно отменить на странице «Правила».
+              </p>
+            }
+            right={
+              <>
+                <Tooltip content="Создаст правила (по получателю или комментарию) для выбранных подсказок и применит их">
+                  <button
+                    onClick={applySelected}
+                    disabled={busy || selectedCount === 0}
+                    className="btn-primary text-xs"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    Применить подсказки ({selectedCount})
+                  </button>
+                </Tooltip>
+                <Tooltip content="Скрыть подсказки">
+                  <button
+                    onClick={() => setShowSuggestions(false)}
+                    className="btn-ghost text-xs text-muted"
+                  >
+                    ×
+                  </button>
+                </Tooltip>
+              </>
+            }
+          />
           {/* Select-all + quick presets. */}
           {selectable.length > 0 && (
             <div className="flex items-center gap-3 px-2 py-1.5 mb-1 text-xs border-b border-border/50">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={allSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = selectedCount > 0 && !allSelected;
-                  }}
                   onChange={toggleSelectAll}
-                  className="accent-accent"
+                  indeterminate={selectedCount > 0 && !allSelected}
+                  label="Выбрать все предложения"
                 />
                 <span className="text-muted">Выбрать все ({selectable.length})</span>
               </label>
@@ -235,12 +236,10 @@ export function UncategorizedPage() {
                     applied ? "bg-income/10" : "bg-panel2/40 hover:bg-panel2/70"
                   }`}
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.has(s.txId)}
                     disabled={applied || !ruleKeyFor(s)}
                     onChange={() => toggleSelect(s.txId)}
-                    className="accent-accent shrink-0"
                     title={
                       !ruleKeyFor(s)
                         ? "Нет получателя и комментария — правило не создать"
@@ -248,6 +247,8 @@ export function UncategorizedPage() {
                           ? "Уже применено"
                           : "Выбрать для применения"
                     }
+                    label="Выбрать для применения"
+                    className="shrink-0"
                   />
                   <div className="text-xs text-muted whitespace-nowrap tabular-nums w-20">
                     {formatDate(s.date, "full")}
@@ -289,8 +290,8 @@ export function UncategorizedPage() {
                     <button
                       onClick={() => applyOne(s)}
                       disabled={busy || applied || !ruleKeyFor(s)}
-                      className={`btn-ghost !p-1.5 text-xs ${
-                        applied ? "text-income" : ""
+                      className={`btn-icon ${
+                        applied ? "text-income hover:text-income" : ""
                       }`}
                     >
                       <CheckCircle2 className="w-3.5 h-3.5" />
@@ -309,95 +310,84 @@ export function UncategorizedPage() {
       )}
 
       {list.length === 0 ? (
-        <div className="card-tray card-pad text-center py-12">
-          <AlertCircle className="w-10 h-10 text-income mx-auto mb-3" />
-          <div className="font-medium mb-1">Все операции категоризированы — отлично!</div>
-          <div className="text-sm text-muted">
-            Не найдено операций без категории
-          </div>
-        </div>
+        <SectionEmpty
+          icon={AlertCircle}
+          tone="income"
+          title="Все операции категоризированы — отлично!"
+        >
+          Не найдено операций без категории
+        </SectionEmpty>
       ) : (
-        <div className="card-tray card-pad">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold">Все без категории ({list.length})</div>
+        <DataTable<Transaction>
+          icon={Tag}
+          title={`Все без категории (${formatNum(list.length)})`}
+          actions={
             <button
+              type="button"
               onClick={() => showDrill("Незакатегоризованные", list, "Чистка категорий")}
               className="btn-ghost text-xs"
             >
-              Открыть в drawer
+              Открыть в шторке
             </button>
-          </div>
-          <SortableTable<Transaction>
-            data={list}
-            rowKey={(t) => t.id}
-            defaultSortKey="date"
-            defaultSortDir="desc"
-            limit={200}
-            exportName="uncategorized"
-            columns={
-              [
-                {
-                  key: "date",
-                  label: "Дата",
-                  sortValue: (t) => t.date,
-                  render: (t) => (
-                    <span className="whitespace-nowrap text-muted">
-                      {formatDate(t.date, "full")}
-                    </span>
-                  ),
-                },
-                {
-                  key: "category",
-                  label: "Категория",
-                  sortValue: (t) => t.categoryFull,
-                  render: (t) => (
-                    <span className="truncate max-w-[150px] inline-block text-warn">
-                      {t.categoryFull || "—"}
-                    </span>
-                  ),
-                },
-                {
-                  key: "payee",
-                  label: "Получатель",
-                  sortValue: (t) => t.payee || "",
-                  render: (t) => (
-                    <span className="truncate max-w-[160px] inline-block">
-                      {t.payee || "—"}
-                    </span>
-                  ),
-                },
-                {
-                  key: "comment",
-                  label: "Комментарий",
-                  sortValue: (t) => t.comment,
-                  render: (t) => (
-                    <span
-                      className="truncate max-w-[280px] inline-block text-xs text-muted"
-                      title={t.comment}
-                    >
-                      {t.comment}
-                    </span>
-                  ),
-                },
-                {
-                  key: "amount",
-                  label: "Сумма",
-                  align: "right",
-                  sortValue: (t) => t.amountBase,
-                  render: (t) => (
-                    <span
-                      className={`tabular-nums whitespace-nowrap ${kindColorClass(t.kind)}`}
-                      title={t.kind === "refund" ? "Возврат — уменьшает расход категории" : undefined}
-                    >
-                      <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
-                      {formatMoney(t.amount, t.currency)}
-                    </span>
-                  ),
-                },
-              ] as Column<Transaction>[]
-            }
-          />
-        </div>
+          }
+          data={list}
+          rowKey={(t) => t.id}
+          defaultSortKey="date"
+          limit={200}
+          exportName="uncategorized"
+          fixed
+          columns={[
+            {
+              key: "date",
+              type: "date",
+              width: "8.5rem",
+              label: "Дата",
+              sortValue: (t) => t.date,
+              render: (t) => formatDate(t.date, "full"),
+            },
+            {
+              key: "category",
+              type: "text",
+              muted: true,
+              width: "12rem",
+              label: "Категория",
+              sortValue: (t) => t.categoryFull,
+              render: (t) => t.categoryFull || "—",
+            },
+            {
+              key: "payee",
+              type: "text",
+              width: "14rem",
+              label: "Получатель",
+              sortValue: (t) => t.payee || "",
+              render: (t) => t.payee || "—",
+            },
+            {
+              key: "comment",
+              type: "text",
+              muted: true,
+              label: "Комментарий",
+              sortValue: (t) => t.comment,
+              render: (t) => t.comment,
+            },
+            {
+              key: "amount",
+              type: "main",
+              tone: (t) => kindTone(t.kind),
+              width: "10rem",
+              label: "Сумма",
+              sortValue: (t) => t.amountBase,
+              cellTitle: (t) =>
+                t.kind === "refund" ? "Возврат — уменьшает расход категории" : undefined,
+              render: (t) => (
+                <>
+                  <span className={kindGlyphClass(t.kind)}>{kindSignGlyph(t.kind)}</span>
+                  {formatMoney(t.amount, t.currency)}
+                </>
+              ),
+            },
+          ]}
+        />
       )}
     </div>
   );

@@ -13,8 +13,10 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import type { HealthComponent, HealthScore } from "../lib/health";
-import { formatMoney, formatPct } from "../lib/format";
+import { formatMoney, formatPct, formatFixed } from "../lib/format";
 import { Tooltip } from "./Tooltip";
+import { CardHeader } from "./CardHeader";
+import { ProgressBar } from "./ProgressBar";
 
 const COMPONENT_ICONS: Record<string, typeof HeartPulse> = {
   savings_rate: TrendingUp,
@@ -32,12 +34,12 @@ function formatValue(c: HealthComponent): string {
     case "fixed_load":
       return formatPct(c.value, 1);
     case "emergency_fund":
-      return `${c.value.toFixed(1)} мес`;
+      return `${formatFixed(c.value)} мес`;
     case "stability":
       // Show the spread as a plain word, not the raw «CV» coefficient.
       return c.value <= 0.5 ? "Ровно" : c.value <= 1 ? "С колебаниями" : "Скачет";
     default:
-      return c.value.toFixed(2);
+      return formatFixed(c.value, 2);
   }
 }
 
@@ -157,16 +159,11 @@ function ScoreRow({ c, base }: { c: HealthComponent; base: string }) {
             </span>
           </div>
 
-          <div className="h-1.5 rounded-full overflow-hidden bg-panel2 mt-2">
-            <div
-              className={`h-full ${statusBar(c.status)}`}
-              style={{ width: `${barPct}%` }}
-            />
-          </div>
+          <ProgressBar value={barPct / 100} fillClassName={statusBar(c.status)} className="mt-2" />
 
           {c.extra && (
             <div className="text-[11px] text-muted mt-1.5 tabular-nums">
-              По обязательным — {c.extra.obligatoryMonths.toFixed(1)} мес · в
+              По обязательным — {formatFixed(c.extra.obligatoryMonths)} мес · в
               среднем {formatMoney(c.extra.avgMonthly, base)} / мес
             </div>
           )}
@@ -206,20 +203,17 @@ export function HealthSummary({
   return (
     <div className="card-tray card-pad">
       {!hideHeading && (
-        <div className="flex items-center justify-between mb-4">
-          <div className="font-semibold flex items-center gap-2">
-            <HeartPulse className="w-4 h-4 text-accent" />
-            Финансовое здоровье
-          </div>
-          {to && (
-            <Link
-              to={to}
-              className="text-xs text-accent hover:underline flex items-center gap-1"
-            >
-              Подробнее <ArrowRight className="w-3 h-3" />
-            </Link>
-          )}
-        </div>
+        <CardHeader
+          icon={HeartPulse}
+          title="Финансовое здоровье"
+          right={
+            to && (
+              <Link to={to} className="pill-link">
+                Подробнее <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            )
+          }
+        />
       )}
 
       <div className="flex flex-col md:flex-row md:items-stretch gap-6">

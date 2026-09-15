@@ -17,10 +17,28 @@ export function kindColorClass(kind: TxKind): string {
     case "refund":
       return "text-accent2";
     default:
-      // transfer — neither income nor expense, so render in a flat muted grey
-      // (same slate in both themes) instead of theme text (which read as plain
-      // black on light / white on dark) or a money-in/out colour.
-      return "text-slate-400";
+      // Перевод — ни доход, ни расход: приглушённым серым, а не цветом
+      // стороны и не основным текстом. Токен `muted`, а не `slate-400` из
+      // палитры Tailwind: палитра не знает о теме.
+      return "text-muted";
+  }
+}
+
+/**
+ * Цвет суммы операции для таблиц (`Tone` из табличного стандарта): тот же
+ * смысл, что у `kindColorClass`, но словом, а не классом — класс таблица
+ * подставит сама.
+ */
+export function kindTone(kind: TxKind): "income" | "expense" | "accent2" | "muted" {
+  switch (kind) {
+    case "income":
+      return "income";
+    case "expense":
+      return "expense";
+    case "refund":
+      return "accent2";
+    default:
+      return "muted";
   }
 }
 
@@ -51,6 +69,16 @@ export function kindSignGlyph(kind: TxKind): string {
  */
 export function kindGlyphClass(kind: TxKind): string {
   return kind === "refund" ? "inline-block relative top-[2px]" : "";
+}
+
+/**
+ * Цвет суммы операции в ленте и таблицах: долг — жёлтым, как в редакторе
+ * операции; остальное — по виду операции.
+ */
+export function operationTone(
+  tx: Pick<Transaction, "kind" | "category">
+): "income" | "expense" | "accent2" | "muted" | "warn" {
+  return tx.category === "Долг" ? "warn" : kindTone(tx.kind);
 }
 
 // ─── refund-aware math helpers ────────────────────────────────────────────────

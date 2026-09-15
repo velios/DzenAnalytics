@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
+import { isViewTransitionUpdate } from "./lib/viewTransition";
 import { TopNav } from "./components/TopNav";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
+import { ThemeModal } from "./components/ThemeModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ChangelogModal } from "./components/ChangelogModal";
 import { HistRatesProgress } from "./components/HistRatesProgress";
@@ -29,7 +31,7 @@ import { SearchPage } from "./pages/SearchPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { UncategorizedPage } from "./pages/UncategorizedPage";
-import { TrashPage } from "./pages/TrashPage";
+import { DeletedPage } from "./pages/DeletedPage";
 import { SankeyPage } from "./pages/SankeyPage";
 import { HelpPage } from "./pages/HelpPage";
 import { RulesPage } from "./pages/RulesPage";
@@ -80,12 +82,21 @@ function PlainLayout() {
   // Re-key the boundary on the route so a crash on one page is cleared the
   // moment you navigate elsewhere (the boundary remounts fresh).
   const { pathname } = useLocation();
+  // Играть ли появление — решаем ОДИН раз на адрес, в той отрисовке, что
+  // сменила страницу. Переход плавной сменой кадров уже проявил её целиком, и
+  // своя анимация была бы лишней. Раньше её гасила пометка на <html> на время
+  // перехода: пометку снимали — анимация запускалась заново, и страница
+  // «открывалась» второй раз.
+  const [enter, setEnter] = useState({ path: pathname, animate: true });
+  if (enter.path !== pathname) {
+    setEnter({ path: pathname, animate: !isViewTransitionUpdate() });
+  }
   return (
     <ErrorBoundary key={pathname}>
       {/* Обёртка нужна только ради появления: ключ по адресу заставляет её
           пересоздаваться на каждом переходе, а с новым узлом заново
           проигрывается и анимация. */}
-      <div key={pathname} className="page-enter">
+      <div key={pathname} className={enter.animate ? "page-enter" : undefined}>
         <Outlet />
       </div>
     </ErrorBoundary>
@@ -391,7 +402,7 @@ function App() {
   if (!loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center text-muted">
-        Загрузка...
+        Загрузка…
       </div>
     );
   }
@@ -415,7 +426,7 @@ function App() {
             <Route path="/goals" element={<GoalsPage />} />
             <Route path="/duplicates" element={<DuplicatesPage />} />
             <Route path="/uncategorized" element={<UncategorizedPage />} />
-            <Route path="/trash" element={<TrashPage />} />
+            <Route path="/trash" element={<DeletedPage />} />
             <Route path="/help" element={<HelpPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/health" element={<HealthPage />} />
@@ -476,6 +487,7 @@ function App() {
       </footer>
       <TransactionsDrawer />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ThemeModal />
       <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
       <ConfirmDialog />
       <HistRatesProgress />

@@ -1,5 +1,8 @@
+import { HeadCell } from "./table/TableParts";
+import { cellClass } from "./table/tableKit";
 import { useState } from "react";
-import { AlertTriangle, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { Callout } from "./Callout";
 
 /**
  * Чем локальная копия отличается от облачного снимка (#93).
@@ -43,17 +46,17 @@ export function BackupComparison() {
         <div className="overflow-hidden">
       <div className="px-4 pb-4 space-y-3">
       <div className="overflow-x-auto -mx-1 px-1">
-        <table className="w-full text-xs border-collapse">
+        <table className="w-full">
           <thead>
-            <tr className="text-left">
+            <tr>
               {/* Колонка подписей — по содержимому: доля от таблицы («26%») на
                   широком экране давала полтысячи пикселей пустоты под «Где
                   лежит». `w-px` + `whitespace-nowrap` сжимает её до подписи.
                   Оставшееся делим поровну: иначе колонки расходятся по длине
                   текста (802 против 534 на 1600 px) и таблицу перекашивает. */}
               <th className="table-th w-px whitespace-nowrap" />
-              <th className="table-th w-1/2">Локальная копия</th>
-              <th className="table-th w-1/2">Облачный снимок</th>
+              <HeadCell type="text" label="Локальная копия" className="w-1/2" />
+              <HeadCell type="text" label="Облачный снимок" className="w-1/2" />
             </tr>
           </thead>
           <tbody>
@@ -76,17 +79,14 @@ export function BackupComparison() {
         </table>
       </div>
 
-      <div className="flex items-start gap-2 rounded-xl border border-warn/40 bg-warn/5 p-3 text-xs">
-        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-warn" />
-        <span>
-          <strong>Локальная копия не вернёт операции в пустой аккаунт
-          Дзен-мани.</strong>{" "}
-          При подключённом Дзен-мани операции приходят из него, и каждая
-          синхронизация заменяет местные тем, что лежит в облаке. Восстановленные
-          из файла операции доживут до первой синхронизации, а потом исчезнут:
-          в облаке их нет. Вернуть их в Дзен-мани может только облачный снимок.
-        </span>
-      </div>
+      <Callout tone="warn">
+        <strong>Локальная копия не вернёт операции в пустой аккаунт
+        Дзен-мани.</strong>{" "}
+        При подключённом Дзен-мани операции приходят из него, и каждая
+        синхронизация заменяет местные тем, что лежит в облаке. Восстановленные
+        из файла операции доживут до первой синхронизации, а потом исчезнут:
+        в облаке их нет. Вернуть их в Дзен-мани может только облачный снимок.
+      </Callout>
       </div>
         </div>
       </div>
@@ -104,10 +104,12 @@ function Row({
   cloud: string;
 }) {
   return (
-    <tr className="border-t border-border/60 align-top">
-      <td className="table-td text-muted whitespace-nowrap pr-6">{label}</td>
-      <td className="table-td">{local}</td>
-      <td className="table-td">{cloud}</td>
+    // Сравнение словами, а не данными: ячейки — абзацы, поэтому переносятся и
+    // выравниваются по верху. Шрифт, поля и черты — табличные.
+    <tr>
+      <td className={cellClass("text", { muted: true, className: "whitespace-nowrap align-top pr-6" })}>{label}</td>
+      <td className={cellClass("text", { className: "align-top" })}>{local}</td>
+      <td className={cellClass("text", { className: "align-top" })}>{cloud}</td>
     </tr>
   );
 }

@@ -19,13 +19,12 @@ import {
   TrendingUp,
   Wallet,
   List,
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
   BarChart3,
+  CalendarRange,
   Layers,
   LineChart as LineChartIcon,
   Sparkles,
+  Table as TableIcon,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
@@ -48,6 +47,7 @@ import {
 import { InsightsPanel } from "../components/InsightsPanel";
 import {
   formatMoney,
+  formatPct,
   monthLabel,
   monthLabelFull,
   formatNum,
@@ -55,14 +55,20 @@ import {
   chartTooltipProps,
   chartGridStroke,
   chartAxisStroke,
+  chartColor,
 } from "../lib/format";
-import { Stat } from "../components/Stat";
+import { StatCell, StatRow } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { CardHeader } from "../components/CardHeader";
+import { Segmented } from "../components/Segmented";
+import { KindSwitcher } from "../components/KindSwitcher";
+import { YearPicker } from "../components/MonthPicker";
 import { pluralRu } from "../lib/plural";
 import { ChartTooltipCard, TooltipFacts, SeriesTooltip } from "../components/TooltipFacts";
-import { SortableTable } from "../components/SortableTable";
+import { DataTable } from "../components/DataTable";
+import { toneOfSigned } from "../components/table/tableKit";
 import type { MonthBucket } from "../lib/aggregations";
 
 export function CashflowPage() {
@@ -150,6 +156,16 @@ export function CashflowPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (allYears.length && !allYears.includes(yoyYear)) setYoyYear(allYears[allYears.length - 1]);
   }, [allYears, yoyYear]);
+  // Годы без операций перешагиваем: сравнивать в них не с чем, а эффект выше
+  // всё равно вернул бы выбор к последнему году.
+  const pickYoyYear = (y: number) => {
+    if (allYears.includes(y)) return setYoyYear(y);
+    const next =
+      y > yoyYear
+        ? allYears.find((v) => v > yoyYear)
+        : [...allYears].reverse().find((v) => v < yoyYear);
+    if (next !== undefined) setYoyYear(next);
+  };
   const yoyData = useMemo(
     () => yearOverYearMonthly(dimensionFiltered, yoyYear, yoyKind),
     [dimensionFiltered, yoyYear, yoyKind]
@@ -215,81 +231,79 @@ export function CashflowPage() {
       <PageHeader
         icon={LineChartIcon}
         title="Cash-flow"
-        hint="Доходы, расходы и чистый поток по месяцам"
+        hint="Сколько остаётся после всех трат и больше ли, чем год назад"
       />
       <GlobalFilters period={lp} />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Stat
+      <StatRow>
+        <StatCell
           label="Доходы"
           value={formatMoney(kpi.income, base)}
           tone="income"
           icon={<TrendingUp className="w-4 h-4" />}
-          hint={`${formatNum(avgMonthlyIncome)} ${base} / мес`}
+          note={`${formatNum(avgMonthlyIncome)} ${base} / мес`}
         />
-        <Stat
+        <StatCell
           label="Расходы"
           value={formatMoney(kpi.expense, base)}
           tone="expense"
           icon={<TrendingDown className="w-4 h-4" />}
-          hint={`${formatNum(avgMonthlyExpense)} ${base} / мес`}
+          note={`${formatNum(avgMonthlyExpense)} ${base} / мес`}
         />
-        <Stat
+        <StatCell
           label="Чистый поток"
           value={formatMoney(kpi.net, base, { signed: true })}
           tone={kpi.net >= 0 ? "income" : "expense"}
           icon={<Wallet className="w-4 h-4" />}
-          hint={`Норма сбережений: ${(savingsRate * 100).toFixed(1)}%`}
+          note={`Норма сбережений: ${formatPct(savingsRate, 1)}`}
         />
-        <button onClick={openAll} className="text-left">
-          <Stat
-            label="Операций (клик)"
-            value={formatNum(kpi.count)}
-            icon={<List className="w-4 h-4" />}
-            hint={
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
-                {kpi.daysSpan} дн · {kpi.uniqueCategories} кат · {kpi.uniquePayees} получ.
-              </span>
-            }
-          />
-        </button>
-      </div>
+        {/* Итог не кликается целиком: действие — отдельной кнопкой-значком,
+            иначе непонятно, какое из четырёх чисел ведёт в операции. */}
+        <StatCell
+          label="Операций"
+          value={formatNum(kpi.count)}
+          icon={
+            <button
+              type="button"
+              onClick={openAll}
+              className="btn-icon -m-1.5"
+              title="Открыть операции периода"
+              aria-label="Открыть операции периода"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          }
+          note={`${kpi.daysSpan} дн · ${kpi.uniqueCategories} кат · ${kpi.uniquePayees} получ.`}
+        />
+      </StatRow>
 
       <InsightsPanel insights={insights} base={base} />
 
       <div className="card-tray card-pad">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <div>
-            <div className="font-semibold">
-              {vizMode === "bars" ? "Доходы и расходы по месяцам" : "Поток расходов по категориям"}
-            </div>
-            <div className="text-xs text-muted">
-              {vizMode === "bars"
-                ? "Столбцы — суммы, линия — чистый поток"
-                : "Категории как реки расходов во времени"}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-              <button
-                onClick={() => setVizMode("bars")}
-                className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${vizMode === "bars" ? "bg-accent text-accent-fg" : "text-muted"}`}
-              >
-                <BarChart3 className="w-3 h-3" />
-                Бары
-              </button>
-              <button
-                onClick={() => setVizMode("stream")}
-                className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${vizMode === "stream" ? "bg-accent text-accent-fg" : "text-muted"}`}
-              >
-                <Layers className="w-3 h-3" />
-                Поток
-              </button>
-            </div>
-            <div className="text-xs text-muted">{months.length} мес.</div>
-          </div>
-        </div>
+        <CardHeader
+          icon={vizMode === "bars" ? BarChart3 : Layers}
+          title={vizMode === "bars" ? "Доходы и расходы по месяцам" : "Поток расходов по категориям"}
+          subtitle={
+            vizMode === "bars"
+              ? "Столбцы — суммы, линия — чистый поток"
+              : "Категории как реки расходов во времени"
+          }
+          right={
+            <>
+              <Segmented
+                size="sm"
+                label="Вид графика"
+                value={vizMode}
+                onChange={setVizMode}
+                options={[
+                  { value: "bars", label: "Бары", icon: BarChart3 },
+                  { value: "stream", label: "Поток", icon: Layers },
+                ]}
+              />
+              <div className="text-xs text-muted">{months.length} мес.</div>
+            </>
+          }
+        />
         <div className="h-80">
           {vizMode === "bars" ? (
           <ResponsiveContainer>
@@ -343,10 +357,10 @@ export function CashflowPage() {
                 content={() => (
                   <div className="flex flex-wrap justify-center gap-4 pt-1 text-xs">
                     {[
-                      { label: "Доходы", color: "#10B981", bar: true },
-                      { label: "Расходы", color: "#EF4444", bar: true },
-                      { label: "Чистый поток", color: "#22D3EE", bar: false },
-                      { label: "Прогноз", color: "#A78BFA", bar: false, dashed: true },
+                      { label: "Доходы", color: chartColor.income, bar: true },
+                      { label: "Расходы", color: chartColor.expense, bar: true },
+                      { label: "Чистый поток", color: chartColor.accent, bar: false },
+                      { label: "Прогноз", color: chartColor.accent2, bar: false, dashed: true },
                     ].map((it) => (
                       <span key={it.label} className="inline-flex items-center gap-1.5" style={{ color: it.color }}>
                         {it.bar ? (
@@ -363,24 +377,24 @@ export function CashflowPage() {
               {/* Two bar series only (Доходы/Расходы); forecast months are the
                   same series, styled apart per-point via <Cell> (lighter +
                   dashed). No separate forecast bars → no reserved empty slots. */}
-              <Bar dataKey="income" name="Доходы" fill="#10B981" radius={[4, 4, 0, 0]} activeBar={false} isAnimationActive={false}>
+              <Bar dataKey="income" name="Доходы" fill={chartColor.income} radius={[4, 4, 0, 0]} activeBar={false} isAnimationActive={false}>
                 {chartData.map((d, i) => (
                   <Cell
                     key={i}
-                    fill="#10B981"
+                    fill={chartColor.income}
                     fillOpacity={d.isForecast ? 0.4 : 1}
-                    stroke={d.isForecast ? "#10B981" : undefined}
+                    stroke={d.isForecast ? chartColor.income : undefined}
                     strokeDasharray={d.isForecast ? "3 3" : undefined}
                   />
                 ))}
               </Bar>
-              <Bar dataKey="expense" name="Расходы" fill="#EF4444" radius={[4, 4, 0, 0]} activeBar={false} isAnimationActive={false}>
+              <Bar dataKey="expense" name="Расходы" fill={chartColor.expense} radius={[4, 4, 0, 0]} activeBar={false} isAnimationActive={false}>
                 {chartData.map((d, i) => (
                   <Cell
                     key={i}
-                    fill="#EF4444"
+                    fill={chartColor.expense}
                     fillOpacity={d.isForecast ? 0.4 : 1}
-                    stroke={d.isForecast ? "#EF4444" : undefined}
+                    stroke={d.isForecast ? chartColor.expense : undefined}
                     strokeDasharray={d.isForecast ? "3 3" : undefined}
                   />
                 ))}
@@ -390,7 +404,7 @@ export function CashflowPage() {
                 type="monotone"
                 dataKey="net"
                 name="Чистый поток"
-                stroke="#22D3EE"
+                stroke={chartColor.accent}
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 isAnimationActive={false}
@@ -402,7 +416,7 @@ export function CashflowPage() {
                 dataKey="netForecastTop"
                 name="Прогноз (оптимист)"
                 stroke="none"
-                fill="#A78BFA"
+                fill={chartColor.accent2}
                 fillOpacity={0.12}
                 legendType="none"
                 isAnimationActive={false}
@@ -412,7 +426,7 @@ export function CashflowPage() {
                 dataKey="netForecastBottom"
                 name="Прогноз (пессимист)"
                 stroke="none"
-                fill="#A78BFA"
+                fill={chartColor.accent2}
                 fillOpacity={0.12}
                 legendType="none"
                 isAnimationActive={false}
@@ -421,7 +435,7 @@ export function CashflowPage() {
                 type="monotone"
                 dataKey="netForecastMid"
                 name="Прогноз (реалист)"
-                stroke="#A78BFA"
+                stroke={chartColor.accent2}
                 strokeWidth={2}
                 strokeDasharray="5 3"
                 dot={false}
@@ -516,57 +530,25 @@ export function CashflowPage() {
 
       {allYears.length >= 2 && (
         <div className="card-tray card-pad">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
-            <div>
-              <div className="font-semibold">Год к году</div>
-              <div className="text-xs text-muted">
-                Сравнение с тем же месяцем годом ранее · вся история (период не влияет)
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-                <button
-                  onClick={() => setYoyKind("expense")}
-                  className={`px-3 py-1 text-xs rounded-full ${yoyKind === "expense" ? "bg-expense text-white" : "text-muted"}`}
-                >
-                  Расходы
-                </button>
-                <button
-                  onClick={() => setYoyKind("income")}
-                  className={`px-3 py-1 text-xs rounded-full ${yoyKind === "income" ? "bg-income text-white" : "text-muted"}`}
-                >
-                  Доходы
-                </button>
-              </div>
-              <div className="flex items-center gap-1 bg-panel2 rounded-full p-1 border border-border shadow-tray">
-                <button
-                  onClick={() =>
-                    setYoyYear((y) => {
-                      const idx = allYears.indexOf(y);
-                      return idx > 0 ? allYears[idx - 1] : y;
-                    })
-                  }
-                  disabled={allYears.indexOf(yoyYear) <= 0}
-                  className="p-1 hover:text-accent disabled:opacity-30"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <span className="px-3 text-sm font-medium tabular-nums">{yoyYear}</span>
-                <button
-                  onClick={() =>
-                    setYoyYear((y) => {
-                      const idx = allYears.indexOf(y);
-                      return idx < allYears.length - 1 ? allYears[idx + 1] : y;
-                    })
-                  }
-                  disabled={allYears.indexOf(yoyYear) >= allYears.length - 1}
-                  className="p-1 hover:text-accent disabled:opacity-30"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
+          {/* Расходы / доходы и год — общими контролами, как в «Календаре»:
+              своя дорожка с красной и зелёной заливкой и своя перелистывалка
+              года без подписи-кнопки повторяли их в другом виде. */}
+          <CardHeader
+            icon={CalendarRange}
+            title="Год к году"
+            subtitle="Сравнение с тем же месяцем годом ранее · вся история (период не влияет)"
+            right={
+              <>
+                <KindSwitcher kind={yoyKind} onChange={setYoyKind} />
+                <YearPicker
+                  year={yoyYear}
+                  minYear={allYears[0]}
+                  maxYear={allYears[allYears.length - 1]}
+                  onChange={pickYoyYear}
+                />
+              </>
+            }
+          />
           <div className="h-72">
             <ResponsiveContainer>
               <ComposedChart data={yoyData}>
@@ -585,14 +567,14 @@ export function CashflowPage() {
                 <Bar
                   dataKey="lastYear"
                   name={`${yoyYear - 1}`}
-                  fill="#A78BFA"
+                  fill={chartColor.accent2}
                   radius={[4, 4, 0, 0]}
                   activeBar={false}
                 />
                 <Bar
                   dataKey="thisYear"
                   name={`${yoyYear}`}
-                  fill={yoyKind === "expense" ? "#EF4444" : "#10B981"}
+                  fill={yoyKind === "expense" ? chartColor.expense : chartColor.income}
                   radius={[4, 4, 0, 0]}
                   activeBar={false}
                 />
@@ -605,17 +587,12 @@ export function CashflowPage() {
       {/* Seasonality */}
       {seasonality.some((s) => s.yearsSampled >= 2) && (
         <div className="card-tray card-pad">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-            <div>
-              <div className="font-semibold flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-warn" />
-                Сезонность расходов
-              </div>
-              <div className="text-xs text-muted">
-                Средний расход по месяцу года, цветом — отклонение от общего среднего · вся история (период не влияет)
-              </div>
-            </div>
-          </div>
+          <CardHeader
+            icon={Sparkles}
+            tone="warn"
+            title="Сезонность расходов"
+            subtitle="Средний расход по месяцу года, цветом — отклонение от общего среднего · вся история (период не влияет)"
+          />
           <div className="h-64">
             <ResponsiveContainer>
               <ComposedChart data={seasonality}>
@@ -664,9 +641,9 @@ export function CashflowPage() {
                   content={() => (
                     <div className="flex flex-wrap justify-center gap-4 pt-1 text-xs">
                       {[
-                        { label: "Ниже среднего", color: "#10B981" },
-                        { label: "Около среднего", color: "#A78BFA" },
-                        { label: "Выше среднего", color: "#EF4444" },
+                        { label: "Ниже среднего", color: chartColor.income },
+                        { label: "Около среднего", color: chartColor.accent2 },
+                        { label: "Выше среднего", color: chartColor.expense },
                       ].map((it) => (
                         <span key={it.label} className="inline-flex items-center gap-1.5" style={{ color: it.color }}>
                           <span style={{ width: 12, height: 12, borderRadius: 2, background: it.color }} />
@@ -680,7 +657,7 @@ export function CashflowPage() {
                   {seasonality.map((s, i) => {
                     const dev = s.expenseDeviationPct;
                     const color =
-                      dev > 0.15 ? "#EF4444" : dev < -0.15 ? "#10B981" : "#A78BFA";
+                      dev > 0.15 ? chartColor.expense : dev < -0.15 ? chartColor.income : chartColor.accent2;
                     return <Cell key={i} fill={color} />;
                   })}
                 </Bar>
@@ -710,81 +687,61 @@ export function CashflowPage() {
         </div>
       )}
 
-      <div className="card-tray card-pad">
-        <SortableTable<MonthBucket>
-          title="Помесячная сводка"
-          data={months}
-          rowKey={(m) => m.ym}
-          defaultSortKey="ym"
-          defaultSortDir="desc"
-          onRowClick={(m) => openMonth(m.ym)}
-          exportName="cashflow_monthly"
-          columns={[
-            {
-              key: "ym",
-              label: "Месяц",
-              sortValue: (m) => m.ym,
-              render: (m) => <span className="font-medium">{monthLabelFull(m.ym)}</span>,
-            },
-            {
-              key: "income",
-              label: "Доходы",
-              align: "right",
-              sortValue: (m) => m.income,
-              render: (m) => (
-                <span className="tabular-nums text-income">
-                  {formatMoney(m.income, base)}
-                </span>
-              ),
-            },
-            {
-              key: "expense",
-              label: "Расходы",
-              align: "right",
-              sortValue: (m) => m.expense,
-              render: (m) => (
-                <span className="tabular-nums text-expense">
-                  {formatMoney(m.expense, base)}
-                </span>
-              ),
-            },
-            {
-              key: "net",
-              label: "Чистый",
-              align: "right",
-              sortValue: (m) => m.net,
-              render: (m) => (
-                <span
-                  className={`tabular-nums font-medium ${
-                    m.net >= 0 ? "text-income" : "text-expense"
-                  }`}
-                >
-                  {formatMoney(m.net, base, { signed: true })}
-                </span>
-              ),
-            },
-            {
-              key: "rate",
-              label: "Норма сбер.",
-              align: "right",
-              sortValue: (m) => (m.income > 0 ? (m.income - m.expense) / m.income : -999),
-              render: (m) => {
-                const sr = m.income > 0 ? (m.income - m.expense) / m.income : 0;
-                return (
-                  <span className="tabular-nums text-muted">{(sr * 100).toFixed(0)}%</span>
-                );
-              },
-            },
-            {
-              key: "count",
-              label: "Операций",
-              align: "right",
-              sortValue: (m) => m.count,
-              render: (m) => <span className="text-muted">{m.count}</span>,
-            },
-          ]}
-        />
-      </div>
+      <DataTable<MonthBucket>
+        icon={TableIcon}
+        title="Помесячная сводка"
+        data={months}
+        rowKey={(m) => m.ym}
+        defaultSortKey="ym"
+        defaultSortDir="desc"
+        onRowClick={(m) => openMonth(m.ym)}
+        exportName="cashflow_monthly"
+        columns={[
+          {
+            key: "ym",
+            type: "text",
+            label: "Месяц",
+            sortValue: (m) => m.ym,
+            render: (m) => monthLabelFull(m.ym),
+          },
+          {
+            key: "income",
+            type: "money",
+            label: "Доходы",
+            sortValue: (m) => m.income,
+            render: (m) => formatMoney(m.income, base),
+          },
+          {
+            key: "expense",
+            type: "money",
+            label: "Расходы",
+            sortValue: (m) => m.expense,
+            render: (m) => formatMoney(m.expense, base),
+          },
+          {
+            key: "net",
+            type: "main",
+            tone: (m) => toneOfSigned(m.net),
+            label: "Чистый",
+            sortValue: (m) => m.net,
+            render: (m) => formatMoney(m.net, base, { signed: true }),
+          },
+          {
+            key: "rate",
+            type: "pct",
+            label: "Норма сбер.",
+            sortValue: (m) => (m.income > 0 ? (m.income - m.expense) / m.income : null),
+            render: (m) => (m.income > 0 ? formatPct((m.income - m.expense) / m.income, 0) : "—"),
+          },
+          {
+            key: "count",
+            type: "count",
+            label: "Операций",
+            sortValue: (m) => m.count,
+            render: (m) => formatNum(m.count),
+          },
+        ]}
+      />
     </div>
   );
 }

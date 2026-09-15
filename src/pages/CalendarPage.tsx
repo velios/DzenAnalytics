@@ -23,11 +23,12 @@ import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { Tooltip } from "../components/Tooltip";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
-import { Segmented } from "../components/Segmented";
-import { MonthPicker } from "../components/MonthPicker";
-import { StatCell } from "../components/SectionCard";
+import { KindSwitcher } from "../components/KindSwitcher";
+import { YearPicker } from "../components/MonthPicker";
+import { StatCell, StatRow } from "../components/SectionCard";
+import { SectionControls } from "../components/SectionControls";
 
-const WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTHS = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
@@ -199,106 +200,85 @@ export function CalendarPage() {
       <PageHeader
         icon={CalendarDays}
         title="Календарь"
-        hint="Тепловая карта по дням года"
-        right={
-          <div className="flex flex-wrap gap-2 items-center">
-            {/* Общие контролы вместо двух самодельных: свои пилюли и своя
-                перелистывалка года повторяли то, что в продукте уже есть, и
-                расходились с ними в мелочах. */}
-            <Segmented
-              value={kind}
-              onChange={setKind}
-              label="Что показывать на карте"
-              size="sm"
-              options={[
-                { value: "expense" as const, label: "Расходы", icon: TrendingDown },
-                { value: "income" as const, label: "Доходы", icon: TrendingUp },
-              ]}
-            />
-            <MonthPicker
-              value={`${year}-01`}
-              minYM={`${yearMin}-01`}
-              maxYM={`${yearMax}-12`}
-              active
-              mode="year"
-              onSelect={(ym) => setYear(Number(ym.slice(0, 4)))}
-              onSelectYear={setYear}
-              onStep={(dir) => setYear((y) => Math.min(yearMax, Math.max(yearMin, y + dir)))}
-            />
-            <InfoPopover>
-              <p>
-                Каждая клетка — день года, её цвет — сколько в этот день{" "}
-                {kind === "expense" ? "потрачено" : "получено"}. Пороги оттенков
-                считаются по <InfoTerm>вашим же дням</InfoTerm> этого года, а не
-                по круглым суммам: самый насыщенный цвет — не «сто тысяч», а
-                «ваш самый дорогой день». Поэтому карта одинаково читается и при
-                тратах в тысячу рублей в день, и при тратах в сто тысяч.
-              </p>
-              <p>
-                Пустая клетка — день без операций. Нажатие на день открывает его
-                операции.
-              </p>
-              <p>
-                Период в общем фильтре на этой странице не показан: его задаёт сам
-                календарь — выбранный год. Остальные фильтры (счета, статьи,
-                поиск) применяются.
-              </p>
-            </InfoPopover>
-          </div>
+        hint="В какие дни вы тратили или получали больше всего"
+        info={
+          <InfoPopover>
+            <p>
+              Каждая клетка — день года, её цвет — сколько в этот день{" "}
+              {kind === "expense" ? "потрачено" : "получено"}. Пороги оттенков
+              считаются по <InfoTerm>вашим же дням</InfoTerm> этого года, а не
+              по круглым суммам: самый насыщенный цвет — не «сто тысяч», а
+              «ваш самый дорогой день». Поэтому карта одинаково читается и при
+              тратах в тысячу рублей в день, и при тратах в сто тысяч.
+            </p>
+            <p>
+              Пустая клетка — день без операций. Нажатие на день открывает его
+              операции.
+            </p>
+            <p>
+              Период в общем фильтре на этой странице не показан: его задаёт сам
+              календарь — выбранный год. Остальные фильтры (счета, статьи,
+              поиск) применяются.
+            </p>
+          </InfoPopover>
         }
       />
       <GlobalFilters showDateRange={false} dateRangeHint="Период задаётся календарём ниже" />
 
+      {/* Расходы и доходы — рядом контролов раздела, тем же переключателем,
+          что в «Категориях» и «Топе»: он меняет всю карту, а не мелочь в
+          шапке. Год — там же, справа: это тоже настройка всей карты, и
+          подпись в общем фильтре «период задаётся календарём ниже» теперь
+          указывает туда, где он на самом деле. Общие контролы вместо
+          самодельных: свои пилюли и своя перелистывалка года расходились с
+          продуктом в мелочах. */}
+      <SectionControls>
+        <KindSwitcher kind={kind} onChange={setKind} size="md" />
+        <YearPicker year={year} minYear={yearMin} maxYear={yearMax} onChange={setYear} size="md" />
+      </SectionControls>
+
       {/* Пять чисел одним рядом с волосяными чертами — как итоги на других
           страницах. Пятью отдельными карточками они несли столько же рамок и
           отступов, сколько содержимого. */}
-      <div className="tray">
-        <div className="tray-core px-5 py-4">
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-x-4 gap-y-4 divide-border lg:divide-x">
-            <StatCell
-              label={`Расходы за ${year}`}
-              value={formatMoney(yearStats.total, base)}
-              icon={<TrendingDown className="w-4 h-4" />}
-              tone="expense"
-              note={plannedNote(plannedYear.planExpense, plannedYear.fcExpense, base)}
-            />
-            <StatCell
-              label={`Доходы за ${year}`}
-              value={formatMoney(yearStats.totalInc, base)}
-              icon={<TrendingUp className="w-4 h-4" />}
-              tone="income"
-              note={plannedNote(plannedYear.planIncome, plannedYear.fcIncome, base)}
-              pad
-            />
-            <StatCell
-              label={`Накопления за ${year}`}
-              value={formatMoney(savingsYear, base, { signed: true })}
-              icon={<PiggyBank className="w-4 h-4" />}
-              tone={savingsYear > 0 ? "income" : savingsYear < 0 ? "expense" : "default"}
-              note="переводы на копилки минус с них"
-              pad
-            />
-            <StatCell
-              label="Операций"
-              value={formatNum(yearStats.count)}
-              icon={<Receipt className="w-4 h-4" />}
-              note={`${formatNum(daysInYear(year))} дней в году`}
-              pad
-            />
-            <StatCell
-              label="Активных дней"
-              value={`${formatNum(yearStats.activeDays)} из ${formatNum(daysInYear(year))}`}
-              icon={<CalendarCheck className="w-4 h-4" />}
-              note={
-                daysInYear(year) > 0
-                  ? `${Math.round((yearStats.activeDays / daysInYear(year)) * 100)}% дней с операциями`
-                  : undefined
-              }
-              pad
-            />
-          </div>
-        </div>
-      </div>
+      <StatRow>
+        <StatCell
+          label={`Расходы за ${year}`}
+          value={formatMoney(yearStats.total, base)}
+          icon={<TrendingDown className="w-4 h-4" />}
+          tone="expense"
+          note={plannedNote(plannedYear.planExpense, plannedYear.fcExpense, base)}
+        />
+        <StatCell
+          label={`Доходы за ${year}`}
+          value={formatMoney(yearStats.totalInc, base)}
+          icon={<TrendingUp className="w-4 h-4" />}
+          tone="income"
+          note={plannedNote(plannedYear.planIncome, plannedYear.fcIncome, base)}
+        />
+        <StatCell
+          label={`Накопления за ${year}`}
+          value={formatMoney(savingsYear, base, { signed: true })}
+          icon={<PiggyBank className="w-4 h-4" />}
+          tone={savingsYear > 0 ? "income" : savingsYear < 0 ? "expense" : "default"}
+          note="переводы на копилки минус с них"
+        />
+        <StatCell
+          label="Операций"
+          value={formatNum(yearStats.count)}
+          icon={<Receipt className="w-4 h-4" />}
+          note={`${formatNum(daysInYear(year))} дней в году`}
+        />
+        <StatCell
+          label="Активных дней"
+          value={`${formatNum(yearStats.activeDays)} из ${formatNum(daysInYear(year))}`}
+          icon={<CalendarCheck className="w-4 h-4" />}
+          note={
+            daysInYear(year) > 0
+              ? `${Math.round((yearStats.activeDays / daysInYear(year)) * 100)}% дней с операциями`
+              : undefined
+          }
+        />
+      </StatRow>
 
       <div className="card-tray card-pad">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

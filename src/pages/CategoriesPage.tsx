@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
+import { Select } from "../components/Select";
 import { useSearchParams } from "react-router-dom";
 import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
-import { ChevronRight, ChevronDown, Maximize2, X, BarChart3, LayoutGrid } from "lucide-react";
+import { Maximize2, X, BarChart3, LayoutGrid } from "lucide-react";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -10,21 +11,21 @@ import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { useFiltersStore, applyFilters, presetToRange } from "../store/useFiltersStore";
 import { previousWindows } from "../lib/period";
 import { buildHierarchy, type CategoryNode } from "../lib/aggregations";
-import { DeviationPill } from "../components/DeviationPill";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { affectsExpense } from "../lib/txKindStyle";
 import { colorForCategory, subcategoryColor } from "../lib/categoryColor";
-import { formatMoney, formatPct, currencySymbol } from "../lib/format";
+import { formatMoney, formatPct } from "../lib/format";
 import { Segmented } from "../components/Segmented";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { CategorySunburst } from "../components/CategorySunburst";
-import { CategoryDot } from "../components/CategoryDot";
+import { CategoryTable, type CategoryTableRow } from "../components/CategoryTable";
 import { KindSwitcher } from "../components/KindSwitcher";
 import { PieChart as PieChartIcon } from "lucide-react";
 import type { Transaction } from "../types";
+import { SectionControls } from "../components/SectionControls";
 
 const COLORS = [
   "#22D3EE", "#A78BFA", "#F59E0B", "#10B981", "#EF4444",
@@ -294,6 +295,7 @@ export function CategoriesPage() {
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
 
   const [view, setView] = useState<View>("rings");
+  const [exportSlot, setExportSlot] = useState<HTMLSpanElement | null>(null);
   // С главной сюда приходят по ссылке из виджета-кольца, и она говорит, какой
   // вид открыть: кольцо расходов ведёт к расходам, кольцо доходов — к доходам.
   // Без этого раздел всегда открывался расходами, и с кольца доходов человек
@@ -389,22 +391,6 @@ export function CategoriesPage() {
   // round. A category with no baseline (brand-new, nothing in the prior
   // windows) reads as fully above average → «∞» in percent mode.
   /** Отклонение от среднего за N месяцев. Разметка — общая с «Сравнением». */
-  function devPill(cur: number, avg: number | undefined) {
-    return (
-      <DeviationPill
-        current={cur}
-        baseline={avg}
-        base={base}
-        asPct={devPct}
-        kind={kind}
-        comparable={avgComp.comparable}
-        sameLabel="≈ среднее"
-        upTitle="Выше среднего"
-        downTitle="Ниже среднего"
-      />
-    );
-  }
-
   // Category lookup by name — shared by the «Все категории» bar tooltip and
   // the treemap tooltip below.
   const catByName = useMemo(() => {
@@ -511,20 +497,40 @@ export function CategoriesPage() {
       kind === "expense" ? "Расходы по подкатегории" : "Доходы по подкатегории"
     );
   }
-  function toggleExpand(name: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }
-  function expandAll() {
-    setExpanded(new Set(tree.filter((n) => n.subs.length > 0).map((n) => n.name)));
-  }
-  function collapseAll() {
-    setExpanded(new Set());
-  }
+
+  // Строки таблицы «Полос»: категории и их подкатегории с тем же средним.
+  const barRows = useMemo<CategoryTableRow[]>(
+    () =>
+      tree.map((node) => {
+        const color = resolvedCategoryColors[node.name] || COLORS[0];
+        return {
+          key: node.name,
+          name: node.name,
+          value: node.total,
+          count: node.count,
+          share: totalAll > 0 ? node.total / totalAll : 0,
+          compare: avgComp.cat.get(node.name),
+          color,
+          children: node.subs
+            .filter((sub) => sub.total > 0)
+            .map((sub) => {
+              const own = subcategoryColor(sub.fullName, categoryMeta) || color;
+              return {
+                key: sub.fullName,
+                name: sub.name,
+                parent: node.name,
+                value: sub.total,
+                count: sub.count,
+                share: totalAll > 0 ? sub.total / totalAll : 0,
+                compare: avgComp.sub.get(sub.fullName),
+                color: own,
+                dotFallback: own,
+              };
+            }),
+        };
+      }),
+    [tree, resolvedCategoryColors, totalAll, avgComp, categoryMeta]
+  );
 
   if (transactions.length === 0) return <EmptyState />;
 
@@ -533,23 +539,26 @@ export function CategoriesPage() {
       <PageHeader
         icon={PieChartIcon}
         title="Категории"
-        hint="Данные и аналитика с разбивкой по категориям и подкатегориям"
-        right={
-          <div className="flex flex-wrap gap-2">
-            <Segmented
-              value={view}
-              onChange={setView}
-              label="Как показать категории"
-              options={[
-                { value: "rings", label: "Donut", title: "Кольцо: доли категорий друг относительно друга", icon: PieChartIcon },
-                { value: "bars", label: "Bars", title: "Полосы: категории списком, со сравнением со средним", icon: BarChart3 },
-                { value: "treemap", label: "Treemap", title: "Плитки: площадь плитки — доля категории", icon: LayoutGrid },
-              ]}
-            />
-          </div>
-        }
+        hint="Структура расходов и доходов по категориям"
       />
       <GlobalFilters />
+
+      {/* Сторона слева, вид справа — как в «Топе». Прежде вид стоял в шапке
+          страницы, а «Расходы / Доходы» — внутри карточки, у каждого вида
+          на своём месте. */}
+      <SectionControls>
+        <KindSwitcher kind={kind} onChange={setKind} size="md" />
+        <Segmented
+          value={view}
+          onChange={setView}
+          label="Как показать категории"
+          options={[
+            { value: "rings", label: "Кольцо", title: "Доли категорий друг относительно друга", icon: PieChartIcon },
+            { value: "bars", label: "Полосы", title: "Категории списком, со сравнением со средним", icon: BarChart3 },
+            { value: "treemap", label: "Плитки", title: "Площадь плитки — доля категории", icon: LayoutGrid },
+          ]}
+        />
+      </SectionControls>
 
       <div>
         <div className="card-tray card-pad">
@@ -557,48 +566,50 @@ export function CategoriesPage() {
               own header (kind badge + scope + big total) so all three read as
               one family. Donut carries its own header, so this is hidden there. */}
           {view !== "rings" && (
-            <div className="mb-4 flex items-start justify-between gap-2">
-              <div>
-                <div className="mb-4">
-                  <KindSwitcher kind={kind} onChange={setKind} />
-                </div>
-                <div>
-                  <span
-                    className={`inline-flex px-4 py-1 rounded-full text-3xl font-bold tabular-nums ${
-                      kind === "expense" ? "bg-expense/15 text-expense" : "bg-income/15 text-income"
-                    }`}
+            <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+              <span
+                className={`inline-flex px-4 py-1 rounded-full text-3xl font-bold tabular-nums ${
+                  kind === "expense" ? "bg-expense/15 text-expense" : "bg-income/15 text-income"
+                }`}
+              >
+                {formatMoney(totalAll, base)}
+              </span>
+              <div className="flex items-center gap-2">
+                {view === "treemap" && (
+                  <button
+                    onClick={() => setTreemapFull(true)}
+                    className="btn-ghost text-xs"
+                    title="Открыть на весь экран"
                   >
-                    {formatMoney(totalAll, base)}
-                  </span>
-                </div>
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    На весь экран
+                  </button>
+                )}
+                {view === "bars" && (
+                  <>
+                    <label className="inline-flex items-center gap-2 text-xs text-muted">
+                      Сравнить со средним за
+                      <Select
+                        size="sm"
+                        className="w-24"
+                        value={String(avgMonths)}
+                        onChange={(v) => setAvgMonths(Number(v) as 3 | 6 | 12)}
+                        options={[
+                          { value: "3", label: "3 мес" },
+                          { value: "6", label: "6 мес" },
+                          { value: "12", label: "12 мес" },
+                        ]}
+                        ariaLabel="Сколько предыдущих месяцев усреднять"
+                        title="Сколько предыдущих месяцев усреднять для базовой линии"
+                      />
+                    </label>
+                    {/* Выгрузка таблицы — в этой же строке: своей шапки у
+                        таблицы нет, и отдельная строка ради «CSV» была бы
+                        пустой. */}
+                    <span ref={setExportSlot} className="flex" />
+                  </>
+                )}
               </div>
-              {view === "treemap" && (
-                <button
-                  onClick={() => setTreemapFull(true)}
-                  className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent shrink-0 mt-1"
-                  title="Открыть на весь экран"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                  На весь экран
-                </button>
-              )}
-              {view === "bars" && (
-                <label className="shrink-0 mt-1 inline-flex items-center gap-2 text-xs text-muted">
-                  Сравнить со средним за
-                  <select
-                    value={avgMonths}
-                    onChange={(e) =>
-                      setAvgMonths(Number(e.target.value) as 3 | 6 | 12)
-                    }
-                    className="input text-xs py-1 px-2 w-auto"
-                    title="Сколько предыдущих месяцев усреднять для базовой линии"
-                  >
-                    <option value={3}>3 мес</option>
-                    <option value={6}>6 мес</option>
-                    <option value={12}>12 мес</option>
-                  </select>
-                </label>
-              )}
             </div>
           )}
           {view === "rings" && (
@@ -607,7 +618,6 @@ export function CategoriesPage() {
               meta={categoryMeta}
               base={base}
               kind={kind}
-              onKindChange={setKind}
               onOpenCategory={openCategory}
               onOpenSubcategory={openSubcategory}
             />
@@ -616,223 +626,31 @@ export function CategoriesPage() {
             <div className="h-[450px] relative">{renderTreemap()}</div>
           )}
           {view === "bars" && (
-            <div
-              className="pr-1"
-              // Show EVERY category with spend/income — no inner scrollbar, the
-              // page scrolls instead (issue #34). Obeys the «Размер текста в
-              // таблицах» slider like the operation tables.
-              style={{ fontSize: "var(--tbl-font)" }}
-            >
-              {/* Column header — same shape & widths as the Donut legend so the
-                  two views feel identical. */}
-              <div className="bg-panel flex items-center gap-2 px-1.5 pb-1 mb-1 border-b border-border text-[0.85em] text-muted uppercase tracking-wide">
-                <span className="flex-1 min-w-0">Категория</span>
-                <span className="w-14 text-left shrink-0">%</span>
-                <span className="w-20 text-left shrink-0">Операции</span>
-                <span className="w-28 text-left shrink-0">Сумма</span>
-                <span
-                  className="w-28 text-left shrink-0"
-                  title={`Средний расход по категории за ${avgMonths} предыдущих ${avgMonths === 3 ? "месяца" : "месяцев"} (без текущего)`}
-                >
-                  Среднее
-                </span>
-                <button
-                  onClick={() => setDevPct((v) => !v)}
-                  className="w-28 text-left shrink-0 uppercase tracking-wide text-muted hover:text-accent inline-flex items-center gap-1"
-                  title={`Насколько текущий период выше/ниже среднего. Клик — переключить ${currencySymbol(base)} / %`}
-                >
-                  Отклонение
-                  <span className="normal-case rounded bg-panel2 px-1 text-[0.9em] leading-none text-text">
-                    {devPct ? "%" : currencySymbol(base)}
-                  </span>
-                </button>
-                <span className="w-8 shrink-0 flex items-center justify-center">
-                  {(() => {
-                    const expandable = tree.filter((n) => n.subs.some((s) => s.total > 0));
-                    if (expandable.length === 0) return null;
-                    const allExpanded = expandable.every((n) => expanded.has(n.name));
-                    return (
-                      <button
-                        onClick={() => (allExpanded ? collapseAll() : expandAll())}
-                        title={allExpanded ? "Свернуть все" : "Развернуть все"}
-                        aria-label={allExpanded ? "Свернуть все" : "Развернуть все"}
-                        className="-m-1 p-1 rounded-full text-muted transition-colors hover:text-accent hover:bg-panel2"
-                      >
-                        <ChevronDown
-                          className={`w-4 h-4 transition-transform duration-300 ${
-                            allExpanded ? "rotate-180" : ""
-                          }`}
-                        />
-                      </button>
-                    );
-                  })()}
-                </span>
-              </div>
-              <div className="space-y-0.5">
-                {tree.map((node) => {
-                  const color = resolvedCategoryColors[node.name] || COLORS[0];
-                  const isOpen = expanded.has(node.name);
-                  const hasSubs = node.subs.some((s) => s.total > 0);
-                  // Bars are scaled to the largest CURRENT category, so the top
-                  // bar fills the track and lengths read as proportional. The
-                  // average marker clamps to the right edge when it's off-scale
-                  // (its exact value stays in the tooltip) — otherwise a single
-                  // big average value would squash every bar.
-                  const maxTotal = tree[0]?.total || 1;
-                  const barPct = Math.max(0, (node.total / maxTotal) * 100);
-                  const avgCat = avgComp.cat.get(node.name);
-                  return (
-                    <div key={node.name}>
-                      <div
-                        className="flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-panel2/50 cursor-pointer"
-                        onClick={() => openCategory(node.name)}
-                      >
-                        <CategoryDot category={node.name} size="w-7 h-7" />
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate" title={node.name}>
-                            {node.name}
-                          </div>
-                          <div className="relative h-2 mt-1 mr-3">
-                            <div className="absolute inset-0 bg-panel2 rounded-full overflow-hidden">
-                              <div
-                                className="h-full rounded-full"
-                                style={{ width: `${barPct}%`, background: color }}
-                              />
-                            </div>
-                            {avgComp.comparable && avgCat !== undefined && avgCat > 0 && (
-                              <div
-                                className="absolute top-1/2 -translate-y-1/2 w-0 border-l-2 border-solid border-text/80"
-                                style={{
-                                  left: `${Math.min(100, (avgCat / maxTotal) * 100)}%`,
-                                  height: "200%",
-                                }}
-                                title={`Среднее за ${avgMonths} мес: ${formatMoney(avgCat, base)}`}
-                              />
-                            )}
-                          </div>
-                        </div>
-                        <span className="w-14 text-left tabular-nums shrink-0">
-                          {formatPct(node.total / totalAll, 1)}
-                        </span>
-                        <span className="w-20 text-left tabular-nums shrink-0">
-                          {node.count}
-                        </span>
-                        <span className="w-28 text-left tabular-nums shrink-0">
-                          {formatMoney(node.total, base)}
-                        </span>
-                        <span className="w-28 text-left text-muted tabular-nums shrink-0">
-                          {avgComp.comparable && avgCat !== undefined
-                            ? formatMoney(avgCat, base)
-                            : "—"}
-                        </span>
-                        <span className="w-28 text-left shrink-0">
-                          {devPill(node.total, avgCat)}
-                        </span>
-                        <span className="w-8 shrink-0 flex items-center justify-center">
-                          {hasSubs && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleExpand(node.name);
-                              }}
-                              className="p-1 rounded-full text-muted transition-colors hover:text-accent hover:bg-panel2"
-                              title={isOpen ? "Свернуть" : "Подкатегории"}
-                            >
-                              {isOpen ? (
-                                <ChevronDown className="w-5 h-5" />
-                              ) : (
-                                <ChevronRight className="w-5 h-5" />
-                              )}
-                            </button>
-                          )}
-                        </span>
-                      </div>
-
-                      {isOpen && hasSubs && (
-                        <div
-                          className="mb-2 space-y-0.5"
-                          style={{ marginLeft: "19px", borderLeft: `3px solid ${color}` }}
-                        >
-                          {node.subs
-                            .filter((s) => s.total > 0)
-                            .map((sub, idx) => {
-                              const own = subcategoryColor(sub.fullName, categoryMeta);
-                              const subColor = own || color;
-                              const subOpacity = own ? 1 : Math.max(0.4, 1 - idx * 0.12);
-                              return (
-                                <div
-                                  key={sub.fullName}
-                                  className="flex items-center gap-2 pl-2 pr-1.5 py-1.5 rounded-md hover:bg-panel2/50 cursor-pointer"
-                                  onClick={() => openSubcategory(sub.fullName)}
-                                >
-                                  {/* Icon badge (own icon/colour, else the parent's);
-                                      the coloured rail groups these rows as children. */}
-                                  <span className="shrink-0">
-                                    <CategoryDot
-                                      category={sub.name}
-                                      parent={node.name}
-                                      fallback={subColor}
-                                      size="w-6 h-6"
-                                    />
-                                  </span>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="truncate text-muted">{sub.name}</div>
-                                    <div className="relative h-1.5 mt-1 mr-3">
-                                      <div className="absolute inset-0 bg-panel2 rounded-full overflow-hidden">
-                                        <div
-                                          className="h-full rounded-full"
-                                          style={{
-                                            width: `${Math.max(0, (sub.total / maxTotal) * 100)}%`,
-                                            background: subColor,
-                                            opacity: subOpacity,
-                                          }}
-                                        />
-                                      </div>
-                                      {(() => {
-                                        const avgSub = avgComp.sub.get(sub.fullName);
-                                        if (!avgComp.comparable || avgSub === undefined || avgSub <= 0)
-                                          return null;
-                                        return (
-                                          <div
-                                            className="absolute top-1/2 -translate-y-1/2 w-0 border-l-2 border-solid border-text/70"
-                                            style={{
-                                              left: `${Math.min(100, (avgSub / maxTotal) * 100)}%`,
-                                              height: "200%",
-                                            }}
-                                            title={`Среднее за ${avgMonths} мес: ${formatMoney(avgSub, base)}`}
-                                          />
-                                        );
-                                      })()}
-                                    </div>
-                                  </div>
-                                  <span className="w-14 text-left text-muted tabular-nums shrink-0">
-                                    {formatPct(sub.total / totalAll, 1)}
-                                  </span>
-                                  <span className="w-20 text-left text-muted tabular-nums shrink-0">
-                                    {sub.count}
-                                  </span>
-                                  <span className="w-28 text-left text-muted tabular-nums shrink-0">
-                                    {formatMoney(sub.total, base)}
-                                  </span>
-                                  <span className="w-28 text-left text-muted tabular-nums shrink-0">
-                                    {avgComp.comparable && avgComp.sub.has(sub.fullName)
-                                      ? formatMoney(avgComp.sub.get(sub.fullName)!, base)
-                                      : "—"}
-                                  </span>
-                                  <span className="w-28 text-left shrink-0">
-                                    {devPill(sub.total, avgComp.sub.get(sub.fullName))}
-                                  </span>
-                                  <span className="w-8 shrink-0" />
-                                </div>
-                              );
-                            })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <CategoryTable
+              rows={barRows}
+              base={base}
+              kind={kind}
+              bar
+              barMax={tree[0]?.total || 1}
+              compare={{
+                label: "Среднее",
+                title: `Средний ${kind === "expense" ? "расход" : "доход"} по категории за ${avgMonths} предыдущих ${avgMonths === 3 ? "месяца" : "месяцев"} (без текущего)`,
+                changeLabel: "Отклонение",
+                changeTitle: "Насколько текущий период выше или ниже среднего",
+                comparable: avgComp.comparable,
+                sameLabel: "≈ среднее",
+                upTitle: "Выше среднего",
+                downTitle: "Ниже среднего",
+                markerLabel: `Среднее за ${avgMonths} мес`,
+                asPct: devPct,
+                onAsPctChange: setDevPct,
+              }}
+              expanded={expanded}
+              onExpandedChange={setExpanded}
+              onRowClick={(r) => (r.parent ? openSubcategory(r.key) : openCategory(r.key))}
+              exportName={`categories_${kind}`}
+              exportSlot={exportSlot}
+            />
           )}
         </div>
       </div>

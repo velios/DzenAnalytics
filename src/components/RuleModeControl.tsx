@@ -3,7 +3,6 @@ import {
   Ban,
   CalendarClock,
   ChevronDown,
-  HelpCircle,
   MousePointerClick,
   Play,
   Zap,
@@ -25,6 +24,7 @@ import {
 } from "../lib/ruleSchedule";
 import type { RuleMode } from "../lib/ruleMode";
 import type { RuleSchedule, ScheduleDepth, ScheduleEvery } from "../lib/ruleSchedule";
+import { InfoPopover } from "./InfoPopover";
 
 /**
  * Режим правила — одним контролом вместо трёх сегментов и кнопки расписания.
@@ -222,7 +222,7 @@ export function RuleModePanel({
                     setSchedule({ everyN: Math.min(999, Math.round(n)) });
                 }}
                 aria-label="Как часто, число"
-                className="input h-8 text-xs !px-2 !py-1 w-14 tabular-nums"
+                className="input h-[34px] text-xs !px-2 !py-1 w-14 tabular-nums"
               />
             )}
             <Select
@@ -267,7 +267,7 @@ export function RuleModePanel({
                         setSchedule({ depthN: Math.min(999, Math.round(n)) });
                     }}
                     aria-label="Глубина, число"
-                    className="input h-8 text-xs !px-2 !py-1 w-14 tabular-nums"
+                    className="input h-[34px] text-xs !px-2 !py-1 w-14 tabular-nums"
                   />
                 )}
                 <Select
@@ -311,31 +311,23 @@ export function RuleModePanel({
                 {push.text}
               </div>
             </div>
-            <Tooltip
-              content={
-                <>
-                  <p>
-                    Новые операции правило в режиме «Авто» размечает при каждой
-                    синхронизации, даже когда расписание стоит на «Только новые».
-                    Расписание и глубина — только про то, что уже лежит в истории.
-                  </p>
-                  <p>
-                    Минуты и часы идут сами, пока приложение открыто. Дни и месяцы
-                    ждут захода в приложение или синхронизации: браузерное
-                    приложение ночью не работает.
-                  </p>
-                  <p>
-                    Записанное правилом — обычная правка операции: видно в списке
-                    изменений, откатывается построчно. В облако она уедет по
-                    правилам вашего режима отправки — о нём третья строка.
-                  </p>
-                </>
-              }
-            >
-              <span className="shrink-0 text-muted hover:text-accent cursor-help">
-                <HelpCircle className="w-4 h-4" />
-              </span>
-            </Tooltip>
+            <InfoPopover label="Как работает «Авто»">
+              <p>
+                Новые операции правило в режиме «Авто» размечает при каждой
+                синхронизации, даже когда расписание стоит на «Только новые».
+                Расписание и глубина — только про то, что уже лежит в истории.
+              </p>
+              <p>
+                Минуты и часы идут сами, пока приложение открыто. Дни и месяцы
+                ждут захода в приложение или синхронизации: браузерное
+                приложение ночью не работает.
+              </p>
+              <p>
+                Записанное правилом — обычная правка операции: видно в списке
+                изменений, откатывается построчно. В облако она уедет по
+                правилам вашего режима отправки — о нём третья строка.
+              </p>
+            </InfoPopover>
             {onRunNow && every !== "off" && (
               <button
                 type="button"

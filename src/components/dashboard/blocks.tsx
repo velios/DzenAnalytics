@@ -65,6 +65,8 @@ import type { FreeMoneyModel } from "../../hooks/useFreeMoney";
 import type { PlanLeft } from "../../lib/freeMoney";
 import type { PlannedOp } from "../../lib/plannedOps";
 import type { Currency } from "../../types";
+import { SectionEmpty } from "../SectionEmpty";
+import { ProgressBar } from "../ProgressBar";
 
 /* ─────────────────────────────  мелочи  ───────────────────────────── */
 
@@ -455,7 +457,7 @@ export function AccountsList({
   onAccount?: (title: string) => void;
 }) {
   if (m.accounts.length === 0) {
-    return <div className="text-sm text-muted text-center py-6">Счетов пока нет</div>;
+    return <SectionEmpty variant="compact">Счетов пока нет</SectionEmpty>;
   }
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -531,9 +533,9 @@ export function CategoriesList({
   const rows = m.categories;
   if (rows.length === 0) {
     return (
-      <div className="text-sm text-muted text-center py-6">
+      <SectionEmpty variant="compact">
         За {monthLabel(m.ym)} расходов ещё не было
-      </div>
+      </SectionEmpty>
     );
   }
   // Полоса меряется от САМОЙ КРУПНОЙ статьи — так видно соотношение между
@@ -573,12 +575,12 @@ export function CategoriesList({
                   {formatMoney(c.expense, m.base)}
                 </span>
               </div>
-              <div className="h-2 mt-1 rounded-full bg-panel2 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-expense"
-                  style={{ width: `${frac * 100}%`, opacity: 0.35 + 0.65 * frac }}
-                />
-              </div>
+              <ProgressBar
+                value={frac}
+                tone="expense"
+                fillStyle={{ opacity: 0.35 + 0.65 * frac }}
+                className="mt-1"
+              />
             </div>
           </button>
         );
@@ -592,9 +594,9 @@ export function CategoriesList({
 export function UpcomingList({ m }: { m: DashboardModel }) {
   if (m.upcoming.length === 0) {
     return (
-      <div className="text-sm text-muted text-center py-6">
+      <SectionEmpty variant="compact">
         До конца месяца регулярных платежей не ждём
-      </div>
+      </SectionEmpty>
     );
   }
   return (
@@ -682,20 +684,20 @@ export function ZenPlannedList({
 }) {
   if (rows === null) {
     return (
-      <div className="text-sm text-muted text-center py-6">
+      <SectionEmpty variant="compact">
         Планы приезжают из Дзен-мани — подключите синхронизацию
-      </div>
+      </SectionEmpty>
     );
   }
   if (rows.length === 0) {
     return (
-      <div className="text-sm text-muted text-center py-6">
+      <SectionEmpty variant="compact">
         {/* Называем последний день окна, а не «конец месяца»: виджет смотрит
             вперёд ровно до этой даты, и точное число не оставляет вопроса,
             что именно проверили. Прежнее «ни впереди, ни просроченных»
             читалось как «планов нет вообще». */}
         Планов по {dayAndMonth(until)} нет — и ничего просроченного
-      </div>
+      </SectionEmpty>
     );
   }
   return (
@@ -941,7 +943,7 @@ export function ActivityHeat({
           const dayTone = future
             ? "text-muted/50"
             : hot
-              ? "text-white font-medium"
+              ? "text-on-tone font-medium"
               : step > 0
                 ? "text-text"
                 : "text-muted";
@@ -1237,12 +1239,7 @@ function AllowanceRing({ ratio, tone }: { ratio: number; tone: string }) {
  */
 function FreeBar({ ratio }: { ratio: number }) {
   return (
-    <div className="h-1.5 rounded-full bg-border/70 overflow-hidden" aria-hidden>
-      <div
-        className="h-full rounded-full bg-income transition-[width] duration-500"
-        style={{ width: `${Math.max(0, Math.min(1, ratio)) * 100}%` }}
-      />
-    </div>
+    <ProgressBar value={ratio} tone="income" />
   );
 }
 

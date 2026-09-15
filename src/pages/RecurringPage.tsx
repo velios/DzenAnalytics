@@ -4,13 +4,13 @@ import {
   Calendar,
   AlertCircle,
   TrendingUp,
-  TrendingDown,
   CalendarClock,
   Coins,
   Sparkles,
   ListChecks,
   Trash2,
   Undo2,
+  X,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
@@ -19,15 +19,22 @@ import { loadZenCache, type ZenCache } from "../lib/zenmoneyCache";
 import { plannedOps, ownPlannedOps, type PlannedOp } from "../lib/plannedOps";
 
 import { useMembersStore } from "../store/useMembersStore";
-import { formatMoney, formatDate, formatNum } from "../lib/format";
+import { formatMoney, formatDate, formatNum, formatPct } from "../lib/format";
 import { pluralRu } from "../lib/plural";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
+import { CardHeader } from "../components/CardHeader";
+import { Segmented } from "../components/Segmented";
+import { Switch } from "../components/Switch";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
-import { Stat } from "../components/Stat";
-import { SortableTable, type Column } from "../components/SortableTable";
+import { StatCell, StatRow } from "../components/SectionCard";
+import { DataTable, type Column, type Tone } from "../components/DataTable";
+import { DeviationPill } from "../components/DeviationPill";
 import { confirm } from "../store/useConfirmStore";
 import { usePlannedDeletionsStore } from "../store/usePlannedDeletionsStore";
+import { SectionEmpty } from "../components/SectionEmpty";
+import { ProgressBar } from "../components/ProgressBar";
+import { SectionControls } from "../components/SectionControls";
 
 // One pill per coarse cadence bucket, plus an "all" pseudo-option.
 // Order matches the user's likely usage frequency on this page:
@@ -101,17 +108,24 @@ function daysOverdue(iso: string, todayIso: string): number {
 }
 
 /** Signed, coloured amount for a planned op (shared by table + overdue list). */
-function plannedAmount(p: PlannedOp, base: string) {
+function plannedAmount(p: PlannedOp, base: string): string {
   const sign = p.kind === "income" ? "+" : p.kind === "expense" ? "−" : "";
-  const tone =
-    p.kind === "income" ? "text-income" : p.kind === "transfer" ? "text-muted" : "text-expense";
-  return (
-    <span className={`tabular-nums whitespace-nowrap ${tone}`}>
-      {sign}
-      {formatMoney(p.amountBase, base)}
-    </span>
-  );
+  return `${sign}${formatMoney(p.amountBase, base)}`;
 }
+
+/** Сторона плановой суммы: перевод — без цвета. */
+function plannedTone(p: PlannedOp): Tone {
+  return p.kind === "income" ? "income" : p.kind === "expense" ? "expense" : "neutral";
+}
+
+/**
+ * Уже этого таблицы запланированного и просроченного не сжимаются, а
+ * прокручиваются вбок. Ширины колонок в rem, текстовые делят остаток: пока
+ * колонки были в процентах, на экране около 1000 px подписи шапки обрезались
+ * («ДАТ…», «ПОВТО…»). 32,75rem — сумма узких колонок, по 8rem — на три
+ * текстовые. У просроченных сумма узких та же, поэтому колонки совпадают.
+ */
+const PLANNED_MIN_WIDTH = "57rem";
 
 export function RecurringPage() {
   const transactions = useDataStore((s) => s.transactions);
@@ -277,20 +291,18 @@ export function RecurringPage() {
     () => [
       {
         key: "date",
+        type: "date",
         label: "Дата",
-        width: "7%",
+        width: "5.5rem",
         sortValue: (p) => p.date,
-        render: (p) => (
-          <span className="text-muted whitespace-nowrap tabular-nums">
-            {formatDate(p.date, "short")}
-          </span>
-        ),
+        render: (p) => formatDate(p.date, "short"),
       },
       {
         key: "type",
+        type: "mark",
         label: "Тип",
-        align: "center",
-        width: "8%",
+        // Как «Задержка» у просроченных: колонки обеих таблиц стоят по одной линии.
+        width: "7.25rem",
         sortValue: (p) => (p.forecast ? 1 : 0),
         exportValue: (p) => (p.forecast ? "Прогноз" : "План"),
         render: (p) => (
@@ -305,59 +317,45 @@ export function RecurringPage() {
       },
       {
         key: "payee",
+        type: "text",
         label: "Получатель",
-        width: "16%",
         sortValue: (p) => p.payee || "",
-        render: (p) => (
-          <span className="block truncate font-semibold" title={p.payee || ""}>
-            {p.payee || "—"}
-          </span>
-        ),
+        render: (p) => p.payee || "—",
       },
       {
         key: "category",
+        type: "text",
+        muted: true,
         label: "Категория",
-        width: "19%",
         sortValue: (p) => p.category,
-        render: (p) => (
-          <span className="block truncate text-muted" title={p.category || ""}>
-            {p.category || "—"}
-          </span>
-        ),
+        render: (p) => p.category || "—",
       },
       {
         key: "comment",
+        type: "text",
+        muted: true,
         label: "Комментарий",
-        width: "22%",
         sortValue: (p) => p.comment || "",
-        render: (p) =>
-          p.comment ? (
-            <span className="block truncate text-muted" title={p.comment}>
-              {p.comment}
-            </span>
-          ) : (
-            <span className="text-muted/50">—</span>
-          ),
+        render: (p) => p.comment || "—",
       },
       {
         key: "account",
+        type: "text",
+        muted: true,
         label: "Счёт",
-        width: "15%",
+        width: "10rem",
         sortValue: (p) => p.account,
-        render: (p) => (
-          <span className="block truncate text-muted">
-            {p.kind === "transfer" ? `${p.account} → ${p.toAccount}` : p.account}
-          </span>
-        ),
+        cellTitle: (p) => (p.kind === "transfer" ? `${p.account} → ${p.toAccount}` : p.account),
+        render: (p) => (p.kind === "transfer" ? `${p.account} → ${p.toAccount}` : p.account),
       },
       {
         key: "amount",
+        type: "main",
+        tone: plannedTone,
         label: "Сумма",
-        align: "right",
-        width: "13%",
+        width: "10rem",
         sortValue: (p) => p.amountBase,
-        exportValue: (p) =>
-          (p.kind === "expense" ? -p.amountBase : p.amountBase).toFixed(2),
+        exportValue: (p) => (p.kind === "expense" ? -p.amountBase : p.amountBase).toFixed(2),
         render: (p) => plannedAmount(p, base),
       },
     ],
@@ -383,18 +381,15 @@ export function RecurringPage() {
     ...plannedColumns.filter((c) => c.key === "date"),
     {
       key: "late",
+      type: "mark",
+      tone: "warn",
       label: "Задержка",
-      align: "center",
-      width: "8%",
+      width: "7.25rem",
       // Сортировать нечего: порядок по задержке — это порядок по дате наоборот.
       sortable: false,
       render: (p) => {
         const d = daysOverdue(p.date, todayIso);
-        return (
-          <span className="text-warn tabular-nums whitespace-nowrap">
-            {formatNum(d)} {pluralRu(d, ["день", "дня", "дней"])}
-          </span>
-        );
+        return `${formatNum(d)} ${pluralRu(d, ["день", "дня", "дней"])}`;
       },
     },
     ...plannedColumns.filter((c) =>
@@ -402,14 +397,12 @@ export function RecurringPage() {
     ),
     ...plannedColumns
       .filter((c) => c.key === "amount")
-      .map((c) => ({ ...c, width: "10%" })),
+      .map((c) => ({ ...c, width: "7.5rem" })),
     {
       key: "act",
+      type: "actions",
       label: "",
-      align: "right",
-      width: "3%",
-      sortable: false,
-      exportSkip: true,
+      width: "2.5rem",
       render: (p) =>
         queuedDeletions[p.id] !== undefined ? (
           <button
@@ -442,159 +435,124 @@ export function RecurringPage() {
   const recurringColumns = useMemo<Column<RecurringCandidate>[]>(
     () => [
       {
-        // Traffic-light status: green = active (payments on schedule),
-        // red = inactive (no payment for more than ~2 expected cycles).
+        // Светофор: зелёный — платежи идут по графику, красный — платежа нет
+        // дольше двух ожидаемых циклов.
         key: "status",
+        type: "mark",
         label: "Статус",
-        align: "center",
-        width: "6%",
+        width: "5.75rem",
         sortValue: (c) => (c.stale ? "неактивен" : "активен"),
+        cellTitle: (c) =>
+          c.stale
+            ? `Неактивен: нет платежа ${c.daysSinceLast} дн. при периоде ~${c.avgIntervalDays} дн.`
+            : "Активен: платежи идут по графику",
         render: (c) => (
           <span
-            className={`inline-block w-2.5 h-2.5 rounded-full ${
+            className={`inline-block w-2.5 h-2.5 rounded-full align-middle ${
               c.stale ? "bg-expense" : "bg-income"
             }`}
-            title={
-              c.stale
-                ? `Неактивен: нет платежа ${c.daysSinceLast} дн. при периоде ~${c.avgIntervalDays} дн.`
-                : "Активен: платежи идут по графику"
-            }
           />
         ),
       },
       {
         key: "payee",
+        type: "text",
         label: "Получатель",
-        width: "15%",
         sortValue: (c) => c.payee,
-        render: (c) => (
-          <span className="block truncate font-medium" title={c.payee}>
-            {c.payee}
-          </span>
-        ),
+        render: (c) => c.payee,
       },
       {
         key: "category",
+        type: "text",
+        muted: true,
         label: "Категория",
-        width: "11%",
         sortValue: (c) => c.category,
-        render: (c) => (
-          <span className="block truncate text-muted" title={c.category}>
-            {c.category}
-          </span>
-        ),
+        render: (c) => c.category,
       },
       {
         key: "avgAmount",
+        type: "money",
         label: "Сумма ср.",
-        align: "right",
-        width: "9%",
+        width: "7.25rem",
         sortValue: (c) => c.avgAmount,
-        render: (c) => (
-          <span className="tabular-nums whitespace-nowrap">
-            {formatMoney(c.avgAmount, c.currency)}
-          </span>
-        ),
+        render: (c) => formatMoney(c.avgAmount, c.currency),
       },
       {
-        // Price-trend column — shows a small arrow + the % change of the *last*
-        // charge vs. the historical average. Empty cell for "flat" so the column
-        // stays visually quiet on the (majority) stable subscriptions.
+        // Последний платёж против исторического среднего. У ровных подписок —
+        // прочерк: колонка не рябит там, где ничего не меняется.
         key: "priceTrend",
+        type: "change",
         label: "Изменение",
-        align: "right",
-        width: "8%",
+        width: "7.75rem",
         sortValue: (c) => c.priceTrend.changePct,
-        render: (c) => {
-          const { priceFlag, changePct } = c.priceTrend;
-          if (priceFlag === "flat") return <span className="text-muted">—</span>;
-          const pct = (changePct * 100).toFixed(0);
-          const Icon = priceFlag === "up" ? TrendingUp : TrendingDown;
-          return (
-            <span
-              className={`inline-flex items-center justify-end gap-1 tabular-nums ${
-                priceFlag === "up" ? "text-warn" : "text-income"
-              }`}
-              title={
-                priceFlag === "up"
-                  ? "Последний платёж дороже исторического среднего"
-                  : "Последний платёж дешевле исторического среднего"
-              }
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {priceFlag === "up" ? "+" : ""}
-              {pct}%
-            </span>
-          );
-        },
+        render: (c) =>
+          c.priceTrend.priceFlag === "flat" ? (
+            <span className="text-muted">—</span>
+          ) : (
+            <DeviationPill
+              current={1 + c.priceTrend.changePct}
+              baseline={1}
+              base={c.currency}
+              asPct
+              kind="expense"
+              upTitle="Последний платёж дороже исторического среднего"
+              downTitle="Последний платёж дешевле исторического среднего"
+            />
+          ),
       },
       {
         key: "avgInterval",
+        type: "number",
         label: "Раз в",
-        align: "right",
-        width: "6%",
+        width: "5rem",
         sortValue: (c) => c.avgIntervalDays,
-        render: (c) => <span className="text-muted whitespace-nowrap">{c.avgIntervalDays} дн</span>,
+        render: (c) => `${formatNum(c.avgIntervalDays)} дн`,
       },
       {
         key: "occurrences",
+        type: "count",
         label: "Повторов",
-        align: "right",
-        width: "7%",
+        width: "7.25rem",
         sortValue: (c) => c.occurrences,
-        render: (c) => <span className="text-muted tabular-nums">{formatNum(c.occurrences)}</span>,
+        render: (c) => formatNum(c.occurrences),
       },
       {
         key: "consistency",
+        type: "pct",
         label: "Стабильность",
-        align: "right",
-        width: "12%",
+        width: "9.5rem",
         sortValue: (c) => c.consistency,
         render: (c) => (
-          <div className="flex items-center justify-end gap-2">
-            <div className="w-12 h-1.5 bg-panel2 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-accent"
-                style={{ width: `${c.consistency * 100}%` }}
-              />
-            </div>
-            <span className="text-xs text-muted tabular-nums w-10 text-right">
-              {(c.consistency * 100).toFixed(0)}%
-            </span>
-          </div>
+          <span className="flex items-center justify-end gap-2">
+            <ProgressBar value={c.consistency} className="w-12 shrink-0" />
+            <span className="w-10">{formatPct(c.consistency, 0)}</span>
+          </span>
         ),
       },
       {
         key: "lastDate",
+        type: "date",
         label: "Последний",
-        width: "8%",
+        width: "8rem",
         sortValue: (c) => c.lastDate,
-        render: (c) => (
-          <span className="text-muted whitespace-nowrap">{formatDate(c.lastDate, "short")}</span>
-        ),
+        render: (c) => formatDate(c.lastDate, "short"),
       },
       {
         key: "nextExpected",
+        type: "date",
         label: "Следующий",
-        width: "8%",
+        width: "8.25rem",
         sortValue: (c) => c.nextExpected,
-        render: (c) => (
-          <span className="text-muted whitespace-nowrap">
-            {formatDate(c.nextExpected, "short")}
-          </span>
-        ),
+        render: (c) => formatDate(c.nextExpected, "short"),
       },
       {
         key: "totalSpent",
+        type: "main",
+        tone: "expense",
         label: "Итого",
-        align: "right",
-        width: "10%",
+        width: "7.5rem",
         sortValue: (c) => c.totalSpent,
-        render: (c) => (
-          <span className="tabular-nums whitespace-nowrap text-expense font-medium">
-            {formatMoney(c.totalSpent, c.currency)}
-          </span>
-        ),
+        render: (c) => formatMoney(c.totalSpent, c.currency),
       },
     ],
     []
@@ -618,8 +576,8 @@ export function RecurringPage() {
       <PageHeader
         title="Регулярные платежи"
         icon={Repeat}
-        hint="Плановые операции из Дзен-мани и подписки, найденные по вашей истории"
-        right={
+        hint="Что скоро спишется, что подорожало и сколько уходит в год"
+        info={
           <InfoPopover label="Что на этой странице">
             <p>
               <InfoTerm>«Планы Дзен-мани»</InfoTerm> — то, что стоит в самом
@@ -665,94 +623,75 @@ export function RecurringPage() {
       />
 
       {/* Page-level tabs: Zen plans vs our own detection (#3). */}
-      <div className="flex gap-1 bg-panel2 rounded-full p-1 border border-border shadow-tray w-fit">
-        {PAGE_TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setPageTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-              pageTab === t.id ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
-            }`}
-          >
-            <t.icon className="w-4 h-4" />
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <SectionControls>
+        <Segmented
+          tabs
+          label="Разделы страницы"
+          value={pageTab}
+          onChange={setPageTab}
+          options={PAGE_TABS.map((t) => ({ value: t.id, label: t.label, icon: t.icon }))}
+        />
+      </SectionControls>
 
       {/* ══ Планы из Дзен-мани (issue #47) ══════════════════════════════════ */}
       {pageTab === "zen" && (
         <>
           {plannedUpcoming.length === 0 && plannedOverdue.length === 0 ? (
-            <div className="card-tray card-pad text-center py-12">
-              <CalendarClock className="w-10 h-10 text-muted mx-auto mb-3" />
-              <div className="font-medium mb-1">Нет запланированных операций из Дзен-мани</div>
-              <div className="text-sm text-muted max-w-md mx-auto">
-                {hiddenPlanned > 0 ? (
-                  <>
-                    Все планы этого аккаунта стоят на личных счетах других
-                    участников, поэтому здесь их нет — как и в приложении
-                    Дзен-мани. Кого считать собой и показывать ли чужое,
-                    задаётся в «Настройки → Данные → Участники аккаунта».
-                  </>
-                ) : (
-                  <>
-                    Планы и прогнозы появятся после синхронизации с Дзен-мани.
-                    Автоопределённые регулярные платежи — во вкладке «Планы
-                    DzenAnalytics».
-                  </>
-                )}
-              </div>
-            </div>
+            <SectionEmpty
+              icon={CalendarClock}
+              title="Нет запланированных операций из Дзен-мани"
+            >
+              {hiddenPlanned > 0 ? (
+                <>
+                  Все планы этого аккаунта стоят на личных счетах других
+                  участников, поэтому здесь их нет — как и в приложении
+                  Дзен-мани. Кого считать собой и показывать ли чужое,
+                  задаётся в «Настройки → Данные → Участники аккаунта».
+                </>
+              ) : (
+                <>
+                  Планы и прогнозы появятся после синхронизации с Дзен-мани.
+                  Автоопределённые регулярные платежи — во вкладке «Планы
+                  DzenAnalytics».
+                </>
+              )}
+            </SectionEmpty>
           ) : (
           <div className="card-tray card-pad space-y-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="font-semibold flex items-center gap-2">
-                <CalendarClock className="w-4 h-4 text-accent" />
-                Планируемые операции
-              </div>
-              <div className="flex gap-0.5 bg-panel2 rounded-full p-1 border border-border shadow-tray shrink-0">
-                {plannedTabs.map((t) => {
-                  const empty = plannedCounts[t.id] === 0;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setPlannedTab(t.id)}
-                      disabled={empty}
-                      title={empty ? "Нет таких операций в выбранном периоде" : undefined}
-                      className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
-                        effectiveTab === t.id
-                          ? "bg-accent text-accent-fg"
-                          : empty
-                            ? "text-muted/40 cursor-not-allowed"
-                            : "text-muted hover:text-text"
-                      }`}
-                    >
-                      {t.label}
-                      <span className="opacity-60"> {plannedCounts[t.id]}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <CardHeader
+              icon={CalendarClock}
+              title="Планируемые операции"
+              right={
+                <Segmented
+                  size="sm"
+                  label="Какие плановые операции показать"
+                  value={effectiveTab}
+                  onChange={setPlannedTab}
+                  className="shrink-0"
+                  options={plannedTabs.map((t) => ({
+                    value: t.id,
+                    label: t.label,
+                    count: plannedCounts[t.id],
+                    disabled: plannedCounts[t.id] === 0,
+                    title:
+                      plannedCounts[t.id] === 0
+                        ? "Нет таких операций в выбранном периоде"
+                        : undefined,
+                  }))}
+                />
+              }
+            />
 
             {/* Date-window filter for the plans table. */}
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-muted mr-1">Период:</span>
-              {PLANNED_PERIODS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPlannedPeriod(p.id)}
-                  className={`px-3 py-1 rounded-full border transition-colors ${
-                    plannedPeriod === p.id
-                      ? "bg-accent/10 border-accent/40 text-accent"
-                      : "border-border text-muted hover:text-text"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="label">Период</span>
+              <Segmented
+                tight
+                label="Период плановых операций"
+                value={plannedPeriod}
+                onChange={setPlannedPeriod}
+                options={PLANNED_PERIODS.map((p) => ({ value: p.id, label: p.label }))}
+              />
             </div>
 
             {/* Просроченное — та же таблица, что и ниже: разбирать его удобнее
@@ -787,9 +726,11 @@ export function RecurringPage() {
                     </p>
                   </InfoPopover>
                 </div>
-                <SortableTable<PlannedOp>
+                <DataTable<PlannedOp>
+                  bare
                   data={plannedOverdue}
                   columns={overdueColumns}
+                  minWidth={PLANNED_MIN_WIDTH}
                   rowKey={(p) => p.id}
                   defaultSortKey="date"
                   defaultSortDir="asc"
@@ -818,9 +759,11 @@ export function RecurringPage() {
                       : "Ничего не запланировано на будущее."}
               </div>
             ) : (
-              <SortableTable<PlannedOp>
+              <DataTable<PlannedOp>
+                bare
                 data={plannedShown}
                 columns={plannedColumns}
+                minWidth={PLANNED_MIN_WIDTH}
                 rowKey={(p) => p.id}
                 defaultSortKey="date"
                 defaultSortDir="asc"
@@ -837,137 +780,106 @@ export function RecurringPage() {
       {/* ══ Планы DzenAnalytics — автодетект по истории (#4) ════════════════ */}
       {pageTab === "dzen" && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Stat
-          dense
+          <StatRow>
+        <StatCell
           label="Найдено"
           value={formatNum(candidates.length)}
           icon={<Repeat className="w-4 h-4" />}
-          hint="регулярных платежей"
+          note="регулярных платежей"
         />
-        <Stat
-          dense
+        <StatCell
           label="≈ в месяц"
           value={formatMoney(totalMonthly, base)}
           tone="warn"
           icon={<Coins className="w-4 h-4" />}
-          hint="оценка нагрузки"
+          note="оценка нагрузки"
         />
-        <Stat
-          dense
+        <StatCell
           label="≈ в год"
           value={formatMoney(totalMonthly * 12, base)}
           tone="warn"
           icon={<Calendar className="w-4 h-4" />}
-          hint="экстраполяция"
+          note="экстраполяция"
         />
-        {/* "Подорожали" — clickable filter tile; matches the dense Stat look. */}
-        <button
-          type="button"
-          onClick={() => priceUpCount > 0 && setOnlyPriceUp((v) => !v)}
-          disabled={priceUpCount === 0}
-          className={`card p-3 text-left transition-colors ${
-            priceUpCount > 0 ? "hover:border-warn cursor-pointer" : "cursor-default"
-          } ${onlyPriceUp ? "border-warn ring-1 ring-warn/30" : ""}`}
+        {/* «Подорожали» фильтрует список ниже. Кликалась вся плитка — теперь
+            действие отдельной ссылкой: в ряду итогов остальные числа не
+            нажимаются, и по одному виду нельзя было понять, какое из них живое. */}
+        <StatCell
+          label="Подорожали"
+          value={formatNum(priceUpCount)}
+          tone={priceUpCount > 0 ? "warn" : "default"}
+          icon={<TrendingUp className="w-4 h-4" />}
+          note={priceUpCount > 0 ? undefined : "за всю историю"}
         >
-          <div className="flex items-center justify-between mb-0.5">
-            <div className="label">Подорожали</div>
-            <TrendingUp className={`w-4 h-4 ${priceUpCount > 0 ? "text-warn" : "text-muted"}`} />
-          </div>
-          <div
-            className={`text-xl font-semibold tabular-nums ${
-              priceUpCount > 0 ? "text-warn" : "text-muted"
-            }`}
-          >
-            {formatNum(priceUpCount)}
-          </div>
-          <div className="text-xs text-muted mt-1">
-            {priceUpCount > 0 ? "клик — показать только их" : "за всю историю"}
-          </div>
-        </button>
-      </div>
+          {priceUpCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setOnlyPriceUp((v) => !v)}
+              aria-pressed={onlyPriceUp}
+              className="text-xs mt-0.5 text-accent hover:underline"
+            >
+              {onlyPriceUp ? "Показать все" : "Показать только их"}
+            </button>
+          )}
+        </StatCell>
+      </StatRow>
 
       {/* Cadence filter — three mutually-exclusive pills + "Все", plus the
           active-only toggle. Hidden when nothing has been detected yet. */}
       {allCandidates.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-muted mr-1">Период:</span>
-          {(["all", "monthly", "weekly", "quarterly"] as const).map((c) => {
-            const label = c === "all" ? "Все" : CADENCE_LABEL[c];
-            const count =
-              c === "all"
-                ? filterPool.length
-                : filterPool.filter((x) => x.cadence === c).length;
-            const active = cadenceFilter === c;
-            return (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setCadenceFilter(c)}
-                className={`px-3 py-1 rounded-full border transition-colors ${
-                  active
-                    ? "bg-accent/10 border-accent/40 text-accent"
-                    : "border-border text-muted hover:text-text"
-                }`}
-              >
-                {label}
-                <span className="ml-1.5 opacity-60">{count}</span>
-              </button>
-            );
-          })}
+          <span className="label">Периодичность</span>
+          <Segmented
+            size="sm"
+            label="Периодичность платежей"
+            value={cadenceFilter}
+            onChange={setCadenceFilter}
+            options={(["all", "monthly", "weekly", "quarterly"] as const).map((c) => ({
+              value: c,
+              label: c === "all" ? "Все" : CADENCE_LABEL[c],
+              count:
+                c === "all"
+                  ? filterPool.length
+                  : filterPool.filter((x) => x.cadence === c).length,
+            }))}
+          />
           {onlyPriceUp && (
             <button
               type="button"
               onClick={() => setOnlyPriceUp(false)}
-              className="px-3 py-1 rounded-full border border-warn/40 bg-warn/10 text-warn"
+              className="chip chip-on"
+              aria-label="Снять фильтр «Только подорожавшие»"
             >
-              Только подорожавшие ×
+              Только подорожавшие
+              <X className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           )}
           {/* Active-only is a toggle, not a period — different style (switch)
               and pushed to the right edge so it doesn't read as a 5th pill. */}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={onlyActive}
-            onClick={() => setOnlyActive((v) => !v)}
+          <label
             title={"Только активные\nНеактивные — те, по которым пропущено больше двух ожидаемых платежей подряд."}
-            className={`ml-auto flex items-center gap-2 transition-colors ${
+            className={`ml-auto flex items-center gap-2 cursor-pointer transition-colors ${
               onlyActive ? "text-text" : "text-muted hover:text-text"
             }`}
           >
             <span>Только активные</span>
-            <span
-              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
-                onlyActive ? "bg-accent" : "bg-border"
-              }`}
-            >
-              <span
-                className={`inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
-                  onlyActive ? "translate-x-3.5" : "translate-x-0.5"
-                }`}
-              />
-            </span>
-          </button>
+            <Switch checked={onlyActive} onChange={setOnlyActive} label="Только активные" />
+          </label>
         </div>
       )}
 
       {candidates.length === 0 && (
-        <div className="card-tray card-pad text-center py-12">
-          <AlertCircle className="w-10 h-10 text-muted mx-auto mb-3" />
-          <div className="font-medium mb-1">Регулярных платежей не найдено</div>
-          <div className="text-sm text-muted">
-            Нужно минимум 3 повтора одного получателя с интервалом ~раз в месяц.
-          </div>
-        </div>
+        <SectionEmpty
+          icon={AlertCircle}
+          title="Регулярных платежей не найдено"
+        >
+          Нужно минимум 3 повтора одного получателя с интервалом ~раз в месяц.
+        </SectionEmpty>
       )}
 
       {upcoming.length > 0 && (
         <div className="card-tray card-pad">
-          <div className="font-semibold mb-3 flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-accent" />
-            Ближайшие ожидаемые
-          </div>
+          <CardHeader icon={Calendar} title="Ближайшие ожидаемые" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {upcoming.slice(0, 6).map((c) => {
               const daysUntil = Math.round(
@@ -999,24 +911,19 @@ export function RecurringPage() {
       )}
 
       {candidates.length > 0 && (
-        <div className="card-tray card-pad">
-          <SortableTable<RecurringCandidate>
-            title={
-              <span className="flex items-center gap-2">
-                <ListChecks className="w-4 h-4 text-accent" />
-                Все регулярные платежи
-              </span>
-            }
-            data={candidates}
-            columns={recurringColumns}
-            rowKey={(c) => c.payee + c.currency}
-            defaultSortKey="totalSpent"
-            defaultSortDir="desc"
-            onRowClick={openCandidate}
-            exportName="recurring_payments"
-            fixed
-          />
-        </div>
+        <DataTable<RecurringCandidate>
+          icon={ListChecks}
+          title="Все регулярные платежи"
+          data={candidates}
+          columns={recurringColumns}
+          // 66,25rem узких колонок и по ~8rem получателю и категории.
+          minWidth="82rem"
+          rowKey={(c) => c.payee + c.currency}
+          defaultSortKey="totalSpent"
+          onRowClick={openCandidate}
+          exportName="recurring_payments"
+          fixed
+        />
       )}
         </>
       )}

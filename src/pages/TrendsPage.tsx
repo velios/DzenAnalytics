@@ -17,8 +17,9 @@ import {
   Radar,
   Legend,
 } from "recharts";
-import { Activity, Calendar } from "lucide-react";
+import { Activity, Calendar, Clock, Grid3x3, LineChart as LineChartIcon, Radar as RadarIcon } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
+import { CardHeader } from "../components/CardHeader";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useLocalPeriod } from "../hooks/useLocalPeriod";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -36,6 +37,7 @@ import {
   chartTooltipProps,
   chartGridStroke,
   chartAxisStroke,
+  chartColor,
 } from "../lib/format";
 import { affectsExpense } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
@@ -43,10 +45,13 @@ import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { SeriesTooltip } from "../components/TooltipFacts";
-import { Stat } from "../components/Stat";
+import { StatCell, StatRow } from "../components/SectionCard";
+import { KindSwitcher } from "../components/KindSwitcher";
+import { Segmented } from "../components/Segmented";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { colorForCategory } from "../lib/categoryColor";
 import { useEffect } from "react";
+import { SectionControls } from "../components/SectionControls";
 
 export function TrendsPage() {
   const transactions = useDataStore((s) => s.transactions);
@@ -170,59 +175,41 @@ export function TrendsPage() {
       <PageHeader
         icon={Activity}
         title="Тренды"
-        hint="Помесячная динамика и паттерны по дням недели"
-        right={
-          <div className="flex flex-wrap gap-2">
-            <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-              <button
-                onClick={() => setKind("expense")}
-                className={`px-3 py-1 text-xs rounded-full ${kind === "expense" ? "bg-expense text-white" : "text-muted"}`}
-              >
-                Расходы
-              </button>
-              <button
-                onClick={() => setKind("income")}
-                className={`px-3 py-1 text-xs rounded-full ${kind === "income" ? "bg-income text-white" : "text-muted"}`}
-              >
-                Доходы
-              </button>
-            </div>
-            <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-              <button
-                onClick={() => setLevel("top")}
-                title="Группировать по верхнеуровневым категориям"
-                className={`px-3 py-1 text-xs rounded-full ${level === "top" ? "bg-accent text-accent-fg" : "text-muted"}`}
-              >
-                Крупно
-              </button>
-              <button
-                onClick={() => setLevel("full")}
-                title="Разбивать по подкатегориям"
-                className={`px-3 py-1 text-xs rounded-full ${level === "full" ? "bg-accent text-accent-fg" : "text-muted"}`}
-              >
-                Детально
-              </button>
-            </div>
-          </div>
-        }
+        hint="Когда вы тратите больше всего и как это меняется"
       />
       <GlobalFilters period={lp} />
 
+      {/* Сторона слева, детализация справа — рядом контролов раздела, как в
+          «Топе»: оба выбора перестраивают все графики страницы. */}
+      <SectionControls>
+        <KindSwitcher kind={kind} onChange={setKind} size="md" />
+        <Segmented
+          value={level}
+          onChange={setLevel}
+          label="Детализация категорий"
+          options={[
+            { value: "top" as const, label: "Крупно", title: "Группировать по верхнеуровневым категориям" },
+            { value: "full" as const, label: "Детально", title: "Разбивать по подкатегориям" },
+          ]}
+        />
+      </SectionControls>
+
       <div className="card-tray card-pad">
-        <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
-          <div>
-            <div className="font-semibold">Категории по месяцам</div>
-            <div className="text-xs text-muted">
+        <CardHeader
+          icon={LineChartIcon}
+          title="Категории по месяцам"
+          subtitle={
+            <>
               {selected.length === 0
                 ? `Авто: топ-5 категорий (${activeCategories.length})`
                 : `Выбрано: ${selected.length}`}
               {" · "}
               <button onClick={() => setSelected([])} className="text-accent hover:underline">
-                сбросить
+                Сбросить
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
         <div className="flex flex-wrap gap-1.5 mb-4">
           {allCategories.slice(0, 30).map((cat) => {
             const isActive = activeCategories.includes(cat);
@@ -232,13 +219,7 @@ export function TrendsPage() {
               <button
                 key={cat}
                 onClick={() => toggleCategory(cat)}
-                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                  isSelected
-                    ? "bg-accent/15 text-text border-accent"
-                    : isActive
-                      ? "bg-panel2 text-text border-border"
-                      : "bg-panel2 text-muted border-border hover:border-accent/50"
-                }`}
+                className={`chip chip-sm ${isSelected ? "chip-on" : isActive ? "text-text" : ""}`}
                 style={isActive ? { borderLeftWidth: 3, borderLeftColor: color } : {}}
               >
                 {cat}
@@ -289,15 +270,11 @@ export function TrendsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card-tray card-pad lg:col-span-2">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="font-semibold flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-accent" />
-                По дням недели
-              </div>
-              <div className="text-xs text-muted">Средний чек {kind === "expense" ? "расхода" : "дохода"} за день</div>
-            </div>
-          </div>
+          <CardHeader
+            icon={Calendar}
+            title="По дням недели"
+            subtitle={<>Средний чек {kind === "expense" ? "расхода" : "дохода"} за день</>}
+          />
           <div className="h-64">
             <ResponsiveContainer>
               <BarChart
@@ -330,7 +307,7 @@ export function TrendsPage() {
                   {dowChart.map((d, i) => (
                     <Cell
                       key={i}
-                      fill={d.isWeekend ? "#A78BFA" : kind === "expense" ? "#EF4444" : "#10B981"}
+                      fill={d.isWeekend ? chartColor.accent2 : kind === "expense" ? chartColor.expense : chartColor.income}
                     />
                   ))}
                 </Bar>
@@ -340,16 +317,11 @@ export function TrendsPage() {
         </div>
 
         <div className="card-tray card-pad">
-          <div className="mb-3">
-            <div className="font-semibold flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-accent" />
-              Радар
-            </div>
-            <div className="text-xs text-muted">
-              Средний чек {kind === "expense" ? "расхода" : "дохода"} за день —
-              форма недели
-            </div>
-          </div>
+          <CardHeader
+            icon={RadarIcon}
+            title="Радар"
+            subtitle={`Средний чек ${kind === "expense" ? "расхода" : "дохода"} за день — форма недели`}
+          />
           <div className="h-64">
             <ResponsiveContainer>
               <RadarChart data={radarData}>
@@ -363,8 +335,8 @@ export function TrendsPage() {
                 <Radar
                   dataKey="value"
                   name="Средний за день"
-                  stroke="#22D3EE"
-                  fill="#22D3EE"
+                  stroke={chartColor.accent}
+                  fill={chartColor.accent}
                   fillOpacity={0.3}
                   strokeWidth={2}
                 />
@@ -378,29 +350,29 @@ export function TrendsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Stat
+      <StatRow>
+        <StatCell
           label="Будни (среднее за день)"
           tone={kind === "expense" ? "expense" : "income"}
           value={formatMoney(weekdayAvg, base)}
-          hint={`Всего за будни: ${formatMoney(weekdayTotal, base)}`}
+          note={`Всего за будни: ${formatMoney(weekdayTotal, base)}`}
         />
-        <Stat
+        <StatCell
           label="Выходные (среднее за день)"
           tone="accent2"
           value={formatMoney(weekendAvg, base)}
-          hint={`Всего за выходные: ${formatMoney(weekendTotal, base)}`}
+          note={`Всего за выходные: ${formatMoney(weekendTotal, base)}`}
         />
-        <Stat
+        <StatCell
           label="Соотношение"
-          value={weekdayAvg > 0 ? `${(weekendAvg / weekdayAvg).toFixed(2)}×` : "—"}
-          hint={
+          value={weekdayAvg > 0 ? `${formatNum(weekendAvg / weekdayAvg, { fractionDigits: 2 })}×` : "—"}
+          note={
             weekendAvg > weekdayAvg
               ? "В выходные тратите больше за день"
               : "В будни тратите больше за день"
           }
         />
-      </div>
+      </StatRow>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <HourOfWeekHeatmap cells={howCells} kind={kind} base={base} />
@@ -468,12 +440,11 @@ function HourOfWeekHeatmap({
 
   return (
     <div className="card-tray card-pad flex flex-col">
-      <div className="font-semibold mb-1">
-        Когда вы {kind === "expense" ? "тратите" : "получаете"}
-      </div>
-      <div className="text-xs text-muted mb-3">
-        По дням недели и часам. Чем темнее клетка — тем больше сумма.
-      </div>
+      <CardHeader
+        icon={Grid3x3}
+        title={`Когда вы ${kind === "expense" ? "тратите" : "получаете"}`}
+        subtitle="По дням недели и часам. Чем темнее клетка — тем больше сумма."
+      />
       <div className="flex-1 flex items-center overflow-x-auto">
         <div className="grid w-full gap-[2px]" style={{ gridTemplateColumns: `auto repeat(24, minmax(18px, 1fr))` }}>
           <div></div>
@@ -560,16 +531,21 @@ function HourOfDayBars({
   }, [cells]);
 
   const peak = data.reduce((m, d) => (d.total > m.total ? d : m), data[0]);
-  const color = kind === "expense" ? "#EF4444" : "#10B981";
+  const color = kind === "expense" ? chartColor.expense : chartColor.income;
 
   return (
     <div className="card-tray card-pad flex flex-col">
-      <div className="font-semibold mb-1">По часам суток</div>
-      <div className="text-xs text-muted mb-3">
-        Сумма {kind === "expense" ? "расходов" : "доходов"} по каждому часу дня
-        за период.
-        {peak.total > 0 && ` Пик — около ${peak.hour}:00.`}
-      </div>
+      <CardHeader
+        icon={Clock}
+        title="По часам суток"
+        subtitle={
+          <>
+            Сумма {kind === "expense" ? "расходов" : "доходов"} по каждому часу дня
+            за период.
+            {peak.total > 0 && ` Пик — около ${peak.hour}:00.`}
+          </>
+        }
+      />
       <div className="flex-1 min-h-[240px]">
         <ResponsiveContainer>
           <BarChart data={data}>

@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExtraCategoriesLine } from "../components/ExtraCategoriesLine";
 import {
-  Search,
   Download,
   Plus,
-  Copy,
   Pencil,
-  Scissors,
   Trash2,
   Eye,
   Scale,
@@ -19,13 +15,10 @@ import {
   HandCoins,
   Calendar,
   Coins,
-  ChevronDown,
   PiggyBank,
-  XSquare,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
-import { useDisplayStore } from "../store/useDisplayStore";
 import { useEditsStore, type TransactionEdit } from "../store/useEditsStore";
 import { useDraftsStore } from "../store/useDraftsStore";
 import { useDeletedStore } from "../store/useDeletedStore";
@@ -36,37 +29,44 @@ import { useZenmoneyStore, getLiveAccountsFromCache } from "../store/useZenmoney
 import { confirm, useConfirmStore } from "../store/useConfirmStore";
 import { pluralRu } from "../lib/plural";
 import { EditTransactionModal } from "../components/EditTransactionModal";
+import { Checkbox } from "../components/Checkbox";
+import { OperationActions, OperationAmount, OperationCategory, OperationPayee } from "../components/operations/OperationCells";
+import { TONE_CLASS } from "../components/table/tableKit";
 import { SplitTransactionModal } from "../components/SplitTransactionModal";
 import { useSplitTransaction } from "../hooks/useSplitTransaction";
-import { Tooltip } from "../components/Tooltip";
 import { BulkEditModal } from "../components/BulkEditModal";
 import { confirmBulkDelete } from "../lib/confirmBulkDelete";
-import { transferTotals } from "../lib/aggregations";
-import { CategoryDot } from "../components/CategoryDot";
+import { kindTotals, transferTotals } from "../lib/aggregations";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { Popover } from "../components/Popover";
 import { PageHeader } from "../components/PageHeader";
-import { Stat } from "../components/Stat";
-import { formatMoney, formatNum, displayPayee, secondaryPayee, crossCurrencyReceived, payeeSearchText } from "../lib/format";
-import { kindColorClass, kindGlyphClass, kindLabel, kindSignGlyph } from "../lib/txKindStyle";
-import { pluralOps } from "../lib/plural";
+import { StatCell, StatRow } from "../components/SectionCard";
+import { formatMoney, formatNum, payeeSearchText } from "../lib/format";
+import { kindLabel, operationTone } from "../lib/txKindStyle";
 import type { Transaction, TxKind } from "../types";
+import { SectionEmpty } from "../components/SectionEmpty";
+import { SearchInput } from "../components/SearchInput";
+import { SortMenu, type SortOption } from "../components/SortMenu";
+import { SelectionBar } from "../components/SelectionBar";
+import { ScrollTopButton } from "../components/ScrollTopButton";
+import { DayHeader } from "../components/operations/DayHeader";
+import {
+  LazyListFooter,
+  OperationListHead,
+  OperationListRow,
+  OperationListTray,
+} from "../components/operations/OperationList";
 
 type SortMode = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
 
-/** Sort options for the compact sort menu. `field` picks the button glyph
+/** Sort options for the compact sort menu. `icon` is the button glyph
  *  (calendar vs coins), `dir` picks the arrow. */
-const SORT_OPTIONS: {
-  value: SortMode;
-  label: string;
-  field: "date" | "amount";
-  dir: "asc" | "desc";
-}[] = [
-  { value: "date-desc", label: "Дата ↓", field: "date", dir: "desc" },
-  { value: "date-asc", label: "Дата ↑", field: "date", dir: "asc" },
-  { value: "amount-desc", label: "Сумма ↓", field: "amount", dir: "desc" },
-  { value: "amount-asc", label: "Сумма ↑", field: "amount", dir: "asc" },
+const SORT_OPTIONS: SortOption<SortMode>[] = [
+  { value: "date-desc", label: "Дата ↓", icon: Calendar, dir: "desc" },
+  { value: "date-asc", label: "Дата ↑", icon: Calendar, dir: "asc" },
+  { value: "amount-desc", label: "Сумма ↓", icon: Coins, dir: "desc" },
+  { value: "amount-asc", label: "Сумма ↑", icon: Coins, dir: "asc" },
 ];
 
 /** The four operation kinds offered by the «Добавить» dropdown, in the order
@@ -82,23 +82,9 @@ const ADD_OPTIONS: {
   { kind: "expense", label: "Расход", Icon: ArrowDown, color: "text-expense" },
   { kind: "income", label: "Доход", Icon: ArrowUp, color: "text-income" },
   { kind: "refund", label: "Возврат", Icon: Undo2, color: "text-accent2" },
-  { kind: "transfer", label: "Перевод", Icon: ArrowLeftRight, color: "text-slate-400" },
+  { kind: "transfer", label: "Перевод", Icon: ArrowLeftRight, color: "text-muted" },
   { kind: "transfer", label: "Долг", Icon: HandCoins, color: "text-warn", debt: true },
 ];
-
-/**
- * For transfer transactions `payee` is blank. The "Счёт" column already
- * shows the source, so we only need to surface the target account in
- * the "Получатель" slot.
- */
-function transferCounterparty(t: Transaction): string | null {
-  if (t.kind !== "transfer") return null;
-  const from = t.outcomeAccount?.trim();
-  const to = t.incomeAccount?.trim();
-  if (!to) return null;
-  if (from && to === from) return null;
-  return to;
-}
 
 /**
  * Column templates are defined as CSS grid-template-columns and applied to
@@ -138,26 +124,21 @@ export function TransactionsPage() {
   const deleteTransactionMany = useDataStore((s) => s.deleteTransactionMany);
   const deletedCount = useDeletedStore((s) => s.deletedIds.length);
   const purgeDeleted = useDataStore((s) => s.purgeDeleted);
-  const pushMode = useZenmoneyStore((s) => s.pushMode);
+  const zenToken = useZenmoneyStore((s) => s.token);
   const [trashOpen, setTrashOpen] = useState(false);
   const trashRef = useRef<HTMLDivElement>(null);
 
-  /** Очистить корзину — тот же вопрос и то же действие, что на её странице:
-   *  безвозвратное удаление обязано спрашивать одинаково, откуда бы его ни
-   *  запустили. */
+  /** Удалить окончательно — тот же вопрос и то же действие, что на странице
+   *  «Удалённые»: безвозвратное удаление обязано спрашивать одинаково, откуда
+   *  бы его ни запустили. Только без Дзен-мани: там удалённое хранит сам
+   *  Дзен-мани, и стирать у нас нечего. */
   async function emptyTrash() {
     const n = deletedCount;
     if (n === 0) return;
-    const ops = pluralRu(n, ["операция", "операции", "операций"]);
-    const willBe = pluralRu(n, ["будет", "будут", "будут"]);
     const ok = await confirm({
-      title: "Очистить корзину окончательно?",
-      message:
-        `${formatNum(n)} ${ops} ${willBe} безвозвратно удалены из локального хранилища и исчезнут из корзины — восстановить их будет нельзя.` +
-        (pushMode !== "off"
-          ? " Уже удалённые в облаке Дзен-мани остаются удалёнными; операции, удаление которых ещё не отправлено в облако, могут вернуться при полной синхронизации."
-          : ""),
-      confirmLabel: "Очистить корзину",
+      title: "Удалить окончательно?",
+      message: `${formatNum(n)} ${pluralRu(n, ["операция будет", "операции будут", "операций будут"])} безвозвратно удалены из локального хранилища — вернуть их будет нельзя.`,
+      confirmLabel: "Удалить окончательно",
       tone: "danger",
     });
     if (!ok) return;
@@ -245,17 +226,6 @@ export function TransactionsPage() {
   // handled by <Popover>.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
-  const sortAnchorRef = useRef<HTMLDivElement>(null);
-
-  // ── Scroll-to-top FAB: shown once the user has scrolled the window
-  //    well past the first screen of the (often long) list. ─────────────
-  const [showTop, setShowTop] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setShowTop(window.scrollY > 600);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
   // ── Bulk selection + edit ──────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -451,19 +421,10 @@ export function TransactionsPage() {
   // Sums (in base currency) of the currently-selected rows, split by kind — so
   // the bulk bar shows how much income / expense / transfer is in the selection.
   // Refunds subtract from expense, as everywhere else.
-  const selectedTotals = useMemo(() => {
-    let inc = 0;
-    let exp = 0;
-    let xfer = 0;
-    for (const t of searched) {
-      if (!selected.has(t.id)) continue;
-      if (t.kind === "income") inc += t.amountBase;
-      else if (t.kind === "expense") exp += t.amountBase;
-      else if (t.kind === "refund") exp -= t.amountBase;
-      else if (t.kind === "transfer") xfer += t.amountBase;
-    }
-    return { inc, exp, xfer };
-  }, [searched, selected]);
+  const selectedTotals = useMemo(
+    () => kindTotals(searched.filter((t) => selected.has(t.id))),
+    [searched, selected]
+  );
 
   const visible = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
 
@@ -542,37 +503,32 @@ export function TransactionsPage() {
       />
       <GlobalFilters />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Stat
-          dense
+      <StatRow>
+        <StatCell
           label="Доходы"
           value={formatMoney(totals.inc, base)}
           tone="income"
           icon={<ArrowUp className="w-4 h-4" />}
         />
-        <Stat
-          dense
+        <StatCell
           label="Расходы"
           value={formatMoney(totals.exp, base)}
           tone="expense"
           icon={<ArrowDown className="w-4 h-4" />}
         />
-        <Stat
-          dense
+        <StatCell
           label="Прибыль"
           value={formatMoney(totals.net, base, { signed: true })}
           tone={totals.net >= 0 ? "income" : "expense"}
           icon={<Scale className="w-4 h-4" />}
         />
-        <Stat
-          dense
+        <StatCell
           label="Переводы"
           value={formatMoney(totals.xfer, base)}
           icon={<ArrowLeftRight className="w-4 h-4" />}
           tooltip="Сумма переводов между своими счетами за период"
         />
-        <Stat
-          dense
+        <StatCell
           label="Накопления"
           value={formatMoney(totals.savings, base, { signed: true })}
           tone={totals.savings > 0 ? "income" : totals.savings < 0 ? "expense" : "default"}
@@ -583,199 +539,152 @@ export function TransactionsPage() {
               : `Переводы НА накопительные счета минус переводы С них. Перевод между двумя накопительными даёт ноль. Учтено счетов: ${savingsAccounts.size} (включая архивные). Начальные остатки счетов не учитываются — только переводы.`
           }
         />
-        <Stat
-          dense
+        <StatCell
           label="Операций"
           value={formatNum(totals.count)}
           icon={<List className="w-4 h-4" />}
-          hint={pageSearch ? `из ${filtered.length} в фильтре` : undefined}
+          note={pageSearch ? `из ${filtered.length} в фильтре` : undefined}
         />
-      </div>
+      </StatRow>
 
-      {/* Двойной кант вокруг таблицы — как у карточек главной. */}
-      <div className="tray">
-      <div className="tray-core overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center gap-3 flex-wrap">
-          <div
-            className="relative flex-1 min-w-[220px]"
-            title={"Быстрый поиск по этой таблице\nИщет по получателю, комментарию, категории и счёту. Не сохраняется и на другие страницы не влияет."}
-          >
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
-            <input
+      <OperationListTray
+        toolbar={
+          <>
+            <SearchInput
+              size="sm"
               value={pageSearch}
-              onChange={(e) => setPageSearch(e.target.value)}
+              onChange={setPageSearch}
               placeholder="Быстрый поиск по таблице…"
-              className="input pl-9 text-xs py-1.5 h-[30px]"
+              title={"Быстрый поиск по этой таблице\nИщет по получателю, комментарию, категории и счёту. Не сохраняется и на другие страницы не влияет."}
+              className="flex-1 min-w-[220px]"
             />
-          </div>
-          {/* Compact sort — icon button (field glyph + direction) opening a
-              small menu with the four named options. */}
-          {apiConnected && (
-            <div className="relative" ref={addMenuRef}>
-              <button
-                onClick={() => setAddMenuOpen((o) => !o)}
-                className="btn-primary text-xs py-1.5 h-[30px] whitespace-nowrap"
-                title="Добавить новую операцию"
-                aria-haspopup="menu"
-                aria-expanded={addMenuOpen}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Добавить
-              </button>
+            {apiConnected && (
+              <div className="relative" ref={addMenuRef}>
+                <button
+                  onClick={() => setAddMenuOpen((o) => !o)}
+                  className="btn-primary text-xs whitespace-nowrap"
+                  title="Добавить новую операцию"
+                  aria-haspopup="menu"
+                  aria-expanded={addMenuOpen}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Добавить
+                </button>
+                <Popover
+                  open={addMenuOpen}
+                  anchorRef={addMenuRef}
+                  onClose={() => setAddMenuOpen(false)}
+                  align="left"
+                  matchWidth
+                  className="rounded-lg border border-border bg-panel shadow-xl py-1"
+                >
+                  {ADD_OPTIONS.map((opt, i) => (
+                    <button
+                      key={opt.label}
+                      role="menuitem"
+                      onClick={() => {
+                        setCreating(opt.kind);
+                        setCreatingDebt(!!opt.debt);
+                        setAddMenuOpen(false);
+                      }}
+                      className="animate-menu-item flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left hover:bg-panel2"
+                      style={{ animationDelay: `${i * 45}ms` }}
+                    >
+                      <opt.Icon className={`w-4 h-4 ${opt.color}`} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </Popover>
+              </div>
+            )}
+            <SortMenu
+              options={SORT_OPTIONS}
+              value={sortMode}
+              onChange={setSortMode}
+              onOpenChange={setSortOpen}
+            />
+            <button onClick={exportCsv} className="btn-ghost text-xs whitespace-nowrap">
+              <Download className="w-3.5 h-3.5" />
+              CSV
+            </button>
+            {/* «Удалённые» без Дзен-мани — меню, а не ссылка: чтобы стереть
+                спрятанное, приходилось идти на отдельную страницу и возвращаться
+                обратно. С Дзен-мани стирать у нас нечего — удалённые хранит он
+                сам, и остаётся простая ссылка без счётчика: номера наших
+                удалений копятся всю жизнь, и число на значке только росло бы. */}
+            <div ref={trashRef} className="relative">
+              {deletedCount > 0 && !zenToken ? (
+                <button
+                  type="button"
+                  onClick={() => setTrashOpen((o) => !o)}
+                  aria-haspopup="menu"
+                  aria-expanded={trashOpen}
+                  aria-label={`Удалённые операции: ${deletedCount}`}
+                  title="Удалённые"
+                  className="relative btn-ghost text-xs !px-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-expense text-on-tone text-[10px] leading-4 text-center tabular-nums">
+                    {deletedCount}
+                  </span>
+                </button>
+              ) : (
+                <Link
+                  to="/trash"
+                  className="relative btn-ghost text-xs !px-2"
+                  title="Удалённые"
+                  aria-label="Удалённые операции"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Link>
+              )}
               <Popover
-                open={addMenuOpen}
-                anchorRef={addMenuRef}
-                onClose={() => setAddMenuOpen(false)}
-                align="left"
-                matchWidth
-                className="rounded-lg border border-border bg-panel shadow-xl py-1"
+                open={trashOpen}
+                anchorRef={trashRef}
+                onClose={() => setTrashOpen(false)}
+                align="right"
+                className="card p-1.5 shadow-lg w-64"
               >
-                {ADD_OPTIONS.map((opt, i) => (
-                  <button
-                    key={opt.label}
-                    role="menuitem"
-                    onClick={() => {
-                      setCreating(opt.kind);
-                      setCreatingDebt(!!opt.debt);
-                      setAddMenuOpen(false);
-                    }}
-                    className="animate-menu-item flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left hover:bg-panel2"
-                    style={{ animationDelay: `${i * 45}ms` }}
-                  >
-                    <opt.Icon className={`w-4 h-4 ${opt.color}`} />
-                    {opt.label}
-                  </button>
-                ))}
+                <Link
+                  to="/trash"
+                  onClick={() => setTrashOpen(false)}
+                  className="w-full text-left rounded-lg px-3 py-2 hover:bg-panel2 flex gap-3 items-start"
+                >
+                  <Eye className="w-4 h-4 mt-0.5 shrink-0 text-accent" />
+                  <span>
+                    <span className="block text-sm font-medium">Просмотреть</span>
+                    <span className="block text-xs text-muted">
+                      Список удалённых и возврат
+                    </span>
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTrashOpen(false);
+                    void emptyTrash();
+                  }}
+                  className="w-full text-left rounded-lg px-3 py-2 hover:bg-panel2 flex gap-3 items-start"
+                >
+                  <Trash2 className="w-4 h-4 mt-0.5 shrink-0 text-expense" />
+                  <span>
+                    <span className="block text-sm font-medium">Удалить окончательно</span>
+                    <span className="block text-xs text-muted">
+                      Удалить {formatNum(deletedCount)}{" "}
+                      {pluralRu(deletedCount, ["операцию", "операции", "операций"])}{" "}
+                      безвозвратно
+                    </span>
+                  </span>
+                </button>
               </Popover>
             </div>
-          )}
-          <div ref={sortAnchorRef} className="relative shrink-0">
-            {(() => {
-              const active = SORT_OPTIONS.find((o) => o.value === sortMode)!;
-              const FieldIcon = active.field === "date" ? Calendar : Coins;
-              const DirIcon = active.dir === "desc" ? ArrowDown : ArrowUp;
-              return (
-                <button
-                  onClick={() => setSortOpen((o) => !o)}
-                  className="btn-ghost text-xs py-1.5 h-[30px] !px-2"
-                  title={`Сортировка: ${active.label}`}
-                  aria-haspopup="menu"
-                  aria-expanded={sortOpen}
-                >
-                  <FieldIcon className="w-3.5 h-3.5" />
-                  <DirIcon className="w-3 h-3" />
-                  <ChevronDown className="w-3 h-3 opacity-60" />
-                </button>
-              );
-            })()}
-            <Popover
-              open={sortOpen}
-              anchorRef={sortAnchorRef}
-              onClose={() => setSortOpen(false)}
-              align="left"
-              className="w-28 card p-2"
-            >
-              {SORT_OPTIONS.map((o) => {
-                const FieldIcon = o.field === "date" ? Calendar : Coins;
-                return (
-                  <button
-                    key={o.value}
-                    onClick={() => {
-                      setSortMode(o.value);
-                      setSortOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded hover:bg-panel2 ${
-                      sortMode === o.value
-                        ? "bg-panel2 text-accent2 font-medium"
-                        : ""
-                    }`}
-                  >
-                    <FieldIcon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="flex-1 min-w-0 truncate">{o.label}</span>
-                  </button>
-                );
-              })}
-            </Popover>
-          </div>
-          <button onClick={exportCsv} className="btn-ghost text-xs py-1.5 h-[30px] whitespace-nowrap">
-            <Download className="w-3.5 h-3.5" />
-            CSV
-          </button>
-          {/* Корзина — меню, а не ссылка: чтобы очистить её, приходилось идти на
-              отдельную страницу и возвращаться обратно. Пустая корзина остаётся
-              простой ссылкой: меню из одного пункта — лишний клик. */}
-          <div ref={trashRef} className="relative">
-            {deletedCount > 0 ? (
-              <button
-                type="button"
-                onClick={() => setTrashOpen((o) => !o)}
-                aria-haspopup="menu"
-                aria-expanded={trashOpen}
-                aria-label={`Удалённые операции: ${deletedCount}`}
-                title="Корзина"
-                className="relative btn-ghost text-xs py-1.5 h-[30px] !px-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-expense text-white text-[10px] leading-4 text-center tabular-nums">
-                  {deletedCount}
-                </span>
-              </button>
-            ) : (
-              <Link
-                to="/trash"
-                className="relative btn-ghost text-xs py-1.5 h-[30px] !px-2"
-                title="Корзина пуста"
-                aria-label="Удалённые операции"
-              >
-                <Trash2 className="w-4 h-4" />
-              </Link>
-            )}
-            <Popover
-              open={trashOpen}
-              anchorRef={trashRef}
-              onClose={() => setTrashOpen(false)}
-              align="right"
-              className="card p-1.5 shadow-lg w-64"
-            >
-              <Link
-                to="/trash"
-                onClick={() => setTrashOpen(false)}
-                className="w-full text-left rounded-lg px-3 py-2 hover:bg-panel2 flex gap-3 items-start"
-              >
-                <Eye className="w-4 h-4 mt-0.5 shrink-0 text-accent" />
-                <span>
-                  <span className="block text-sm font-medium">Просмотреть</span>
-                  <span className="block text-xs text-muted">
-                    Список удалённых, поштучное восстановление
-                  </span>
-                </span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  setTrashOpen(false);
-                  void emptyTrash();
-                }}
-                className="w-full text-left rounded-lg px-3 py-2 hover:bg-panel2 flex gap-3 items-start"
-              >
-                <Trash2 className="w-4 h-4 mt-0.5 shrink-0 text-expense" />
-                <span>
-                  <span className="block text-sm font-medium">Очистить</span>
-                  <span className="block text-xs text-muted">
-                    Удалить {formatNum(deletedCount)}{" "}
-                    {pluralRu(deletedCount, ["операцию", "операции", "операций"])}{" "}
-                    безвозвратно
-                  </span>
-                </span>
-              </button>
-            </Popover>
-          </div>
-        </div>
-
+          </>
+        }
+      >
         {sorted.length === 0 ? (
-          <div className="text-center text-muted text-sm py-16">
+          <SectionEmpty variant="inline">
             По текущим фильтрам ничего не найдено
-          </div>
+          </SectionEmpty>
         ) : groupedByDay ? (
           <div>
             <HeaderRow
@@ -827,19 +736,10 @@ export function TransactionsPage() {
           </div>
         )}
 
-        {/* Lazy-load sentinel — shown only while more rows remain to load.
-            The total count lives in the «Операций» widget above, so no
-            trailing "Всего N" row is rendered once everything is loaded. */}
         {showingTail && (
-          <div
-            ref={sentinelRef}
-            className="px-4 py-3 text-center text-xs text-muted border-t border-border"
-          >
-            Показано {visibleCount} из {sorted.length} — прокрутите дальше, чтобы загрузить ещё
-          </div>
+          <LazyListFooter shown={visibleCount} total={sorted.length} sentinelRef={sentinelRef} />
         )}
-      </div>
-      </div>
+      </OperationListTray>
 
       {splitting && (
         <SplitTransactionModal
@@ -905,67 +805,29 @@ export function TransactionsPage() {
         />
       )}
 
-      {/* Floating bulk-action bar — appears when ≥1 row is selected. */}
       {selected.size > 0 && (
-        <div
-          role="region"
-          aria-label="Массовые действия"
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 rounded-xl border border-border bg-panel shadow-xl max-w-[calc(100vw-1.5rem)] overflow-hidden"
+        <SelectionBar
+          count={selected.size}
+          totals={selectedTotals}
+          base={base}
+          onClear={() => setSelected(new Set())}
         >
-          {/* Row 1: count + per-kind sums of the selection. */}
-          <div className="flex items-center justify-center gap-x-4 gap-y-1 flex-wrap px-4 pt-2.5 pb-2 text-sm">
-            <span>
-              Выбрано: <strong className="tabular-nums">{formatNum(selected.size)}</strong>
-            </span>
-            {(selectedTotals.inc > 0 || selectedTotals.exp > 0 || selectedTotals.xfer > 0) && (
-              <span className="flex items-center gap-3 tabular-nums border-l border-border pl-4">
-                {selectedTotals.inc > 0 && (
-                  <span className="flex items-center gap-1 text-income">
-                    <ArrowUp className="w-3.5 h-3.5" />
-                    {formatMoney(selectedTotals.inc, base)}
-                  </span>
-                )}
-                {selectedTotals.exp > 0 && (
-                  <span className="flex items-center gap-1 text-expense">
-                    <ArrowDown className="w-3.5 h-3.5" />
-                    {formatMoney(selectedTotals.exp, base)}
-                  </span>
-                )}
-                {selectedTotals.xfer > 0 && (
-                  <span className="flex items-center gap-1 text-muted">
-                    <ArrowLeftRight className="w-3.5 h-3.5" />
-                    {formatMoney(selectedTotals.xfer, base)}
-                  </span>
-                )}
-              </span>
-            )}
-          </div>
-          {/* Row 2: actions. */}
-          <div className="flex items-center justify-center gap-2 flex-wrap px-4 pb-2.5 pt-2 border-t border-border">
-            <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
-              <Pencil className="w-4 h-4" />
-              Изменить
+          <button onClick={() => setBulkOpen(true)} className="btn-primary text-sm">
+            <Pencil className="w-4 h-4" />
+            Изменить
+          </button>
+          {selectedUnseen > 0 && (
+            <button onClick={markSeenBulk} className="btn-ghost text-sm">
+              <Eye className="w-4 h-4" />
+              Отметить просмотренными
+              <span className="tabular-nums text-muted">({selectedUnseen})</span>
             </button>
-            {selectedUnseen > 0 && (
-              <button onClick={markSeenBulk} className="btn-ghost text-sm">
-                <Eye className="w-4 h-4" />
-                Отметить просмотренными
-                <span className="tabular-nums text-muted">({selectedUnseen})</span>
-              </button>
-            )}
-            <button onClick={deleteBulk} className="btn-danger text-sm">
-              <Trash2 className="w-4 h-4" />
-              Удалить
-            </button>
-            <button
-              onClick={() => setSelected(new Set())}
-              className="btn-ghost text-sm text-muted"
-            >
-              <XSquare className="w-3.5 h-3.5" />
-              Снять выделение
-            </button>
-          </div>
-        </div>
+          )}
+          <button onClick={deleteBulk} className="btn-danger text-sm">
+            <Trash2 className="w-4 h-4" />
+            Удалить
+          </button>
+        </SelectionBar>
       )}
 
       {bulkOpen && (
@@ -977,17 +839,7 @@ export function TransactionsPage() {
         />
       )}
 
-      {/* Floating scroll-to-top button — appears once scrolled far down. */}
-      {showTop && (
-        <button
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="fixed bottom-6 right-6 z-30 w-10 h-10 rounded-full border border-border bg-panel shadow-xl flex items-center justify-center text-muted hover:text-accent transition-colors"
-          title="Наверх"
-          aria-label="Вернуться к началу списка"
-        >
-          <ArrowUp className="w-5 h-5" />
-        </button>
-      )}
+      <ScrollTopButton />
     </div>
   );
 }
@@ -1006,20 +858,13 @@ function HeaderRow({
 }) {
   const template = grouped ? GRID_COLS_NODATE : GRID_COLS_FULL;
   return (
-    <div
-      className="grid items-center gap-3 px-3 py-2 border-b border-border bg-panel text-[length:calc(var(--tbl-font)-0.125rem)] uppercase tracking-wider text-muted font-medium sticky top-0 z-20"
-      style={{ gridTemplateColumns: template }}
-    >
-      <input
-        type="checkbox"
-        className="accent-accent w-4 h-4"
+    <OperationListHead template={template}>
+      <Checkbox
         checked={allSelected}
-        ref={(el) => {
-          if (el) el.indeterminate = someSelected;
-        }}
+        indeterminate={someSelected}
         onChange={onToggleAll}
         title="Выбрать всё (под фильтрами)"
-        aria-label="Выбрать все операции"
+        label="Выбрать все операции"
       />
       {!grouped && <div>Дата</div>}
       <div>Категория</div>
@@ -1028,7 +873,7 @@ function HeaderRow({
       <div>Комментарий</div>
       <div className="text-right">Сумма</div>
       <div className="text-center">Действия</div>
-    </div>
+    </OperationListHead>
   );
 }
 
@@ -1062,71 +907,9 @@ function DayGroup({
   selected: Set<string>;
   onToggleSelect: (id: string) => void;
 }) {
-  const { label, weekday } = useMemo(() => formatDayHeader(ymd), [ymd]);
-  const totals = useMemo(() => {
-    let inc = 0;
-    let exp = 0;
-    let xfer = 0;
-    for (const t of txs) {
-      if (t.kind === "income") inc += t.amountBase;
-      else if (t.kind === "expense") exp += t.amountBase;
-      // Refund subtracts from the day header's expense total.
-      else if (t.kind === "refund") exp -= t.amountBase;
-      else if (t.kind === "transfer") xfer += t.amountBase;
-    }
-    return { inc, exp, xfer, net: inc - exp };
-  }, [txs]);
-
   return (
     <div>
-      <div className="px-4 py-2 border-b border-t border-border bg-panel2/60 flex items-center gap-3 text-sm">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <span className="font-semibold truncate">{label}</span>
-          {weekday && <span className="text-[13px] text-muted capitalize">{weekday}</span>}
-        </div>
-        <div className="ml-auto flex items-center gap-3 sm:gap-4 text-sm tabular-nums">
-          <span
-            className="flex items-center gap-1 text-muted whitespace-nowrap"
-            title={`${txs.length} ${pluralOps(txs.length)}`}
-          >
-            <List className="w-4 h-4" aria-hidden />
-            {txs.length}
-          </span>
-          {showTransfers && totals.xfer > 0 && (
-            <span
-              className="flex items-center gap-1 text-slate-400 whitespace-nowrap"
-              title="Переводы за день"
-            >
-              <ArrowLeftRight className="w-4 h-4" aria-hidden />
-              {formatMoney(totals.xfer, base)}
-            </span>
-          )}
-          {totals.inc > 0 && (
-            <span
-              className="flex items-center gap-1 text-income whitespace-nowrap"
-              title="Поступления за день"
-            >
-              <ArrowUp className="w-4 h-4" aria-hidden />
-              {formatMoney(totals.inc, base)}
-            </span>
-          )}
-          {totals.exp > 0 && (
-            <span
-              className="flex items-center gap-1 text-expense whitespace-nowrap"
-              title="Траты за день"
-            >
-              <ArrowDown className="w-4 h-4" aria-hidden />
-              {formatMoney(totals.exp, base)}
-            </span>
-          )}
-          <span
-            className={`px-2 py-0.5 rounded-md font-medium tabular-nums whitespace-nowrap ${totals.net >= 0 ? "bg-income/15 text-income" : "bg-expense/15 text-expense"}`}
-            title="Итог за день"
-          >
-            {formatMoney(totals.net, base, { signed: true })}
-          </span>
-        </div>
-      </div>
+      <DayHeader ymd={ymd} txs={txs} base={base} showTransfers={showTransfers} />
       {txs.map((t) => (
         <Row
           key={t.id}
@@ -1145,11 +928,6 @@ function DayGroup({
     </div>
   );
 }
-
-/** Порог двойного клика: на столько откладывается выделение строки, чтобы
- *  двойной клик успел его отменить. Меньше — двойной клик начинает мигать
- *  выделением, больше — выделение ощущается вялым. */
-const DOUBLE_CLICK_MS = 220;
 
 function Row({
   tx,
@@ -1175,265 +953,41 @@ function Row({
   onToggleSelect: () => void;
   hideDate?: boolean;
 }) {
-  // Что показывать второй строкой под контрагентом — настройка «Оформления».
-  const statementLine = useDisplayStore((s) => s.statementLine);
-  // Одиночный клик выделяет строку, двойной открывает редактор. Проблема в
-  // том, что двойной клик В ЛЮБОМ СЛУЧАЕ проходит через одиночные, и строка
-  // успевает мигнуть выделением. Поэтому выделение откладываем на порог
-  // двойного клика: пришёл второй клик — отменяем, не пришёл — выделяем.
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelPendingSelect = () => {
-    if (clickTimer.current) {
-      clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-    }
-  };
-  useEffect(() => cancelPendingSelect, []);
-
   const template = hideDate ? GRID_COLS_NODATE : GRID_COLS_FULL;
-  // Debt rides on kind=transfer, but gets its own accent (amber) instead of
-  // the transfer grey — so the feed matches the editor's «Долг» colour.
-  const amountColor =
-    tx.category === "Долг" ? "text-warn" : kindColorClass(tx.kind);
-  const amountSign = kindSignGlyph(tx.kind);
-  const amountSignClass = kindGlyphClass(tx.kind);
 
   return (
-    <div
-      // Одиночный клик выделяет строку, двойной открывает редактор. Двойной
-      // клик проходит через два одиночных, поэтому выделение переключается
-      // дважды и возвращается в исходное — состояние остаётся верным.
-      // Клики по кнопкам и ссылкам внутри строки не должны выделять: у них
-      // своё действие, и попутное выделение читалось бы как случайное.
-      onClick={(e) => {
-        // Второй клик двойного — гасим отложенное выделение и уходим.
-        if (e.detail > 1) {
-          cancelPendingSelect();
-          return;
-        }
-        const el = e.target as HTMLElement;
-        // Клики по кнопкам и полям внутри строки не должны выделять: у них
-        // своё действие, и попутное выделение читалось бы как случайное.
-        if (el.closest("button, a, input, label, select, textarea")) return;
-        // Клик с зажатым Shift/Ctrl — привычный системный жест; не трогаем.
-        if (e.shiftKey || e.metaKey || e.ctrlKey) return;
-        // Выделение текста мышью тоже не должно переключать строку.
-        if ((window.getSelection()?.toString() || "").length > 0) return;
-        cancelPendingSelect();
-        clickTimer.current = setTimeout(() => {
-          clickTimer.current = null;
-          onToggleSelect();
-        }, DOUBLE_CLICK_MS);
-      }}
-      onDoubleClick={() => {
-        cancelPendingSelect();
-        onEdit();
-      }}
-      className={`grid items-center gap-3 px-3 py-2 border-b border-border/40 cursor-pointer group text-[length:var(--tbl-font)] ${
-        selected ? "bg-accent/5" : "hover:bg-panel2/40"
-      }`}
-      style={{ gridTemplateColumns: template }}
+    <OperationListRow
+      template={template}
+      selected={selected}
+      onToggleSelect={onToggleSelect}
+      onOpen={onEdit}
     >
-      <input
-        type="checkbox"
-        className="accent-accent w-4 h-4"
+      <Checkbox
         checked={selected}
-        onClick={(e) => e.stopPropagation()}
+        stopPropagation
         onChange={onToggleSelect}
-        aria-label="Выбрать операцию"
+        label="Выбрать операцию"
       />
       {!hideDate && (
         <div className="text-muted tabular-nums whitespace-nowrap">
           {tx.date.slice(8, 10)}.{tx.date.slice(5, 7)}.{tx.date.slice(0, 4)}
         </div>
       )}
-      {/* Без `title`: подсказка повторяла название, которое тут же и написано,
-          и всплывала при каждом проходе мышью над лентой. */}
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="relative inline-flex shrink-0">
-          {/* Sub-category operations show the SUB-tag's own icon (resolved by the
-              «Parent / Sub» path), not the parent's. */}
-          <CategoryDot
-            category={tx.subcategory || tx.category}
-            parent={tx.subcategory ? tx.category : undefined}
-            size="w-7 h-7"
-          />
-          {draft && (
-            <span
-              className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-expense border-2 border-panel"
-              aria-label="Новая операция — не синхронизирована"
-            />
-          )}
-          {/* «Новая» — операция приехала из банка, и в Дзен-мани её ещё не
-              открывали (`viewed: false`). Стоит тем же значком на иконке
-              категории, а не отдельной колонкой: колонка занимала место в
-              каждой строке ради метки, которая бывает у единиц. Столкнуться с
-              красной точкой черновика она не может — черновики этой пометки не
-              получают, у них своя. */}
-          {tx.unseen && !draft && (
-            <Tooltip content="Новая — вы ещё не открывали её в Дзен-мани">
-              <span
-                className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-panel"
-                role="img"
-                aria-label="Новая операция"
-              />
-            </Tooltip>
-          )}
-        </span>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="truncate">{tx.category}</span>
-            {edited && !draft && (
-              <Pencil
-                className="w-3 h-3 text-accent2 shrink-0"
-                aria-label="Отредактировано"
-              />
-            )}
-          </div>
-          {tx.subcategory && (
-            <div className="text-[0.85em] text-muted truncate">
-              {tx.subcategory}
-            </div>
-          )}
-          {/* Вторые категории — своей строкой: второй без подкатегории,
-              третьей с ней (#69). */}
-          <ExtraCategoriesLine extras={tx.extraCategories} />
-        </div>
-      </div>
+      {/* Без `title`: подсказка повторяла бы название, которое тут же и написано. */}
+      <OperationCategory tx={tx} edited={edited} draft={draft} />
       <div className="truncate text-muted" title={tx.account}>
         {tx.account}
       </div>
-      {/* Show brand (Zenmoney's curated name) as the primary payee
-          line. Raw bank-statement text (`tx.payee`) goes underneath
-          in muted small if it differs — keeps the "WB-MOSCOW-12345"
-          info visible without dominating. Tooltip shows both. */}
-      <div className="min-w-0">
-        {(() => {
-          const primary = displayPayee(tx) || transferCounterparty(tx) || "";
-          const secondary = statementLine ? secondaryPayee(tx, "statement") : null;
-          const tooltip = secondary ? `${primary} — ${secondary}` : primary;
-          return (
-            <>
-              <div className="truncate text-muted" title={tooltip}>
-                {primary || "—"}
-              </div>
-              {secondary && (
-                <div className="truncate text-[0.85em] text-text" title={secondary}>
-                  {secondary}
-                </div>
-              )}
-            </>
-          );
-        })()}
-      </div>
+      <OperationPayee tx={tx} />
       <div className="text-muted truncate" title={tx.comment || ""}>
         {tx.comment || ""}
       </div>
       <div
-        className={`text-right tabular-nums font-medium whitespace-nowrap ${amountColor}`}
+        className={`text-right tabular-nums font-medium whitespace-nowrap ${TONE_CLASS[operationTone(tx)]}`}
       >
-        {tx.category === "Долг" ? (
-          <HandCoins className="inline-block w-3.5 h-3.5 align-[-2px] mr-0.5" aria-hidden />
-        ) : tx.kind === "transfer" ? (
-          <ArrowLeftRight className="inline-block w-3.5 h-3.5 align-[-2px] mr-0.5" aria-hidden />
-        ) : (
-          <span className={amountSignClass}>{amountSign}</span>
-        )}
-        {formatMoney(tx.amount, tx.currency)}
-        {(() => {
-          const received = crossCurrencyReceived(tx);
-          return received ? (
-            <div className="text-[0.85em] font-normal text-muted/80">
-              ({received})
-            </div>
-          ) : null;
-        })()}
+        <OperationAmount tx={tx} />
       </div>
-      <div className="flex items-center justify-center gap-0.5">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-          className="btn-icon"
-          title="Редактировать"
-          aria-label="Редактировать операцию"
-        >
-          <Pencil className="w-4 h-4" />
-        </button>
-        {onCopy && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onCopy();
-            }}
-            className="btn-icon"
-            title="Копировать — та же операция сегодняшним днём"
-            aria-label="Копировать операцию"
-          >
-            <Copy className="w-4 h-4" />
-          </button>
-        )}
-        {onSplit && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onSplit();
-            }}
-            className="btn-icon"
-            title="Разделить — расписать операцию по нескольким статьям"
-            aria-label="Разделить операцию"
-          >
-            <Scissors className="w-4 h-4" />
-          </button>
-        )}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="btn-icon-danger"
-          title="Удалить"
-          aria-label="Удалить операцию"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-    </div>
+      <OperationActions onEdit={onEdit} onCopy={onCopy} onSplit={onSplit} onDelete={onDelete} />
+    </OperationListRow>
   );
-}
-
-const WEEKDAYS = [
-  "воскресенье",
-  "понедельник",
-  "вторник",
-  "среда",
-  "четверг",
-  "пятница",
-  "суббота",
-];
-const MONTHS_GEN = [
-  "января", "февраля", "марта", "апреля", "мая", "июня",
-  "июля", "августа", "сентября", "октября", "ноября", "декабря",
-];
-
-function formatDayHeader(ymd: string): { label: string; weekday: string } {
-  const d = new Date(ymd);
-  if (Number.isNaN(d.getTime())) return { label: ymd, weekday: "" };
-
-  const today = new Date();
-  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  const yYmd = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
-
-  const day = d.getDate();
-  const month = MONTHS_GEN[d.getMonth()];
-  const year = d.getFullYear();
-  const weekday = WEEKDAYS[d.getDay()];
-  const dateLabel = `${day} ${month}${year === today.getFullYear() ? "" : ` ${year}`}`;
-
-  if (ymd === todayYmd) return { label: `Сегодня, ${dateLabel}`, weekday };
-  if (ymd === yYmd) return { label: `Вчера, ${dateLabel}`, weekday };
-  return { label: dateLabel, weekday };
 }

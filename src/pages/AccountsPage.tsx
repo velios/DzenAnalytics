@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Checkbox } from "../components/Checkbox";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -29,10 +30,7 @@ import {
   ArrowUpDown,
   ChevronDown,
   Check,
-  ArrowUp,
-  ArrowDown,
   Pencil,
-  HelpCircle,
   LineChart as LineChartIcon,
   Settings2,
   Trash2,
@@ -42,6 +40,7 @@ import {
   Archive,
   Users,
   UserRound,
+  TrendingUp,
 } from "lucide-react";
 import {
   debtPayeeKey,
@@ -101,6 +100,7 @@ import {
   chartAxisStroke,
   chartTotalStroke,
   niceStep,
+  chartColor,
 } from "../lib/format";
 import { ChartTooltipCard, TooltipFacts, type TooltipFact } from "../components/TooltipFacts";
 import { EmptyState } from "../components/EmptyState";
@@ -111,19 +111,24 @@ import { InfoPopover, InfoTerm } from "../components/InfoPopover";
 import { capitalShare, mergeLiveByTitle, positiveBalanceTotal } from "../lib/accountOptions";
 import { depositTotals, projectDeposit, type DepositRow } from "../lib/deposits";
 import { SectionCard } from "../components/SectionCard";
+import { CardHeader } from "../components/CardHeader";
+import { HeadCell, TreeElbow } from "../components/table/TableParts";
+import { cellClass, scaledWidth, toneOfSigned, treeIndent, type ColumnType, type Tone } from "../components/table/tableKit";
 import { toIsoDate } from "../lib/period";
-import { Stat } from "../components/Stat";
+import { StatCell, StatRow } from "../components/SectionCard";
 import { Sparkline } from "../components/Sparkline";
 import { AccountLogo } from "../components/AccountLogo";
 import { MultiSelect } from "../components/MultiSelect";
 import { AccountEditModal } from "../components/AccountEditModal";
 import { Popover } from "../components/Popover";
-import { Tooltip as AppTooltip } from "../components/Tooltip";
 import { DateField } from "../components/DateField";
 import { ACCOUNT_KINDS, accountKindLabel, DEBT_TYPES } from "../lib/accountType";
 import { accountOptions } from "../lib/accountOptions";
 import { debtKey, parseDebtKey, withDebtCounterparties } from "../lib/debtFilter";
 import { pluralRu } from "../lib/plural";
+import { SectionEmpty } from "../components/SectionEmpty";
+import { Badge } from "../components/Badge";
+import { SectionControls } from "../components/SectionControls";
 
 const STACK_COLORS = [
   "#22D3EE", "#A78BFA", "#F59E0B", "#10B981", "#EC4899",
@@ -134,9 +139,9 @@ const STACK_COLORS = [
 const NEG_ZONE = 0.1;
 
 /** Цвет линии «Совокупного баланса» — и самой линии, и метки в подсказке. */
-const NET_STROKE = "#22D3EE";
+const NET_STROKE = chartColor.accent;
 /** Цвет линии «Изменения по фильтру» — там же. */
-const FLOW_STROKE = "#A78BFA";
+const FLOW_STROKE = chartColor.accent2;
 
 // Типы настроек показа переехали в свой стор вместе с самими настройками:
 // страница их только читает. «Капитал» — остатки и их история, «Движение» —
@@ -228,11 +233,7 @@ function DropdownMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         style={minWidth ? { minWidth } : undefined}
-        className={`px-3 py-1.5 text-xs rounded-full border flex items-center gap-1.5 whitespace-nowrap transition-colors duration-200 ${
-          active
-            ? "bg-accent/10 border-accent/40 text-accent"
-            : "bg-panel2 border-border text-muted hover:text-text"
-        }`}
+        className={clsx("chip", active && "chip-on")}
       >
         <Icon className="w-3.5 h-3.5 shrink-0" />
         {label}
@@ -279,8 +280,6 @@ function AccountMarks({
   owner?: string | null;
 }) {
   if (!offBalance && !archive && !owner) return null;
-  const chip =
-    "text-[10px] leading-4 px-1.5 rounded-full border whitespace-nowrap shrink-0";
   // Группа НЕ `shrink-0`: имя участника длины непредсказуемой, и в узкой
   // колонке несжимаемая пилюля съедала название счёта до одной буквы.
   // Сжимается здесь только она — «Вне баланса» и «Архив» короткие и на своём.
@@ -289,26 +288,20 @@ function AccountMarks({
   return (
     <span className="flex items-center gap-1 min-w-0">
       {offBalance && (
-        <span className={`${chip} border-accent2/40 text-accent2 bg-accent2/10`}>
+        <Badge tone="accent2" className="shrink-0">
           Вне баланса
-        </span>
+        </Badge>
       )}
       {/* Со значком, а не одним именем: серый чип с надписью «Ирина» иначе не
           отличить от «Архива» — непонятно, пометка это или чьё-то название.
           Человечек говорит, что речь о владельце, ещё до чтения. */}
       {owner && (
-        <span
-          className="text-[10px] leading-4 px-1.5 rounded-full border border-border
-                     text-muted bg-panel2 inline-flex items-center gap-1
-                     min-w-[4rem] max-w-[10rem]"
-          title={`Личный счёт участника: ${owner}`}
-        >
-          <UserRound className="w-2.5 h-2.5 shrink-0" />
+        <Badge icon={UserRound} title={`Личный счёт участника: ${owner}`} className="min-w-[4rem] max-w-[10rem]">
           <span className="truncate">{owner}</span>
-        </span>
+        </Badge>
       )}
       {archive && (
-        <span className={`${chip} border-border text-muted bg-panel2`}>Архив</span>
+        <Badge className="shrink-0">Архив</Badge>
       )}
     </span>
   );
@@ -328,11 +321,11 @@ function CheckItem({
 }) {
   return (
     <label className="flex items-center gap-2.5 px-3 py-1.5 text-xs hover:bg-panel2 cursor-pointer">
-      <input
-        type="checkbox"
+      <Checkbox
         checked={checked}
         onChange={onChange}
-        className="accent-accent shrink-0"
+        label="Включить признак"
+        className="shrink-0"
       />
       <Icon className="w-3.5 h-3.5 text-muted shrink-0" />
       <span className="whitespace-nowrap">{label}</span>
@@ -341,44 +334,31 @@ function CheckItem({
 }
 
 /**
- * Заголовок сортируемой колонки. Стрелка появляется только у активной —
- * шесть постоянных значков «можно сортировать» шумят сильнее, чем помогают.
+ * Заголовок сортируемой колонки — общая шапка таблиц (`HeadCell`), только с
+ * ключом сортировки списка счетов: порядок строк считает сама страница, с
+ * группами и разбивкой долгов.
  */
 function SortTh({
   sortKey,
-  align = "left",
+  type = "text",
   active,
   dir,
   onSort,
   children,
 }: {
   sortKey: SortBy;
-  align?: "left" | "right" | "center";
+  type?: ColumnType;
   active: SortBy;
   dir: SortDir;
   onSort: (key: SortBy) => void;
   children: ReactNode;
 }) {
-  const on = active === sortKey;
-  const Arrow = dir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th
-      className={`table-th ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""}`}
-      aria-sort={on ? (dir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      {/* `uppercase` повторяется здесь не зря: браузер сбрасывает
-          text-transform на кнопках, поэтому без него заголовок-кнопка
-          выпадает из общего вида таблиц сервиса. */}
-      <button
-        onClick={() => onSort(sortKey)}
-        className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-text ${
-          align === "right" ? "flex-row-reverse" : ""
-        } ${on ? "text-accent" : ""}`}
-      >
-        {children}
-        {on && <Arrow className="w-3 h-3 shrink-0" />}
-      </button>
-    </th>
+    <HeadCell
+      type={type}
+      label={children}
+      sort={{ active: active === sortKey, dir, onToggle: () => onSort(sortKey) }}
+    />
   );
 }
 
@@ -1554,59 +1534,13 @@ export function AccountsPage() {
       <PageHeader
         icon={Wallet}
         title="Счета"
-        hint="Остатки на счетах, их история и обороты за период"
-        right={
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Переключатели «Вся история / По фильтрам» и «По счетам /
-                Совокупно» жили здесь, в шапке страницы, и по ним нельзя было
-                понять, на что каждый влияет. Теперь каждый стоит там, где
-                действует: первый — над блоком показателей и графиков, которые
-                он пересчитывает, второй — в карточке своего графика.
-
-                А вот выбор раздела здесь как раз на месте: он меняет страницу
-                целиком, и стоит там же, где такой же выбор на «Категориях». */}
-            {/* Значок стоит слева от переключателя, а не между ним и
-                «Калибровкой». Ряд прижат к правому краю, поэтому появление и
-                исчезновение САМОГО ЛЕВОГО элемента ничего не двигает: короче
-                становится только левый край ряда. Стоял бы он в середине — при
-                переходе на «Движение» кнопки прыгали бы вбок. */}
-            {tab === "capital" && (
-              <InfoPopover label="Что делают фильтры на «Капитале»">
-                <p>{CAPITAL_FILTERS_HINT}</p>
-              </InfoPopover>
-            )}
-            <Segmented
-              value={tab}
-              onChange={setTab}
-              label="Разделы страницы «Счета»"
-              options={[
-                {
-                  value: "capital",
-                  label: "Капитал",
-                  icon: Landmark,
-                  // Не «фильтру не подчиняется»: период на этой вкладке работает —
-                  // просто выбирает показанный отрезок, а не пересчитывает суммы.
-                  title: "Сколько денег на счетах и как менялось",
-                },
-                {
-                  value: "flow",
-                  label: "Движение",
-                  icon: ArrowLeftRight,
-                  title: "Поступления и списания за выбранный период",
-                },
-              ]}
-            />
-            {zenLoaded && !zenToken && (
-              <button
-                onClick={() => setCalibOpen((o) => !o)}
-                className={`btn-ghost text-xs ${calibration ? "border-accent2 text-accent2" : ""}`}
-                title="Привязать график к фактическому балансу"
-              >
-                <Settings2 className="w-3.5 h-3.5" />
-                {calibration ? "Калибровка вкл." : "Калибровка"}
-              </button>
-            )}
-          </div>
+        hint="Остатки, их история и обороты за период"
+        info={
+          tab === "capital" && (
+            <InfoPopover label="Что делают фильтры на «Капитале»">
+              <p>{CAPITAL_FILTERS_HINT}</p>
+            </InfoPopover>
+          )
         }
       />
       {/* Панель больше не гаснет: фильтр в деле на обеих вкладках. На «Капитале»
@@ -1622,12 +1556,50 @@ export function AccountsPage() {
         dataFiltersHint={CAPITAL_FILTERS_HINT}
       />
 
+      {/* Выбор раздела меняет страницу целиком — рядом контролов раздела, как
+          в «Топе» и «Категориях». В шапке он стоял рядом с кнопками ступени 34
+          и был выше их на восемь пикселей. «Калибровка» — там же, справа: это
+          настройка графика «Капитала», и только там она что-то меняет. В шапке
+          она стояла и на «Движении», где нажатие ничего не показывало. */}
+      <SectionControls>
+        <Segmented
+          tabs
+          value={tab}
+          onChange={setTab}
+          label="Разделы страницы «Счета»"
+          options={[
+            {
+              value: "capital",
+              label: "Капитал",
+              icon: Landmark,
+              // Не «фильтру не подчиняется»: период на этой вкладке работает —
+              // просто выбирает показанный отрезок, а не пересчитывает суммы.
+              title: "Сколько денег на счетах и как менялось",
+            },
+            {
+              value: "flow",
+              label: "Движение",
+              icon: ArrowLeftRight,
+              title: "Поступления и списания за выбранный период",
+            },
+          ]}
+        />
+        {tab === "capital" && zenLoaded && !zenToken && (
+          <button
+            onClick={() => setCalibOpen((o) => !o)}
+            aria-expanded={calibOpen}
+            className={`btn-ghost btn-lg ${calibration ? "border-accent2 text-accent2" : ""}`}
+            title="Привязать график к фактическому балансу"
+          >
+            <Settings2 className="w-4 h-4" />
+            {calibration ? "Калибровка вкл." : "Калибровка"}
+          </button>
+        )}
+      </SectionControls>
+
       {tab === "capital" && calibOpen && !zenToken && (
         <div className="card card-pad bg-accent2/5 border-accent2/40">
-          <div className="font-semibold mb-2 flex items-center gap-2">
-            <Settings2 className="w-4 h-4 text-accent2" />
-            Калибровка совокупного баланса
-          </div>
+          <CardHeader icon={Settings2} tone="accent2" title="Калибровка совокупного баланса" />
           <p className="text-xs text-muted mb-4">
             В CSV нет начальных остатков счетов, поэтому без калибровки график
             показывает <em>изменение</em>, а не реальный баланс. Укажите, сколько
@@ -1724,16 +1696,12 @@ export function AccountsPage() {
         </div>
       )}
 
-      <div
-        className={
-          tab === "capital" ? "grid grid-cols-2 md:grid-cols-2 gap-4" : "hidden"
-        }
-      >
-        <Stat
+      <StatRow className={tab === "capital" ? undefined : "hidden"}>
+        <StatCell
           label="Совокупный баланс"
           tone={noWindowData ? "accent" : lastNetWorth >= 0 ? "income" : "expense"}
           value={noWindowData ? "—" : formatMoney(lastNetWorth, base, { signed: true })}
-          hint={
+          note={
             noWindowData
               ? "В выбранном периоде нет операций"
               : viewWindow
@@ -1741,13 +1709,13 @@ export function AccountsPage() {
                 : "На последний день истории"
           }
         />
-        <Stat
+        <StatCell
           label="Наибольший баланс"
           tone="accent"
           value={noWindowData ? "—" : formatMoney(peakNetWorth, base)}
           // То же окно, что и у «Совокупного баланса», — значит и подпись
           // должна честно называть его, а не молчать про период.
-          hint={
+          note={
             noWindowData
               ? "В выбранном периоде нет операций"
               : viewWindow
@@ -1755,56 +1723,53 @@ export function AccountsPage() {
                 : "За всю историю"
           }
         />
-      </div>
+      </StatRow>
 
       {/* ── «Движение»: всё, что подчиняется фильтру ─────────────────────── */}
-      <div
-        className={
-          tab === "flow" ? "grid grid-cols-2 md:grid-cols-4 gap-4" : "hidden"
-        }
-      >
-        <Stat
+      <StatRow className={tab === "flow" ? undefined : "hidden"}>
+        <StatCell
           label="Доходы"
           tone="income"
           value={formatMoney(totalIncome, base)}
-          hint="Без переводов между счетами"
+          note="Без переводов между счетами"
         />
-        <Stat
+        <StatCell
           label="Расходы"
           tone="expense"
           value={formatMoney(totalExpense, base)}
-          hint="Без переводов между счетами"
+          note="Без переводов между счетами"
         />
-        <Stat
+        <StatCell
           label="Изменение по фильтру"
           tone={totalNet >= 0 ? "income" : "expense"}
           value={formatMoney(totalNet, base, { signed: true })}
-          hint="Доходы минус расходы"
+          note="Доходы минус расходы"
         />
-        <Stat
+        <StatCell
           label="Изменение за всю историю"
           tone={totalAllAccounts >= 0 ? "income" : "expense"}
           value={formatMoney(totalAllAccounts, base, { signed: true })}
           // Стоит рядом с «по фильтру» намеренно: эти два числа сравнивают, и в
           // этом весь их смысл. Раньше пара терялась в середине страницы.
-          hint="Для сравнения — без фильтра"
+          note="Для сравнения — без фильтра"
         />
-      </div>
+      </StatRow>
 
       <div className={tab === "capital" ? "card-tray card-pad" : "hidden"}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="font-semibold">
-              {view === "stacked"
-                ? hasRealBalances
-                  ? "Остатки по счетам"
-                  : "Накоплено по счетам"
-                : "Совокупный баланс"}
-            </div>
-            {/* Подпись говорит про период ровно то, что есть на деле. Раньше у
-                стопки стояло «без фильтров» всегда — а она строится из того же
-                набора операций, что и остальное. */}
-            <div className="text-xs text-muted">
+        {/* Подпись говорит про период ровно то, что есть на деле. Раньше у
+            стопки стояло «без фильтров» всегда — а она строится из того же
+            набора операций, что и остальное. */}
+        <CardHeader
+          icon={view === "stacked" ? Layers : LineChartIcon}
+          title={
+            view === "stacked"
+              ? hasRealBalances
+                ? "Остатки по счетам"
+                : "Накоплено по счетам"
+              : "Совокупный баланс"
+          }
+          subtitle={
+            <>
               {view === "stacked" && chartNothingPicked ? (
                 // Ни одного счёта не отмечено — рисовать нечего, и рассказывать
                 // про слои и период тут значило бы описывать пустое место.
@@ -1839,56 +1804,56 @@ export function AccountsPage() {
                         : "")}
                 </>
               )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Фильтр счетов — только у стопки: «Совокупно» показывает активы
-                минус долги целиком, и выкидывать оттуда счета нельзя, конец
-                кривой прибит к сумме ВСЕХ реальных остатков. */}
-            {view === "stacked" && chartAccountOptions.length > 1 && (
-              <MultiSelect
-                className="w-48 shrink-0"
-                label="Счета"
-                options={chartAccountOptions}
-                selected={chartAccounts}
-                onChange={setChartAccounts}
-                renderIcon={(name) =>
-                  parseDebtKey(name) ? (
-                    <Users className="w-[18px] h-[18px] text-muted" />
-                  ) : (
-                    <AccountLogo title={name} size={18} />
-                  )
-                }
-                labelOf={(name) => parseDebtKey(name)?.payee ?? name}
-                nestedOf={(name) => parseDebtKey(name) !== null}
-                nestedUnitForms={["контрагент", "контрагента", "контрагентов"]}
-                groupOf={chartAccountGroup}
-                unitForms={["счёт", "счёта", "счетов"]}
-                searchPlaceholder="Поиск счёта"
-                archivedSet={chartArchived}
-                compactSummary
+            </>
+          }
+          right={
+            <>
+              {/* Фильтр счетов — только у стопки: «Совокупно» показывает активы
+                  минус долги целиком, и выкидывать оттуда счета нельзя, конец
+                  кривой прибит к сумме ВСЕХ реальных остатков. */}
+              {view === "stacked" && chartAccountOptions.length > 1 && (
+                <MultiSelect
+                  className="w-48 shrink-0"
+                  label="Счета"
+                  options={chartAccountOptions}
+                  selected={chartAccounts}
+                  onChange={setChartAccounts}
+                  renderIcon={(name) =>
+                    parseDebtKey(name) ? (
+                      <Users className="w-[18px] h-[18px] text-muted" />
+                    ) : (
+                      <AccountLogo title={name} size={18} />
+                    )
+                  }
+                  labelOf={(name) => parseDebtKey(name)?.payee ?? name}
+                  nestedOf={(name) => parseDebtKey(name) !== null}
+                  nestedUnitForms={["контрагент", "контрагента", "контрагентов"]}
+                  groupOf={chartAccountGroup}
+                  unitForms={["счёт", "счёта", "счетов"]}
+                  searchPlaceholder="Поиск счёта"
+                  archivedSet={chartArchived}
+                  compactSummary
+                />
+              )}
+              <Segmented
+                size="sm"
+                label="Вид графика"
+                value={view}
+                onChange={setView}
+                className="shrink-0"
+                options={[
+                  { value: "stacked", label: "По счетам", icon: Layers, title: "Разложить по счетам" },
+                  {
+                    value: "single",
+                    label: "Совокупно",
+                    icon: LineChartIcon,
+                    title: "Одной линией: активы минус долги",
+                  },
+                ]}
               />
-            )}
-            <div className="flex gap-0.5 bg-panel2 rounded-full p-1 border border-border shadow-tray shrink-0">
-            <button
-              onClick={() => setView("stacked")}
-              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${view === "stacked" ? "bg-accent text-accent-fg" : "text-muted"}`}
-              title="Разложить по счетам"
-            >
-              <Layers className="w-3 h-3" />
-              По счетам
-            </button>
-            <button
-              onClick={() => setView("single")}
-              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${view === "single" ? "bg-accent text-accent-fg" : "text-muted"}`}
-              title="Одной линией: активы минус долги"
-            >
-              <LineChartIcon className="w-3 h-3" />
-              Совокупно
-            </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
         <div className="h-96">
           {view === "stacked" && chartNothingPicked ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 text-sm text-muted">
@@ -2056,23 +2021,18 @@ export function AccountsPage() {
       </div>
 
       <div className={tab === "flow" ? "card-tray card-pad" : "hidden"}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="font-semibold">
-              {selectedAccount
-                ? `Изменение по счёту: ${selectedAccount}`
-                : "Изменение по фильтру"}
-            </div>
-            <div className="text-xs text-muted">
-              Нарастающим итогом с начала периода
-            </div>
-          </div>
-          {selectedAccount && (
-            <button onClick={() => setSelectedAccount(null)} className="btn-ghost text-xs">
-              Все счета
-            </button>
-          )}
-        </div>
+        <CardHeader
+          icon={TrendingUp}
+          title={selectedAccount ? `Изменение по счёту: ${selectedAccount}` : "Изменение по фильтру"}
+          subtitle="Нарастающим итогом с начала периода"
+          right={
+            selectedAccount && (
+              <button onClick={() => setSelectedAccount(null)} className="btn-ghost text-xs">
+                Все счета
+              </button>
+            )
+          }
+        />
         <div className="h-64">
           <ResponsiveContainer>
             <AreaChart data={series}>
@@ -2115,7 +2075,7 @@ export function AccountsPage() {
           за период, а вклад отвечает на другой вопрос — сколько он принесёт. */}
       {capitalView && depositRows.length > 0 && (
         <SectionCard
-          icon={<PiggyBank className="w-4 h-4 text-income" />}
+          icon={PiggyBank} tone="income"
           title="Вклады"
           info={
             <p>
@@ -2140,7 +2100,7 @@ export function AccountsPage() {
               вклад с длинным названием сдвигал бы столбцы с деньгами у всех
               остальных. Резиновым остаётся только название. */}
           <div className="overflow-x-auto -mx-1 px-1">
-            <table className="w-full text-sm table-fixed min-w-[50rem]">
+            <table className="w-full table-fixed min-w-[50rem]">
               <colgroup>
                 <col />
                 <col style={{ width: 84 }} />
@@ -2151,24 +2111,12 @@ export function AccountsPage() {
               </colgroup>
               <thead>
                 <tr>
-                  <th scope="col" className="table-th">
-                    Вклад
-                  </th>
-                  <th scope="col" className="table-th text-right">
-                    Ставка
-                  </th>
-                  <th scope="col" className="table-th text-right">
-                    До закрытия
-                  </th>
-                  <th scope="col" className="table-th text-right">
-                    Сумма
-                  </th>
-                  <th scope="col" className="table-th text-right">
-                    Проценты
-                  </th>
-                  <th scope="col" className="table-th text-right">
-                    На конец срока
-                  </th>
+                  <HeadCell type="text" label="Вклад" />
+                  <HeadCell type="number" label="Ставка" />
+                  <HeadCell type="number" label="До закрытия" />
+                  <HeadCell type="money" label="Сумма" />
+                  <HeadCell type="money" label="Проценты" />
+                  <HeadCell type="main" label="На конец срока" />
                 </tr>
               </thead>
               <tbody>
@@ -2176,46 +2124,37 @@ export function AccountsPage() {
                   const p = r.projection;
                   const done = p.daysLeft === 0;
                   const isSel = selectedAccount === r.account.title;
+                  // Условия договора — в подсказке к названию: они объясняют
+                  // все числа строки, но строка таблицы остаётся одной.
+                  const terms = `${formatDate(r.account.startDate ?? "", "short")} — ${formatDate(p.endDate, "short")}${p.compounded ? " · С капитализацией" : ""}`;
                   return (
                     <tr
                       key={r.account.id}
                       onClick={() =>
                         setSelectedAccount(isSel ? null : r.account.title)
                       }
-                      className={`align-middle cursor-pointer group ${
+                      className={`cursor-pointer group ${
                         isSel ? "bg-accent/10" : "hover:bg-panel2/50"
                       }`}
                     >
-                      <td className="table-td">
+                      <td className={cellClass("text")} title={`${r.account.title}: ${terms}`}>
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="shrink-0">
+                          <span className="flex shrink-0">
                             <AccountLogo
                               title={r.account.title}
                               type={r.account.type}
+                              size={20}
                             />
                           </span>
-                          <span className="min-w-0">
-                            <span className="block font-medium truncate group-hover:text-accent">
-                              {r.account.title}
-                            </span>
-                            {/* Условия договора второй строкой: они объясняют
-                                все остальные числа этой строки. */}
-                            <span className="block text-[11px] text-muted truncate">
-                              {formatDate(r.account.startDate ?? "", "short")} —{" "}
-                              {formatDate(p.endDate, "short")}
-                              {p.compounded ? " · С капитализацией" : ""}
-                            </span>
+                          <span className="truncate group-hover:text-accent">
+                            {r.account.title}
                           </span>
                         </div>
                       </td>
-                      <td className="table-td text-right tabular-nums whitespace-nowrap">
+                      <td className={cellClass("number")}>
                         {formatPct(p.percent / 100, 1)}
                       </td>
-                      <td
-                        className={`table-td text-right tabular-nums whitespace-nowrap ${
-                          done ? "text-warn" : ""
-                        }`}
-                      >
+                      <td className={cellClass("number", { className: done ? "text-warn" : undefined })}>
                         {done
                           ? "Срок вышел"
                           : `${formatNum(p.daysLeft)} ${pluralRu(p.daysLeft, [
@@ -2224,17 +2163,13 @@ export function AccountsPage() {
                               "дней",
                             ])}`}
                       </td>
-                      <td className="table-td text-right tabular-nums whitespace-nowrap">
+                      <td className={cellClass("money")}>
                         {formatMoney(r.balance, base)}
                       </td>
-                      <td
-                        className={`table-td text-right tabular-nums whitespace-nowrap ${
-                          done ? "text-muted" : "text-income"
-                        }`}
-                      >
+                      <td className={cellClass("money", { muted: done })}>
                         {done ? "—" : `+${formatMoney(p.interestLeft, base)}`}
                       </td>
-                      <td className="table-td text-right tabular-nums whitespace-nowrap font-medium">
+                      <td className={cellClass("main")}>
                         {formatMoney(p.atMaturity, base)}
                       </td>
                     </tr>
@@ -2244,22 +2179,22 @@ export function AccountsPage() {
               {/* Итог строкой таблицы, а не подписью под ней: каждое число
                   стоит под своим столбцом и читается как сумма колонки. */}
               <tfoot>
-                <tr className="bg-panel2/60 font-semibold">
-                  <td className="table-td">Итого</td>
+                <tr className="table-group-row">
+                  <td className={cellClass("text")}>Итого</td>
                   <td
-                    className="table-td text-right tabular-nums font-normal text-muted whitespace-nowrap"
+                    className={cellClass("number", { muted: true, className: "font-normal" })}
                     title="Средняя ставка, взвешенная остатком вклада"
                   >
                     {formatPct(depositSum.avgPercent / 100, 1)}
                   </td>
                   <td className="table-td" />
-                  <td className="table-td text-right tabular-nums whitespace-nowrap">
+                  <td className={cellClass("money")}>
                     {formatMoney(depositSum.balance, base)}
                   </td>
-                  <td className="table-td text-right tabular-nums whitespace-nowrap text-income">
+                  <td className={cellClass("money")}>
                     +{formatMoney(depositSum.interestLeft, base)}
                   </td>
-                  <td className="table-td text-right tabular-nums whitespace-nowrap">
+                  <td className={cellClass("money")}>
                     {formatMoney(depositSum.atMaturity, base)}
                   </td>
                 </tr>
@@ -2428,80 +2363,64 @@ export function AccountsPage() {
               }
             </DropdownMenu>
           )}
-          <div
-            role="group"
-            aria-label="Вид списка счетов"
-            className="ml-auto flex gap-0.5 bg-panel2 rounded-full p-1 border border-border shadow-tray"
-          >
-            <button
-              onClick={() =>
-                void patchPrefs({
-                  listView: "table",
-                  // В таблице колонки «Банк» нет: заголовки не подсветятся, и
-                  // порядок будет выглядеть случайным. Возвращаемся к сумме.
-                  ...(sortBy === "bank"
-                    ? { sortBy: "balance" as const, sortDir: DEFAULT_DIR.balance }
-                    : {}),
-                })
-              }
-              aria-pressed={accountsView === "table"}
-              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${
-                accountsView === "table" ? "bg-accent text-accent-fg" : "text-muted"
-              }`}
-            >
-              <TableIcon className="w-3 h-3" />
-              Таблица
-            </button>
-            <button
-              onClick={() =>
-                void patchPrefs({
-                  listView: "cards",
-                  // «Поступления», «Опер.» и прочие колонки в карточках выбрать
-                  // нечем, поэтому меню сортировки показывало бы порядок,
-                  // которого в нём нет. Возвращаемся к сумме — она есть на
-                  // каждой карточке.
-                  ...(CARD_SORT_OPTIONS.some((o) => o.value === sortBy)
-                    ? {}
-                    : { sortBy: "balance" as const, sortDir: DEFAULT_DIR.balance }),
-                })
-              }
-              aria-pressed={accountsView === "cards"}
-              className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 transition-colors duration-200 ${
-                accountsView === "cards" ? "bg-accent text-accent-fg" : "text-muted"
-              }`}
-            >
-              <LayoutGrid className="w-3 h-3" />
-              Карточки
-            </button>
-          </div>
-          <AppTooltip content={listHint} placement="bottom">
-            <button
-              className="btn-icon shrink-0"
-              aria-label="Как читать список счетов"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
-          </AppTooltip>
+          <Segmented
+            size="sm"
+            label="Вид списка счетов"
+            value={accountsView}
+            onChange={(next) =>
+              void patchPrefs(
+                next === "table"
+                  ? {
+                      listView: "table",
+                      // В таблице колонки «Банк» нет: заголовки не подсветятся, и
+                      // порядок будет выглядеть случайным. Возвращаемся к сумме.
+                      ...(sortBy === "bank"
+                        ? { sortBy: "balance" as const, sortDir: DEFAULT_DIR.balance }
+                        : {}),
+                    }
+                  : {
+                      listView: "cards",
+                      // «Поступления», «Опер.» и прочие колонки в карточках выбрать
+                      // нечем, поэтому меню сортировки показывало бы порядок,
+                      // которого в нём нет. Возвращаемся к сумме — она есть на
+                      // каждой карточке.
+                      ...(CARD_SORT_OPTIONS.some((o) => o.value === sortBy)
+                        ? {}
+                        : { sortBy: "balance" as const, sortDir: DEFAULT_DIR.balance }),
+                    }
+              )
+            }
+            className="ml-auto"
+            options={[
+              { value: "table", label: "Таблица", icon: TableIcon },
+              { value: "cards", label: "Карточки", icon: LayoutGrid },
+            ]}
+          />
+          <InfoPopover label="Как читать список счетов">{listHint}</InfoPopover>
         </div>
 
         {visibleRows.length === 0 ? (
-          <div className="text-center py-10 text-sm text-muted">
-            <div>Ни один счёт не подошёл под фильтр.</div>
-            <button
-              onClick={() =>
-                void patchPrefs({
-                  typeFilter: [],
-                  bankFilter: [],
-                  balanceScope: "all",
-                  onlySavings: false,
-                  hideArchived: false,
-                })
-              }
-              className="btn-ghost text-xs mt-3"
-            >
-              Сбросить фильтры
-            </button>
-          </div>
+          <SectionEmpty
+            variant="inline"
+            action={
+              <button
+                onClick={() =>
+                  void patchPrefs({
+                    typeFilter: [],
+                    bankFilter: [],
+                    balanceScope: "all",
+                    onlySavings: false,
+                    hideArchived: false,
+                  })
+                }
+                className="btn-ghost text-sm"
+              >
+                Сбросить фильтры
+              </button>
+            }
+          >
+            Ни один счёт не подошёл под фильтр.
+          </SectionEmpty>
         ) : accountsView === "cards" ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {listItems.map((item) => {
@@ -2594,12 +2513,9 @@ export function AccountsPage() {
                     </button>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {a.edited && (
-                        <span
-                          className="text-[10px] leading-4 px-1.5 rounded-full border border-warn/40 text-warn bg-warn/10 whitespace-nowrap"
-                          title="Правка ещё не отправлена в Дзен-мани"
-                        >
+                        <Badge tone="warn" title="Правка ещё не отправлена в Дзен-мани">
                           Изменён
-                        </span>
+                        </Badge>
                       )}
                       <span
                         className="pill text-[10px]"
@@ -2617,7 +2533,7 @@ export function AccountsPage() {
                             e.stopPropagation();
                             openAccountEditor(a.id);
                           }}
-                          className="btn-ghost !p-1 text-muted hover:text-accent"
+                          className="btn-icon btn-icon-sm"
                           title="Изменить счёт"
                           aria-label="Изменить счёт"
                         >
@@ -2630,7 +2546,7 @@ export function AccountsPage() {
                     onClick={() => setSelectedAccount(isSel ? null : a.account)}
                     className="block text-left w-full"
                   >
-                    <div className="text-[10px] uppercase tracking-wider text-muted">
+                    <div className="caps-label">
                       {capitalView ? (hasReal ? "Остаток" : "Накоплено") : "Изменение"}
                     </div>
                     <div className="flex items-end justify-between gap-2">
@@ -2693,9 +2609,9 @@ export function AccountsPage() {
                   </button>
                   <button
                     onClick={() => openAccount(a.account)}
-                    className="btn-ghost text-xs w-full !py-1.5"
+                    className="btn-ghost text-xs w-full"
                   >
-                    <List className="w-3 h-3" />
+                    <List className="w-3.5 h-3.5" />
                     Операции
                   </button>
                 </div>
@@ -2709,7 +2625,7 @@ export function AccountsPage() {
                 Numeric columns are sized to fit million-ruble values so nothing
                 overflows its cell (which would force a horizontal scrollbar). */}
             <table
-              className="w-full text-base table-fixed"
+              className="w-full table-fixed"
               style={{
                 // Минимум под НАБОР столбцов этой вкладки: на «Капитале» их
                 // пять, и ширина от восьми растянула бы таблицу пустотой.
@@ -2728,24 +2644,27 @@ export function AccountsPage() {
             >
               <colgroup>
                 <col />
-                {/* 170px = самая длинная подпись вида счёта («Накопительный
+                {/* 10.75rem = самая длинная подпись вида счёта («Накопительный
                     счёт», замер 140px) плюс отступы ячейки: иначе она режется
-                    многоточием у большинства счетов. */}
-                <col style={{ width: 170 }} />
+                    многоточием у большинства счетов. Ширины — в rem и растут
+                    с размером текста таблиц, как у остальных таблиц: в
+                    пикселях «Поступления» и «Операции» на «Движении»
+                    резались многоточием. */}
+                <col style={{ width: scaledWidth("10.75rem") }} />
                 {capitalView ? (
                   <>
-                    <col style={{ width: hasForeignCurrency ? 230 : 140 }} />
-                    <col style={{ width: 110 }} />
+                    <col style={{ width: scaledWidth(hasForeignCurrency ? "14.5rem" : "8.75rem") }} />
+                    <col style={{ width: scaledWidth("7rem") }} />
                   </>
                 ) : (
                   <>
-                    <col style={{ width: 130 }} />
-                    <col style={{ width: 130 }} />
-                    <col style={{ width: 126 }} />
-                    <col style={{ width: 96 }} />
+                    <col style={{ width: scaledWidth("8.75rem") }} />
+                    <col style={{ width: scaledWidth("8.75rem") }} />
+                    <col style={{ width: scaledWidth("8rem") }} />
+                    <col style={{ width: scaledWidth("7rem") }} />
                   </>
                 )}
-                <col style={{ width: 120 }} />
+                <col style={{ width: scaledWidth("7.5rem") }} />
               </colgroup>
               <thead>
                 <tr>
@@ -2761,38 +2680,38 @@ export function AccountsPage() {
                       отвечала сразу на два разных вопроса. */}
                   {capitalView ? (
                     <>
-                      <SortTh sortKey="balance" align="right" {...sortHead}>
+                      <SortTh sortKey="balance" type="balance" {...sortHead}>
                         {hasRealBalances ? "Остаток" : "Накоплено"}
                       </SortTh>
-                      <SortTh sortKey="balance" align="right" {...sortHead}>
+                      <SortTh sortKey="balance" type="pct" {...sortHead}>
                         Доля
                       </SortTh>
                     </>
                   ) : (
                     <>
-                      <SortTh sortKey="income" align="right" {...sortHead}>
+                      <SortTh sortKey="income" type="money" {...sortHead}>
                         Поступления
                       </SortTh>
-                      <SortTh sortKey="expense" align="right" {...sortHead}>
+                      <SortTh sortKey="expense" type="money" {...sortHead}>
                         Списания
                       </SortTh>
-                      <SortTh sortKey="delta" align="right" {...sortHead}>
+                      <SortTh sortKey="delta" type="main" {...sortHead}>
                         Изменение
                       </SortTh>
-                      <SortTh sortKey="count" align="center" {...sortHead}>
+                      <SortTh sortKey="count" type="count" {...sortHead}>
                         Операции
                       </SortTh>
                     </>
                   )}
-                  <th className="table-th text-center">Действия</th>
+                  <HeadCell type="actions" label="Действия" />
                 </tr>
               </thead>
               <tbody>
                 {listItems.map((item) => {
                   if (item.kind === "header") {
                     return (
-                      <tr key={item.key} className="bg-panel2/60">
-                        <td className="table-td font-semibold">
+                      <tr key={item.key} className="table-group-row">
+                        <td className="table-td">
                           <span className="inline-block max-w-[240px] truncate align-bottom">
                             {item.label}
                           </span>
@@ -2803,12 +2722,15 @@ export function AccountsPage() {
                         </td>
                         <td className="table-td" />
                         {/* Сумма группы стоит ровно под колонкой с деньгами:
-                            на «Капитале» это остаток, на «Движении» — поступления.
-                            Хвост добивается пустыми ячейками до конца строки. */}
+                            на «Капитале» это остаток (прижат влево, как он), на
+                            «Движении» — поступления (вправо). Хвост добивается
+                            пустыми ячейками до конца строки. */}
                         <td
-                          className={`table-td text-right tabular-nums font-semibold whitespace-nowrap ${
-                            item.sum < 0 ? "text-expense" : "text-text"
-                          }`}
+                          className={cellClass(capitalView ? "balance" : "money", {
+                            // У строки группы сумма обычным начертанием, как была:
+                            // 500 у остатка — для строк счетов.
+                            className: clsx("!font-normal", item.sum < 0 && "text-expense"),
+                          })}
                         >
                           {formatMoney(item.sum, base)}
                         </td>
@@ -2817,7 +2739,7 @@ export function AccountsPage() {
                         {capitalView ? (
                           <>
                             <td
-                              className="table-td text-right tabular-nums text-muted whitespace-nowrap"
+                              className={cellClass("pct")}
                               title="Доля от суммы положительных остатков"
                             >
                               {(() => {
@@ -2837,12 +2759,10 @@ export function AccountsPage() {
                   const isSel = selectedAccount === a.account;
                   const hasReal = a.balanceBase !== null;
                   const headline = hasReal ? a.balanceBase! : a.delta;
-                  const headlineNeg = headline < 0;
-                  const headlineColor = headlineNeg
-                    ? "text-expense"
-                    : hasReal
-                      ? "text-text"
-                      : "text-income";
+                  // Остаток — без цвета стороны; накопленное без остатков — как
+                  // приход; минус — как расход.
+                  const headlineTone: Tone =
+                    headline < 0 ? "expense" : hasReal ? "neutral" : "income";
                   // Долговой счёт раскрывается по контрагентам; если долговых
                   // операций нет вовсе, раскрывать нечего — шеврона тоже нет.
                   //
@@ -2882,16 +2802,18 @@ export function AccountsPage() {
                         {/* Пометки состояния идут за названием: тип уехал в свою
                             колонку, а «вне баланса» и «архив» — свойства самого
                             счёта, не его типа. */}
-                        <div className="flex items-baseline gap-2 min-w-0">
-                          <span className="self-center shrink-0">
-                            <AccountLogo title={a.account} type={a.type} />
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="flex shrink-0">
+                            {/* 20 px — в строку таблицы 37 px; крупнее значок
+                                раздвигал бы строку. */}
+                            <AccountLogo title={a.account} type={a.type} size={20} />
                           </span>
                           {/* Нижний предел ширины — чтобы пометки справа не
                               дожимали название до одной буквы: колонка скорее
                               станет шире (таблица прокручивается), чем строка
                               перестанет читаться. */}
                           <span
-                            className="font-medium truncate min-w-[5rem] group-hover:text-accent"
+                            className="truncate min-w-[5rem] group-hover:text-accent"
                             title={a.displayTitle}
                           >
                             {a.displayTitle}
@@ -2916,7 +2838,7 @@ export function AccountsPage() {
                               title={
                                 debtsOpen ? "Свернуть контрагентов" : "Показать контрагентов"
                               }
-                              className="self-center shrink-0 -my-1 p-1 rounded text-muted hover:text-accent hover:bg-panel2"
+                              className="btn-icon btn-icon-sm self-center shrink-0 -my-1"
                             >
                               <ChevronDown
                                 className={`w-3.5 h-3.5 transition-transform ${
@@ -2926,12 +2848,9 @@ export function AccountsPage() {
                             </button>
                           )}
                           {a.edited && (
-                            <span
-                              className="text-[10px] leading-4 px-1.5 rounded-full border border-warn/40 text-warn bg-warn/10 whitespace-nowrap shrink-0"
-                              title="Правка ещё не отправлена в Дзен-мани"
-                            >
+                            <Badge tone="warn" title="Правка ещё не отправлена в Дзен-мани" className="shrink-0">
                               Изменён
-                            </span>
+                            </Badge>
                           )}
                           {hasReal && (
                             <AccountMarks
@@ -2942,17 +2861,17 @@ export function AccountsPage() {
                           )}
                         </div>
                       </td>
-                      <td className="table-td text-muted truncate">{a.kind}</td>
+                      <td className={cellClass("text", { muted: true, className: "truncate" })}>{a.kind}</td>
                       {capitalView && (
                         <td
-                          className={`table-td text-right tabular-nums font-semibold whitespace-nowrap ${headlineColor}`}
+                          className={cellClass("balance", { tone: headlineTone })}
                           title={formatMoney(headline, base, { decimals: 2 })}
                         >
                           {formatMoney(headline, base, { signed: !hasReal })}
                           {/* Валюта счёта — в скобках рядом, а не второй строкой:
                               строка таблицы не должна расти из-за одной суммы. */}
                           {hasReal && a.nativeCurrency && a.nativeCurrency !== base && (
-                            <span className="text-[13px] text-muted font-normal">
+                            <span className="text-[0.9em] text-muted font-normal">
                               {" "}
                               ({formatMoney(a.nativeBalance!, a.nativeCurrency)})
                             </span>
@@ -2961,7 +2880,7 @@ export function AccountsPage() {
                       )}
                       {capitalView ? (
                         <td
-                          className="table-td text-right tabular-nums text-muted whitespace-nowrap"
+                          className={cellClass("pct")}
                           title="Доля от суммы положительных остатков. У долгов доли нет"
                         >
                           {(() => {
@@ -2974,26 +2893,16 @@ export function AccountsPage() {
                         </td>
                       ) : (
                         <>
-                          <td className="table-td text-right tabular-nums text-income whitespace-nowrap">
-                            {formatMoney(a.income, base)}
-                          </td>
-                          <td className="table-td text-right tabular-nums text-expense whitespace-nowrap">
-                            {formatMoney(a.expense, base)}
-                          </td>
-                          <td
-                            className={`table-td text-right tabular-nums whitespace-nowrap ${
-                              a.delta >= 0 ? "text-income" : "text-expense"
-                            }`}
-                          >
+                          <td className={cellClass("money")}>{formatMoney(a.income, base)}</td>
+                          <td className={cellClass("money")}>{formatMoney(a.expense, base)}</td>
+                          <td className={cellClass("main", { tone: toneOfSigned(a.delta) })}>
                             {formatMoney(a.delta, base, { signed: true })}
                           </td>
-                          <td className="table-td text-center tabular-nums text-muted">
-                            {formatNum(a.count)}
-                          </td>
+                          <td className={cellClass("count")}>{formatNum(a.count)}</td>
                         </>
                       )}
-                      <td className="table-td">
-                        <div className="flex items-center justify-center gap-1">
+                      <td className={cellClass("actions")}>
+                        <div className="flex items-center justify-center gap-0.5">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -3059,32 +2968,24 @@ export function AccountsPage() {
                         владельца счетов, плюс значит «должны вам». Клик по
                         строке открывает операции этого контрагента. */}
                     {debtsOpen &&
-                      debtRows.map((d) => (
+                      debtRows.map((d, di) => (
                         <tr
                           key={`${a.account} ${d.payee}`}
                           onClick={() => openDebtCounterparty(a.account, d)}
-                          title={`Операции: ${d.payee}`}
-                          className="cursor-pointer bg-panel2/30 hover:bg-panel2/70"
+                          className="cursor-pointer hover:bg-panel2/50"
                         >
-                          {/* Имя и «сколько раз» — одной ячейкой, чтобы длинный
-                              хвост не лез под колонку действий и не обрезался.
-                              Отступ и полоска слева говорят, что строка
-                              подчинена счёту выше. */}
-                          <td className="table-td !py-1.5">
-                            <div className="pl-6 ml-2 border-l-2 border-border min-w-0">
-                              <div
-                                className={`text-sm truncate ${d.settled ? "text-muted" : ""}`}
-                              >
-                                {d.payee}
-                              </div>
-                              <div className="text-[11px] text-muted">
-                                {formatNum(d.count)}{" "}
-                                {pluralRu(d.count, ["операция", "операции", "операций"])} ·
-                                последняя {formatDate(d.last)}
-                              </div>
-                            </div>
+                          {/* Строка под счётом с уголком к нему — как подстрока
+                              любого дерева в таблицах. Сколько операций и когда
+                              последняя — в подсказке: строка остаётся одной. */}
+                          <td
+                            className={cellClass("text", { muted: true, className: "relative truncate" })}
+                            style={{ paddingLeft: treeIndent(1) }}
+                            title={`${d.payee}: ${formatNum(d.count)} ${pluralRu(d.count, ["операция", "операции", "операций"])}, последняя ${formatDate(d.last)}`}
+                          >
+                            <TreeElbow depth={1} last={di === debtRows.length - 1 && unallocated === 0} />
+                            {d.payee}
                           </td>
-                          <td className="table-td !py-1.5 text-xs text-muted whitespace-nowrap align-middle">
+                          <td className={cellClass("text", { muted: true, className: "truncate" })}>
                             {d.settled
                               ? "Рассчитались"
                               : d.amount > 0
@@ -3094,15 +2995,11 @@ export function AccountsPage() {
                           {/* Сумма встаёт под ту же колонку, что и у счёта:
                               на «Капитале» это остаток, на «Движении» —
                               изменение за период. */}
-                          {!capitalView && <td className="table-td !py-1.5" colSpan={2} />}
+                          {!capitalView && <td className="table-td" colSpan={2} />}
                           <td
-                            className={`table-td !py-1.5 text-right tabular-nums whitespace-nowrap align-middle ${
-                              d.settled
-                                ? "text-muted"
-                                : d.amount > 0
-                                  ? "text-income"
-                                  : "text-expense"
-                            }`}
+                            className={cellClass("main", {
+                              tone: d.settled ? "muted" : d.amount > 0 ? "income" : "expense",
+                            })}
                           >
                             {formatMoney(Math.abs(d.amount), base)}
                           </td>
@@ -3114,7 +3011,7 @@ export function AccountsPage() {
                               свободную ширину между ним и колонкой «Счёт», та
                               ужималась вдвое, и таблица на глазах съезжала
                               влево, оставляя пустое поле справа (issue #80). */}
-                          <td className="table-td !py-1.5" colSpan={2} />
+                          <td className="table-td" colSpan={2} />
                         </tr>
                       ))}
                     {/* Строка сверки: остаток счёта минус сумма по людям.
@@ -3124,33 +3021,29 @@ export function AccountsPage() {
                         сумма долгов у нас просто неверная (issue #80). */}
                     {debtsOpen && unallocated !== 0 && (
                       <tr
-                        className="bg-panel2/30"
                         title={
-                          "Остаток счёта из Дзен-мани минус сумма по контрагентам. " +
-                          "Разница — это начальный остаток счёта, операции старше " +
-                          "загруженной истории или курсовая разница у валютного долга: " +
-                          "операция пересчитана по курсу своего дня, а остаток счёта — " +
-                          "по сегодняшнему."
+                          "Начальный остаток, операции вне истории или курсовая разница. " +
+                          "Остаток счёта из Дзен-мани минус сумма по контрагентам: " +
+                          "начальный остаток счёта, операции старше загруженной истории " +
+                          "или курсовая разница у валютного долга — операция пересчитана " +
+                          "по курсу своего дня, а остаток счёта — по сегодняшнему."
                         }
                       >
-                        <td className="table-td !py-1.5">
-                          <div className="pl-6 ml-2 border-l-2 border-border min-w-0">
-                            <div className="text-sm text-muted">
-                              Не разложено по контрагентам
-                            </div>
-                            <div className="text-[11px] text-muted truncate">
-                              Начальный остаток, операции вне истории или курсовая
-                              разница
-                            </div>
-                          </div>
+                        <td
+                          className={cellClass("text", { muted: true, className: "relative truncate" })}
+                          style={{ paddingLeft: treeIndent(1) }}
+                        >
+                          <TreeElbow depth={1} last />
+                          Не разложено по контрагентам
                         </td>
-                        <td className="table-td !py-1.5 text-xs text-muted whitespace-nowrap align-middle">
+                        <td className={cellClass("text", { muted: true, className: "truncate" })}>
                           {unallocated > 0 ? "Должны вам" : "Должны вы"}
                         </td>
-                        <td className="table-td !py-1.5 text-right tabular-nums whitespace-nowrap align-middle text-muted">
+                        {!capitalView && <td className="table-td" colSpan={2} />}
+                        <td className={cellClass("money", { muted: true })}>
                           {formatMoney(Math.abs(unallocated), base)}
                         </td>
-                        <td className="table-td !py-1.5" colSpan={2} />
+                        <td className="table-td" colSpan={2} />
                       </tr>
                     )}
                     </Fragment>

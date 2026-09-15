@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   Search as SearchIcon,
   ArrowRight,
@@ -30,14 +29,19 @@ import {
   Moon,
   Monitor,
   Trash2,
+  Palette,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useThemeStore } from "../store/useThemeStore";
+import { useThemeModalStore } from "../store/useThemeModalStore";
 import { useFiltersStore } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { groupByCategory, topPayees, NO_PAYEE_LABEL } from "../lib/aggregations";
 import { monthLabel, ymKey } from "../lib/format";
+import { SectionEmpty } from "./SectionEmpty";
+import { useSmoothNavigate } from "../hooks/useSmoothNavigate";
+import { ALL_SCHEMES } from "../lib/themeSchemes";
 
 interface Item {
   id: string;
@@ -106,10 +110,13 @@ function score(query: string, text: string, aliases: string[] = []): number {
 }
 
 export function CommandPalette({ open, onClose }: Props) {
-  const nav = useNavigate();
+  // Переход в раздел — той же плавной сменой экрана, что из шапки и меню.
+  const nav = useSmoothNavigate();
   const transactions = useDataStore((s) => s.transactions);
   const showDrill = useDrillStore((s) => s.show);
   const setMode = useThemeStore((s) => s.setMode);
+  const setScheme = useThemeStore((s) => s.setScheme);
+  const showThemeModal = useThemeModalStore((s) => s.show);
   const setMonth = useFiltersStore((s) => s.setMonth);
   const views = useSavedViewsStore((s) => s.views);
   const filtersStore = useFiltersStore;
@@ -136,6 +143,20 @@ export function CommandPalette({ open, onClose }: Props) {
       { id: "theme:light", group: "Действия", title: "Светлая тема", icon: Sun, action: () => setMode("light") },
       { id: "theme:dark", group: "Действия", title: "Тёмная тема", icon: Moon, action: () => setMode("dark") },
       { id: "theme:auto", group: "Действия", title: "Тема: авто", icon: Monitor, action: () => setMode("auto") },
+      { id: "theme:pick", group: "Действия", title: "Выбрать тему оформления", icon: Palette, action: showThemeModal },
+      // Все двенадцать тем: «тема лагуна» или «уголь» находит нужную сразу.
+      // Из палитры тему просят увидеть — поэтому включаем и её вид.
+      ...ALL_SCHEMES.map((sc) => ({
+        id: `scheme:${sc.id}`,
+        group: "Действия",
+        title: `Тема: ${sc.name}`,
+        hint: `${sc.kind === "dark" ? "Тёмная" : "Светлая"} · ${sc.hint}`,
+        icon: Palette,
+        action: () => {
+          setScheme(sc.id);
+          setMode(sc.kind);
+        },
+      })),
       {
         id: "filter:reset",
         group: "Действия",
@@ -233,7 +254,7 @@ export function CommandPalette({ open, onClose }: Props) {
     }
 
     return list;
-  }, [transactions, views, nav, setMode, setMonth, showDrill, filtersStore]);
+  }, [transactions, views, nav, setMode, setScheme, showThemeModal, setMonth, showDrill, filtersStore]);
 
   const filtered = useMemo(() => {
     if (!query) return items.slice(0, 80);
@@ -342,7 +363,9 @@ export function CommandPalette({ open, onClose }: Props) {
 
         <div ref={listRef} className="flex-1 overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <div className="text-center text-sm text-muted py-8">Ничего не найдено</div>
+            <SectionEmpty variant="compact">
+              Ничего не найдено
+            </SectionEmpty>
           ) : (
             filtered.map((item, idx) => {
               const Icon = item.icon;
@@ -352,7 +375,7 @@ export function CommandPalette({ open, onClose }: Props) {
               return (
                 <div key={item.id}>
                   {showGroup && (
-                    <div className="text-[10px] uppercase tracking-wider text-muted px-4 pt-3 pb-1">
+                    <div className="caps-label px-4 pt-3 pb-1">
                       {item.group}
                     </div>
                   )}

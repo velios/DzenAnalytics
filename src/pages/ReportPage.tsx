@@ -2,8 +2,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Table as TableIcon,
   Download,
-  ChevronRight,
-  ChevronDown,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -25,12 +23,16 @@ import {
   type XlsxNumberStyle,
 } from "../lib/categoryReportXlsx";
 import { ReportExportModal } from "../components/ReportExportModal";
+import { ExpandChevron, TreeElbow } from "../components/table/TableParts";
+import { treeIndent } from "../components/table/tableKit";
 import { InfoPopover } from "../components/InfoPopover";
 import { formatMoney } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { Segmented } from "../components/Segmented";
 import type { Transaction } from "../types";
+import { SectionEmpty } from "../components/SectionEmpty";
 
 const SCALES: ReportScale[] = ["month", "quarter", "year", "total"];
 
@@ -322,24 +324,20 @@ export function ReportPage() {
             стоят шевроны отдельных категорий, и не занимает отдельную строку
             над таблицей. */}
         {hasSubcategories ? (
-          <button
-            onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(allParents))}
-            className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-text"
-            title={allCollapsed ? "Развернуть все" : "Свернуть все"}
-            aria-label={allCollapsed ? "Развернуть все" : "Свернуть все"}
-            aria-expanded={!allCollapsed}
-            tabIndex={forClone ? -1 : undefined}
+          <span
+            className="flex items-center gap-1.5"
             // Мышь фокусирует кнопку даже с `tabIndex={-1}`, а фокус внутри
-            // `aria-hidden`-поддерева — это то, чего быть не должно.
+            // `aria-hidden`-поддерева двойника — это то, чего быть не должно.
             onMouseDown={forClone ? (e) => e.preventDefault() : undefined}
           >
-            {allCollapsed ? (
-              <ChevronRight className="w-3.5 h-3.5 shrink-0" aria-hidden />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5 shrink-0" aria-hidden />
-            )}
+            <ExpandChevron
+              open={!allCollapsed}
+              onToggle={() => setCollapsed(allCollapsed ? new Set() : new Set(allParents))}
+              label={allCollapsed ? "Развернуть все" : "Свернуть все"}
+              tabIndex={forClone ? -1 : undefined}
+            />
             Категория
-          </button>
+          </span>
         ) : (
           "Категория"
         )}
@@ -356,30 +354,27 @@ export function ReportPage() {
   if (all.length === 0) return <EmptyState />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <PageHeader
         title="Доходы и расходы"
         icon={TableIcon}
-        hint="Все категории по периодам — одной таблицей, с выгрузкой в Excel"
+        hint="Как менялась каждая категория от периода к периоду"
       />
 
       <GlobalFilters period={lp} />
 
       <div className="flex items-center gap-2 flex-wrap">
         <span className="label">Разбивка</span>
-        <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-          {SCALES.map((s) => (
-            <button
-              key={s}
-              onClick={() => setScale(s)}
-              className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
-                scale === s ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
-              }`}
-            >
-              {s === "total" ? "Всего" : SCALE_LABELS[s]}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          size="sm"
+          label="Разбивка"
+          value={scale}
+          onChange={setScale}
+          options={SCALES.map((sc) => ({
+            value: sc,
+            label: sc === "total" ? "Всего" : SCALE_LABELS[sc],
+          }))}
+        />
         {/* Переключателя «Вид» здесь больше нет: он существовал только потому,
             что закреплённая шапка и таблица во весь рост считались
             несовместимыми. Теперь работает и то и другое сразу, и выбирать
@@ -427,7 +422,7 @@ export function ReportPage() {
             тому, что ниже, а не к заголовку страницы. */}
         <span className="flex-1 min-w-2" />
         <button
-          className="btn-ghost text-sm shrink-0"
+          className="btn-ghost text-xs shrink-0"
           onClick={() => setExportOpen(true)}
           disabled={empty}
           title="Скачать отчёт в Excel"
@@ -447,9 +442,9 @@ export function ReportPage() {
       )}
 
       {empty ? (
-        <div className="card-tray card-pad text-sm text-muted text-center py-10">
-          За выбранный период нет доходов и расходов — измените фильтр выше.
-        </div>
+        <SectionEmpty icon={TableIcon} title="За выбранный период нет доходов и расходов">
+          Измените фильтр выше.
+        </SectionEmpty>
       ) : (
         // `overflow-clip`, а НЕ `overflow-hidden`: скруглённые углы карточки
         // надо вернуть — непрозрачные ячейки шапки закрашивают их, — но
@@ -478,7 +473,7 @@ export function ReportPage() {
               onScroll={syncBack}
             >
               <table
-                className="text-sm border-separate border-spacing-0"
+                className="border-separate border-spacing-0"
                 style={{
                   tableLayout: "fixed",
                   width: tableWidth > 0 ? `${tableWidth}px` : undefined,
@@ -506,7 +501,7 @@ export function ReportPage() {
           >
           <table
             ref={tableRef}
-            className="w-full text-sm border-separate border-spacing-0"
+            className="w-full border-separate border-spacing-0"
           >
             <thead>
               <tr>{headerCells(false)}</tr>
@@ -520,8 +515,9 @@ export function ReportPage() {
                 tone="text-income"
                 showTotal={showTotal}
               />
-              {report.income.map((row) => (
+              {report.income.map((row, i, rows) => (
                 <BodyRow
+                  last={rows[i + 1]?.depth !== 1}
                   key={`i-${row.key}`}
                   row={row}
                   base={base}
@@ -545,8 +541,9 @@ export function ReportPage() {
                 tone="text-expense"
                 showTotal={showTotal}
               />
-              {report.expense.map((row) => (
+              {report.expense.map((row, i, rows) => (
                 <BodyRow
+                  last={rows[i + 1]?.depth !== 1}
                   key={`e-${row.key}`}
                   row={row}
                   base={base}
@@ -661,11 +658,14 @@ function BodyRow({
   hidden,
   collapsed,
   hasKids: kids,
+  last,
   showTotal,
   onToggle,
   onCell,
 }: {
   row: ReportRow;
+  /** Последняя подкатегория своего родителя — уголок обрывается на ней. */
+  last: boolean;
   base: string;
   columns: { key: string; label: string }[];
   hidden: boolean;
@@ -677,25 +677,32 @@ function BodyRow({
 }) {
   if (hidden) return null;
   return (
-    <tr className="group hover:bg-panel2/60">
+    <tr className="group hover:bg-panel2/50">
+      {/* Подкатегория — строкой под родителем с уголком и приглушённым именем,
+          как в дереве любой таблицы. Ячейка закреплена слева и непрозрачна:
+          под ней уезжают столбцы при прокрутке вбок. */}
       <td
         className={`table-td sticky left-0 bg-panel group-hover:bg-panel2 z-10 whitespace-nowrap ${
-          row.depth === 1 ? "pl-8 text-muted" : ""
+          row.depth === 1 ? "text-muted" : ""
         }`}
+        style={row.depth === 1 ? { paddingLeft: treeIndent(1) } : undefined}
       >
+        {row.depth === 1 && <TreeElbow depth={1} last={last} />}
         {kids ? (
-          <button
-            className="inline-flex items-center gap-1 hover:text-accent"
-            onClick={onToggle}
-            title={collapsed ? "Развернуть" : "Свернуть"}
-          >
-            {collapsed ? (
-              <ChevronRight className="w-3.5 h-3.5" aria-hidden />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5" aria-hidden />
-            )}
+          <span className="flex items-center gap-1.5">
+            <ExpandChevron
+              open={!collapsed}
+              onToggle={onToggle}
+              label={collapsed ? "Развернуть" : "Свернуть"}
+            />
             {row.label}
-          </button>
+          </span>
+        ) : row.depth === 0 ? (
+          // Место под шеврон — чтобы имена без подкатегорий стояли в одну линию.
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 shrink-0" aria-hidden />
+            {row.label}
+          </span>
         ) : (
           row.label
         )}

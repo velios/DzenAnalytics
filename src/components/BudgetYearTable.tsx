@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, Coins, HelpCircle, Scale, Target } from "lucide-react";
+import { ChevronDown, Coins, Scale, Target } from "lucide-react";
 import {
   hasTransfers,
   yearDiff,
@@ -16,7 +16,11 @@ import { AccountLogo } from "./AccountLogo";
 import { CategoryDot } from "./CategoryDot";
 import { TRANSFER_CATEGORY } from "../lib/budgetScope";
 import { Tooltip } from "./Tooltip";
+import { ExpandChevron, TreeElbow } from "./table/TableParts";
+import { treeIndent } from "./table/tableKit";
 import { TooltipFacts } from "./TooltipFacts";
+import { InfoPopover } from "./InfoPopover";
+import { Badge } from "./Badge";
 
 /** Три колонки на месяц плюс столько же на год — их и заполняем. */
 const SUB_COLUMNS = ["План", "Факт", "Разница"] as const;
@@ -271,7 +275,7 @@ export function BudgetYearTable({
   ) => {
     const diff = yearDiff(c, kind);
     const empty = c.plan === 0 && c.fact === 0;
-    const cls = `py-1 text-right tabular-nums whitespace-nowrap ${
+    const cls = `py-1.5 text-right tabular-nums whitespace-nowrap ${
       strong ? "font-medium" : ""
     }`;
     return (
@@ -341,38 +345,33 @@ export function BudgetYearTable({
 
   const dataRow = (
     row: YearRow,
-    opts: { nested?: boolean; group?: string; own?: YearRow }
+    opts: { nested?: boolean; last?: boolean; group?: string; own?: YearRow }
   ) => (
     // Подсветка всей строки под курсором: у таблицы под сорок колонок, и вести
     // глаз от названия статьи до нужного месяца без опоры не получалось.
     // Закреплённый первый столбец красится отдельно и НЕПРОЗРАЧНЫМ цветом:
     // под ним при прокрутке уезжают ячейки этой же строки, и полупрозрачная
     // подсветка показала бы их насквозь.
-    <tr key={row.key} className={`group ${opts.nested ? "text-muted" : ""} hover:bg-panel2`}>
+    <tr key={row.key} className="group hover:bg-panel2">
+      {/* Подкатегория — строкой под родителем с уголком и приглушённым именем,
+          как в дереве любой таблицы; числа — обычным цветом. */}
       <th
         scope="row"
-        className={`sticky left-0 bg-panel group-hover:bg-panel2 text-left font-normal px-2 py-1 ${
-          opts.nested ? "pl-9" : ""
+        className={`sticky left-0 bg-panel group-hover:bg-panel2 text-left font-normal px-2 py-1.5 ${
+          opts.nested ? "relative text-muted" : ""
         }`}
+        style={opts.nested ? { paddingLeft: treeIndent(1) } : undefined}
       >
+        {opts.nested && <TreeElbow depth={1} last={!!opts.last} />}
         <div className="flex items-center gap-2 min-w-0">
           {opts.group !== undefined ? (
-            <button
-              type="button"
-              onClick={() => toggle(opts.group!)}
-              className="shrink-0 text-muted hover:text-text"
-              aria-label={
-                expanded.has(opts.group) ? "Свернуть подкатегории" : "Показать подкатегории"
-              }
-            >
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform ${
-                  expanded.has(opts.group) ? "" : "-rotate-90"
-                }`}
-              />
-            </button>
+            <ExpandChevron
+              open={expanded.has(opts.group)}
+              onToggle={() => toggle(opts.group!)}
+              label={expanded.has(opts.group) ? "Свернуть подкатегории" : "Показать подкатегории"}
+            />
           ) : (
-            !opts.nested && <span className="w-3.5 shrink-0" />
+            !opts.nested && <span className="w-4 shrink-0" aria-hidden />
           )}
           {row.subcategory && row.category === TRANSFER_CATEGORY ? (
             // У переводов под-категория — это счёт по ту сторону, а не тег.
@@ -459,7 +458,7 @@ export function BudgetYearTable({
         })}
         {subs.length > 0 &&
           expanded.has(`${g.total.kind} ${g.category}`) &&
-          subs.map((s) => dataRow(s, { nested: true }))}
+          subs.map((s, i) => dataRow(s, { nested: true, last: i === subs.length - 1 }))}
       </Fragment>
     );
   };
@@ -483,26 +482,25 @@ export function BudgetYearTable({
               нечего — ни у одной категории нет под-категорий, — кнопки нет
               вовсе, а не висит неработающей. */}
           {sectionKeys(section).length > 0 ? (
-            <button
-              type="button"
-              onClick={() => toggleSection(section)}
-              className="flex items-center gap-1.5 hover:text-accent"
-              aria-expanded={sectionExpanded(section)}
-              aria-label={
-                sectionExpanded(section)
-                  ? `Свернуть подкатегории: ${heading}`
-                  : `Раскрыть подкатегории: ${heading}`
-              }
-            >
-              <ChevronDown
-                className={`w-4 h-4 shrink-0 transition-transform ${
-                  sectionExpanded(section) ? "" : "-rotate-90"
-                }`}
+            <span className="flex items-center gap-2">
+              <ExpandChevron
+                open={sectionExpanded(section)}
+                onToggle={() => toggleSection(section)}
+                label={
+                  sectionExpanded(section)
+                    ? `Свернуть подкатегории: ${heading}`
+                    : `Раскрыть подкатегории: ${heading}`
+                }
               />
-              {heading}
-            </button>
+              {/* Цветом стороны — только название раздела, суммы обычные. */}
+              <span className={section.kind === "expense" ? "text-expense" : "text-income"}>
+                {heading}
+              </span>
+            </span>
           ) : (
-            heading
+            <span className={section.kind === "expense" ? "text-expense" : "text-income"}>
+              {heading}
+            </span>
           )}
         </th>
       </tr>
@@ -551,7 +549,7 @@ export function BudgetYearTable({
         </>
       )}
       <tr className="font-medium border-t-2 border-border">
-        <th scope="row" className="sticky left-0 bg-panel text-left px-2 py-1">
+        <th scope="row" className="sticky left-0 bg-panel text-left px-2 py-1.5">
           Итого {heading.toLowerCase()}
         </th>
         {section.totals.map((c, i) =>
@@ -577,7 +575,7 @@ export function BudgetYearTable({
           другой вопрос: не «сколько потрачено», а «сколько прошло по счетам». */}
       {hasTransfers(section) && (
         <tr className="font-medium text-muted">
-          <th scope="row" className="sticky left-0 bg-panel text-left px-2 py-1 font-medium">
+          <th scope="row" className="sticky left-0 bg-panel text-left px-2 py-1.5 font-medium">
             {section.kind === "expense" ? "Расход" : "Доход"}, включая переводы
           </th>
           {section.totalsAll.map((c, i) =>
@@ -644,7 +642,7 @@ export function BudgetYearTable({
       <tr>
         <th
           rowSpan={2}
-          className="sticky left-0 z-[15] bg-panel text-left px-2 py-2 min-w-[13rem] align-bottom"
+          className="head-type sticky left-0 z-[15] bg-panel text-left px-2 py-2 min-w-[13rem] align-bottom"
         >
           {/* Пояснение к колонкам — в подсказке, а не строкой над таблицей:
               читают его один раз, а место оно занимало всегда. */}
@@ -653,44 +651,24 @@ export function BudgetYearTable({
             {/* Какой раздел сейчас под шапкой. Только в двойнике: он и есть та
                 полоса, что остаётся на экране, когда «Расходы» уехали вверх. */}
             {forClone && activeSection && (
-              <span
-                className={`text-[11px] font-normal px-1.5 py-0.5 rounded-full ${
-                  activeSection === "income"
-                    ? "bg-income/10 text-income"
-                    : "bg-expense/10 text-expense"
-                }`}
-              >
+              <Badge tone={activeSection === "income" ? "income" : "expense"} className="normal-case tracking-normal">
                 {activeSection === "income" ? "Доходы" : "Расходы"}
-              </span>
+              </Badge>
             )}
-            <Tooltip
-              content={
-                <>
-                  Суммы в {base}. «Разница» у расходов — сколько осталось до
-                  плана, у доходов — насколько план перевыполнен; больше нуля
-                  везде значит «хорошо».
-                </>
-              }
-            >
-              <button
-                type="button"
-                aria-label="Как читать таблицу"
-                className="text-muted hover:text-accent"
-                tabIndex={forClone ? -1 : undefined}
-                // Мышь фокусирует кнопку даже с `tabIndex={-1}`, а фокус внутри
-                // `aria-hidden`-поддерева — это то, чего быть не должно.
-                onMouseDown={forClone ? (e) => e.preventDefault() : undefined}
-              >
-                <HelpCircle className="w-3.5 h-3.5" />
-              </button>
-            </Tooltip>
+            <InfoPopover label="Как читать таблицу" focusable={!forClone}>
+              <p>
+                Суммы в {base}. «Разница» у расходов — сколько осталось до
+                плана, у доходов — насколько план перевыполнен; больше нуля
+                везде значит «хорошо».
+              </p>
+            </InfoPopover>
           </span>
         </th>
         {report.months.map((m) => (
           <th
             key={m}
             colSpan={SUB_COLUMNS.length}
-            className="bg-panel px-1 pt-2 pb-0.5 text-center font-medium border-l border-border/60"
+            className="head-type bg-panel px-1 pt-2 pb-0.5 text-center border-l border-border/60"
           >
             {/* Полное название: тройка колонок под ним всё равно шире
                 любого месяца, и сокращать было незачем. Год убираем — он
@@ -700,7 +678,7 @@ export function BudgetYearTable({
         ))}
         <th
           colSpan={SUB_COLUMNS.length}
-          className="bg-panel px-1 pt-2 pb-0.5 text-center font-semibold border-l border-border"
+          className="head-type bg-panel px-1 pt-2 pb-0.5 text-center !font-semibold !text-text border-l border-border"
         >
           За год
         </th>
@@ -710,7 +688,7 @@ export function BudgetYearTable({
           SUB_COLUMNS.map((s, i) => (
             <th
               key={`${m} ${s}`}
-              className={`bg-panel pb-1.5 text-right font-normal min-w-[5rem] ${
+              className={`head-type bg-panel pb-1.5 text-right min-w-[5rem] border-b border-border ${
                 i === 0 ? GROUP_EDGE : i === SUB_COLUMNS.length - 1 ? "pl-2 pr-4" : "px-2"
               }`}
             >
@@ -751,7 +729,7 @@ export function BudgetYearTable({
           onScroll={syncBack}
         >
           <table
-            className="text-xs border-separate border-spacing-0"
+            className="meter-list border-separate border-spacing-0"
             style={{
               tableLayout: "fixed",
               width: tableWidth > 0 ? `${tableWidth}px` : undefined,
@@ -774,7 +752,7 @@ export function BudgetYearTable({
       >
       <table
         ref={tableRef}
-        className="w-full text-xs border-separate border-spacing-0"
+        className="meter-list w-full border-separate border-spacing-0"
       >
         <thead>{headerRows(false)}</thead>
         {sectionBody(report.expense, "Расходы")}

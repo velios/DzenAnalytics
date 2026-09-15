@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
-import { X, ArrowRight, ListChecks, Info, Loader2, Pencil } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Checkbox } from "./Checkbox";
+import { ArrowRight, ListChecks, Info, Loader2, Pencil } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { Tooltip } from "./Tooltip";
@@ -11,6 +11,10 @@ import { pluralRu } from "../lib/plural";
 import { CategoryDot } from "./CategoryDot";
 import { Segmented } from "./Segmented";
 import type { Transaction } from "../types";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "./Modal";
+import { SectionEmpty } from "./SectionEmpty";
+import { Callout } from "./Callout";
+import { Badge, type BadgeTone } from "./Badge";
 
 /**
  * Окно «Что изменят правила» — предпросмотр и применение (пункты 9–12 issue #49).
@@ -44,11 +48,11 @@ const STATUS_LABEL: Record<RuleRow["status"], string> = {
   blocked: "Нет категории в Дзен-мани",
 };
 
-const STATUS_TONE: Record<RuleRow["status"], string> = {
-  pending: "bg-warn/10 text-warn",
-  written: "bg-income/10 text-income",
-  same: "bg-panel2 text-muted",
-  blocked: "bg-expense/10 text-expense",
+const STATUS_TONE: Record<RuleRow["status"], BadgeTone> = {
+  pending: "warn",
+  written: "income",
+  same: "neutral",
+  blocked: "expense",
 };
 
 export function RulePreviewModal({
@@ -87,16 +91,6 @@ export function RulePreviewModal({
   const displayed = useDataStore((s) => s.transactions);
   const openEditor = (id: string, fallback: Transaction) =>
     setEditing(displayed.find((t) => t.id === id) ?? fallback);
-
-  useEffect(() => {
-    // Пока сверху открыт редактор операции, Escape принадлежит ему: иначе одно
-    // нажатие закрывало бы оба окна разом.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !editing) onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, editing]);
 
   const allSelected = pendingIds.length > 0 && selected.size === pendingIds.length;
 
@@ -138,59 +132,34 @@ export function RulePreviewModal({
     return false;
   }, [plan]);
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Что изменят правила"
-        className="card w-full max-w-3xl max-h-[88vh] flex flex-col"
-      >
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="p-1.5 rounded-lg bg-accent/10 text-accent shrink-0">
-              <ListChecks className="w-4 h-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="font-semibold truncate">Что изменят правила</div>
-              <div className="text-xs text-muted">
-                Правил включено: {ruleCount} · Совпадений:{" "}
-                {formatNum(plan.rows.length)} · К записи:{" "}
-                {formatNum(plan.pending.length)}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-muted hover:text-text shrink-0"
-            aria-label="Закрыть"
-            title="Закрыть (Esc)"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+  return (
+    <>
+      <Modal onClose={onClose} width="3xl">
+        <ModalHeader
+          icon={ListChecks}
+          title="Что изменят правила"
+          subtitle={
+            <>
+              Правил включено: {ruleCount} · Совпадений: {formatNum(plan.rows.length)} · К записи:{" "}
+              {formatNum(plan.pending.length)}
+            </>
+          }
+        />
 
         {plan.rows.length > 0 && (
           <div className="flex items-center gap-3 px-5 py-2 border-b border-border shrink-0 text-xs text-muted flex-wrap">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={allSelected}
+              <Checkbox
                 // Частичный выбор показываем третьим состоянием: пустая
                 // галочка при «Отмечено: 134 из 138» читается как «не выбрано
                 // ничего».
-                ref={(el) => {
-                  if (el) el.indeterminate = selected.size > 0 && !allSelected;
-                }}
+                checked={allSelected}
                 onChange={() =>
                   setSelected(allSelected ? new Set() : new Set(pendingIds))
                 }
                 disabled={pendingIds.length === 0}
-                aria-label="Выбрать все операции"
-                className="accent-accent w-4 h-4"
+                indeterminate={selected.size > 0 && !allSelected}
+                label="Выбрать все операции"
               />
               Выбрать все
             </label>
@@ -230,15 +199,15 @@ export function RulePreviewModal({
           </div>
         )}
 
-        <div className="overflow-y-auto px-5 py-3 flex-1">
+        <ModalBody scroll>
           {visible.length === 0 ? (
-            <div className="text-center text-muted text-sm py-10">
+            <SectionEmpty variant="inline">
               {ruleCount === 0
                 ? "Все правила выключены — включите нужные, и покажу, что они сделают."
                 : plan.rows.length === 0
                   ? "Ни одна операция не подходит под выбранные правила."
                   : "Записывать нечего: правила уже применены. Переключитесь на «Все», чтобы увидеть весь разбор."}
-            </div>
+            </SectionEmpty>
           ) : (
             <div className="space-y-0.5">
               {shown.map((row) => {
@@ -263,13 +232,11 @@ export function RulePreviewModal({
                     )}
                   >
                     <span className="w-4 shrink-0 flex items-center justify-center pt-1.5">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selected.has(row.tx.id)}
                         onChange={() => toggle(row.tx.id)}
                         disabled={!selectable}
-                        aria-label={`Выбрать операцию: ${rowTitle(row.tx)}, ${formatDate(row.tx.date)}`}
-                        className="accent-accent w-4 h-4 disabled:opacity-40"
+                        label={`Выбрать операцию: ${rowTitle(row.tx)}, ${formatDate(row.tx.date)}`}
                       />
                     </span>
                     <CategoryDot category={row.tx.category} size="w-7 h-7" />
@@ -283,24 +250,17 @@ export function RulePreviewModal({
                             подпись молчит: она повторялась бы в каждой строке,
                             а её и так видно в шапке окна. */}
                         {showRule && oneRule && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-panel2 text-muted whitespace-nowrap max-w-[14rem] truncate">
-                            {oneRule}
-                          </span>
+                          <Badge className="max-w-[14rem] truncate">{oneRule}</Badge>
                         )}
                         {STATUS_LABEL[row.status] && (
-                          <span
-                            className={clsx(
-                              "text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap",
-                              STATUS_TONE[row.status]
-                            )}
-                          >
+<Badge tone={STATUS_TONE[row.status]}>
                             {STATUS_LABEL[row.status]}
                             {row.status === "blocked" && row.blockedCategory
                               ? `: «${row.blockedCategory}»`
                               : row.status === "blocked" && row.blockedPayee
                                 ? `: контрагента «${row.blockedPayee}» больше нет`
                                 : ""}
-                          </span>
+                          </Badge>
                         )}
                       </div>
                       <div className="mt-1 space-y-0.5">
@@ -353,7 +313,7 @@ export function RulePreviewModal({
                       <button
                         type="button"
                         onClick={() => openEditor(row.tx.id, row.tx)}
-                        className="btn-ghost !p-1.5 text-muted hover:text-accent shrink-0"
+                        className="btn-icon shrink-0"
                         aria-label={`Открыть операцию: ${rowTitle(row.tx)}`}
                       >
                         <Pencil className="w-4 h-4" />
@@ -364,12 +324,12 @@ export function RulePreviewModal({
               })}
             </div>
           )}
-        </div>
+        </ModalBody>
 
         {(notes.length > 0 || plan.skippedCount > 0) && (
           <div className="px-5 py-3 border-t border-border shrink-0 space-y-2">
             {plan.skippedCount > 0 && (
-              <div className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+              <Callout tone="warn">
                 {formatNum(plan.skippedCount)}{" "}
                 {pluralRu(plan.skippedCount, ["операция", "операции", "операций"])} не
                 записать — в справочнике Дзен-мани нет категории{" "}
@@ -379,7 +339,7 @@ export function RulePreviewModal({
                   .join(", ")}
                 {plan.skipped.length > 3 ? ` и ещё ${plan.skipped.length - 3}` : ""}.
                 Заведите её в справочнике категорий и откройте окно снова.
-              </div>
+              </Callout>
             )}
             {notes.length > 0 && (
               <div className="flex gap-2 text-xs text-muted">
@@ -394,7 +354,7 @@ export function RulePreviewModal({
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border shrink-0">
+        <ModalFooter>
           <button type="button" onClick={onClose} className="btn-ghost text-sm">
             Закрыть
           </button>
@@ -409,9 +369,8 @@ export function RulePreviewModal({
             ) : null}
             Применить правила ({formatNum(selected.size)})
           </button>
-        </div>
-      </div>
-
+        </ModalFooter>
+      </Modal>
       {editing && (
         <EditTransactionModal
           key={editing.id}
@@ -419,7 +378,6 @@ export function RulePreviewModal({
           onClose={() => setEditing(null)}
         />
       )}
-    </div>,
-    document.body
+    </>
   );
 }

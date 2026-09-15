@@ -12,6 +12,22 @@ export function displayPayee(t: Pick<Transaction, "payee" | "brand">): string {
 }
 
 /**
+ * Куда ушёл перевод — для колонки контрагента. У перевода `payee` пустой, а
+ * счёт-источник уже стоит в колонке «Счёт», поэтому показываем счёт-получатель.
+ * `null` — не перевод, получателя нет или перевод на тот же счёт.
+ */
+export function transferCounterparty(
+  t: Pick<Transaction, "kind" | "outcomeAccount" | "incomeAccount">
+): string | null {
+  if (t.kind !== "transfer") return null;
+  const from = t.outcomeAccount?.trim();
+  const to = t.incomeAccount?.trim();
+  if (!to) return null;
+  if (from && to === from) return null;
+  return to;
+}
+
+/**
  * Raw payee value to show as a secondary line / tooltip *when* it
  * differs from the brand. Returns null if there's no brand or the
  * payee is already the same string — avoids the noisy "Wildberries /
@@ -138,6 +154,18 @@ export function crossCurrencyReceived(
   if (t.kind !== "transfer") return null;
   if (!t.incomeAmount || t.incomeCurrency === t.outcomeCurrency) return null;
   return formatMoney(t.incomeAmount, t.incomeCurrency);
+}
+
+/**
+ * Дробное число с постоянным числом знаков и русской запятой: «2,5 мес»,
+ * «1,0σ». `toFixed` ставил точку — «2.5 мес» посреди русского текста, — а
+ * `formatNum` отбрасывает нули, и у бегунка «2» и «2,5» прыгала ширина.
+ */
+export function formatFixed(value: number, digits = 1): string {
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
 }
 
 export function formatNum(
@@ -303,6 +331,23 @@ export const chartAxisStroke = "rgb(var(--c-muted))";
 /** Линия итога поверх стопки. Цвет текста, а не палитры счетов: итог — не
  *  ещё одна доля, а сумма всех, и путать его с ними нельзя. */
 export const chartTotalStroke = "rgb(var(--c-text))";
+
+/**
+ * Цвета рядов графиков — те же токены темы, что у сумм в таблицах и итогах.
+ *
+ * Прежде ряды красились зашитыми цветами тёмной темы (#10B981, #EF4444,
+ * #22D3EE…), и в светлой доход на графике был не того зелёного, что доход в
+ * строке таблицы под ним. Категориальные палитры (счета, категории, облако
+ * слов) остаются палитрами: там цвет различает ряды, а не несёт смысл.
+ */
+export const chartColor = {
+  income: "rgb(var(--c-income))",
+  expense: "rgb(var(--c-expense))",
+  accent: "rgb(var(--c-accent))",
+  accent2: "rgb(var(--c-accent2))",
+  warn: "rgb(var(--c-warn))",
+  muted: "rgb(var(--c-muted))",
+} as const;
 
 /**
  * Ближайший «круглый» шаг сетки: 1, 2 или 5 на своём порядке.

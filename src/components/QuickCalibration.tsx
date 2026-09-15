@@ -159,7 +159,7 @@ export function QuickCalibration() {
             </button>
             <button
               onClick={() => setDismissed(true)}
-              className="btn-ghost !p-1.5 text-muted"
+              className="btn-ghost btn-square text-muted"
               title="Скрыть на этой странице"
             >
               <X className="w-3.5 h-3.5" />
@@ -193,7 +193,7 @@ export function QuickCalibration() {
         ) : (
           <button
             onClick={() => setDismissed(true)}
-            className="btn-ghost !p-1.5 text-muted shrink-0"
+            className="btn-ghost btn-square text-muted"
             title="Скрыть"
           >
             <X className="w-3.5 h-3.5" />
@@ -229,11 +229,11 @@ export function QuickCalibration() {
             <input
               type="number"
               inputMode="numeric"
-              placeholder="например, 2900000"
+              placeholder="Например, 2900000"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && applyManual()}
-              className="input"
+              className="input text-sm"
               autoFocus
             />
           </div>

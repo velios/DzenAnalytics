@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Cloud, Upload, LogIn } from "lucide-react";
 import { isProviderActive } from "../lib/authProvider";
 import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { Badge } from "./Badge";
 
 /**
  * Shown on every analytics page while there are no transactions yet.
@@ -31,9 +32,9 @@ export function EmptyState() {
                 <LogIn className="w-5 h-5" />
               </span>
               <span className="font-semibold">Войти через zen-platform</span>
-              <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent shrink-0">
+              <Badge tone="accent" className="ml-auto shrink-0">
                 Рекомендуем
-              </span>
+              </Badge>
             </div>
             <p className="text-sm text-muted">
               Единый вход по сессии — токен подтянется автоматически, без
@@ -51,9 +52,9 @@ export function EmptyState() {
             </span>
             <span className="font-semibold">Подключить Дзен-мани</span>
             {!isProviderActive() && (
-              <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent shrink-0">
+              <Badge tone="accent" className="ml-auto shrink-0">
                 Рекомендуем
-              </span>
+              </Badge>
             )}
           </div>
           <p className="text-sm text-muted">

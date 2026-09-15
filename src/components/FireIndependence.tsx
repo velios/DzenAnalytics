@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Flame, Wallet, ChevronDown, Check, Info } from "lucide-react";
+import { Flame, Wallet, ChevronDown, Check } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useFireStore } from "../store/useFireStore";
 import { useFireCapital } from "../hooks/useFireCapital";
@@ -8,6 +8,9 @@ import { groupByMonth } from "../lib/aggregations";
 import { formatMoney } from "../lib/format";
 import { Tooltip } from "./Tooltip";
 import { TooltipFacts } from "./TooltipFacts";
+import { CardHeader } from "./CardHeader";
+import { ProgressBar } from "./ProgressBar";
+import { Slider } from "./Slider";
 
 /** FIRE goal on the 4%-rule: 25 годовых расходов = 300 месяцев. */
 const FIRE_MONTHS = 300;
@@ -18,7 +21,7 @@ const INTRO = [
   "FIRE — это когда накоплений столько, что на доход с них можно жить, не завися от зарплаты.",
   "Нужная сумма — обязательные расходы за год × 25 (правило 4%): снимая около 4% в год, вы покрываете обязательные траты, а накопления не иссякают.",
   "Цель считается от обязательных расходов — это порог финансовой безопасности. Чтобы сохранить весь текущий уровень жизни, ориентир будет выше.",
-].join("\n\n");
+];
 
 /** Correct Russian plural for «год» (1 год · 2 года · 5 лет). */
 function yearsWord(n: number): string {
@@ -112,15 +115,14 @@ export function FireIndependence({
 
   return (
     <div className={bare ? "" : "card card-pad"}>
-      <div className="flex items-center gap-2 mb-4">
-        <Flame className="w-4 h-4 text-accent" />
-        <span className="font-semibold">FIRE — финансовая независимость</span>
-        <Tooltip content={INTRO}>
-          <span className="cursor-help text-muted hover:text-text">
-            <Info className="w-3.5 h-3.5" />
-          </span>
-        </Tooltip>
-      </div>
+      <CardHeader
+        icon={Flame}
+        title="FIRE — финансовая независимость"
+        infoLabel="Что такое FIRE"
+        info={INTRO.map((p) => (
+          <p key={p}>{p}</p>
+        ))}
+      />
 
       {/* Progress: % пути + лет до цели */}
       <div className="flex items-baseline justify-between flex-wrap gap-2 text-sm mb-1.5">
@@ -175,12 +177,11 @@ export function FireIndependence({
           </span>
         </Tooltip>
       </div>
-      <div className="h-2 rounded-full bg-panel2 overflow-hidden">
-        <div
-          className={`h-full rounded-full ${fireAchieved ? "bg-income" : "bg-accent"}`}
-          style={{ width: `${Math.min(Math.max(capitalProgress, 0), 1) * 100}%` }}
-        />
-      </div>
+      <ProgressBar
+        value={capitalProgress}
+        tone={fireAchieved ? "income" : "accent"}
+        label="Путь к финансовой независимости"
+      />
 
       {/* Accounts expander (functional — which accounts count as capital) */}
       {capitalAccounts.length > 0 ? (
@@ -218,7 +219,7 @@ export function FireIndependence({
                     on ? "bg-accent border-accent" : "border-border"
                   }`}
                 >
-                  {on && <Check className="w-3 h-3 text-white" />}
+                  {on && <Check className="w-3 h-3 text-accent-fg" />}
                 </span>
                 <span className={`flex-1 truncate ${on ? "" : "text-muted line-through"}`}>
                   {a.title}
@@ -333,33 +334,27 @@ export function FireIndependence({
         </div>
       </div>
 
-      {/* Interactive scenario slider */}
-      <div className="mt-4">
-        <div className="flex items-baseline justify-between gap-3 text-sm mb-1.5">
-          <span className="text-muted">Если откладывать долю дохода</span>
-          <span className="tabular-nums">
-            <span className="font-semibold">{scenarioRate}%</span>
-            <span className="text-muted"> → </span>
-            <span className={`font-semibold ${Number.isFinite(scenYears) ? "text-warn" : "text-muted"}`}>
+      {/* Сценарий: общий бегунок, как в «Что-если», — со своим значением
+          «доля → срок». */}
+      <Slider
+        layout="stacked"
+        className="mt-4"
+        label="Если откладывать долю дохода"
+        value={scenarioRate}
+        min={1}
+        max={99}
+        onChange={setScenarioRate}
+        format={(v) => `${v}%`}
+        display={
+          <>
+            {scenarioRate}%<span className="text-muted font-normal"> → </span>
+            <span className={Number.isFinite(scenYears) ? "text-warn" : "text-muted"}>
               {Number.isFinite(scenYears) ? yearsFmt(scenYears) : "—"}
             </span>
-          </span>
-        </div>
-        <input
-          type="range"
-          min={1}
-          max={99}
-          step={1}
-          value={scenarioRate}
-          onChange={(e) => setScenarioRate(Number(e.target.value))}
-          className="w-full"
-          style={{ accentColor: "rgb(var(--c-accent))" }}
-          aria-label="Доля дохода, которую откладывать"
-        />
-        <div className="text-[11px] text-muted mt-1">
-          Сейчас вы откладываете {currentRatePct}%. С учётом уже накопленного.
-        </div>
-      </div>
+          </>
+        }
+        hint={`Сейчас вы откладываете ${currentRatePct}%. С учётом уже накопленного`}
+      />
     </div>
   );
 }

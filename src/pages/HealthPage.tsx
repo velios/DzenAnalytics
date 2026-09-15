@@ -54,8 +54,7 @@ export function HealthPage() {
       <PageHeader
         icon={HeartPulse}
         title="Финансовое здоровье"
-        hint="Насколько устойчивы ваши финансы сейчас и как близко до финансовой независимости"
-        hintWrap
+        hint="Что в порядке, что подтянуть и далеко ли до независимости"
       />
 
       <SectionDivider
