@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { Cloud, Upload, LogIn } from "lucide-react";
-import { isProviderActive } from "../lib/authProvider";
-import { useZenmoneyStore } from "../store/useZenmoneyStore";
+import { isOAuthConfigured, startOAuth } from "../lib/oauth";
 
 /**
  * Shown on every analytics page while there are no transactions yet.
@@ -20,24 +19,23 @@ export function EmptyState() {
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl">
-        {isProviderActive() && (
+        {isOAuthConfigured() && (
           <button
             type="button"
-            onClick={() => useZenmoneyStore.getState().loginViaProvider()}
+            onClick={startOAuth}
             className="rounded-xl border border-border bg-panel2/40 p-5 text-left transition-colors hover:border-accent hover:bg-panel2 sm:col-span-2"
           >
             <div className="flex items-center gap-2 mb-2">
               <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-accent/10 text-accent shrink-0">
                 <LogIn className="w-5 h-5" />
               </span>
-              <span className="font-semibold">Войти через zen-platform</span>
+              <span className="font-semibold">Войти через Дзен-мани</span>
               <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent shrink-0">
                 Рекомендуем
               </span>
             </div>
             <p className="text-sm text-muted">
-              Единый вход по сессии — токен подтянется автоматически, без
-              ручного ввода.
+              Подтвердите доступ в Дзен-мани. Токен сохранится в этом браузере.
             </p>
           </button>
         )}
@@ -50,7 +48,7 @@ export function EmptyState() {
               <Cloud className="w-5 h-5" />
             </span>
             <span className="font-semibold">Подключить Дзен-мани</span>
-            {!isProviderActive() && (
+            {!isOAuthConfigured() && (
               <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent shrink-0">
                 Рекомендуем
               </span>
