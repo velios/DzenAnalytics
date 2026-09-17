@@ -358,7 +358,6 @@ export function ReportPage() {
       <PageHeader
         title="Доходы и расходы"
         icon={TableIcon}
-        hint="Как менялась каждая категория от периода к периоду"
       />
 
       <GlobalFilters period={lp} />
@@ -443,7 +442,7 @@ export function ReportPage() {
 
       {empty ? (
         <SectionEmpty icon={TableIcon} title="За выбранный период нет доходов и расходов">
-          Измените фильтр выше.
+          Измените фильтры — они открываются кнопкой в шапке.
         </SectionEmpty>
       ) : (
         // `overflow-clip`, а НЕ `overflow-hidden`: скруглённые углы карточки

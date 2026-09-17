@@ -46,6 +46,7 @@ import { RuleModePanel } from "./RuleModeControl";
 import { ruleModeFields, ruleModeOf } from "../lib/ruleMode";
 import type { RuleSchedule } from "../lib/ruleSchedule";
 import { useDataStore } from "../store/useDataStore";
+import { isServiceCategory } from "../lib/zenmoneyMap";
 import type { Transaction } from "../types";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "./Modal";
 import { InfoPopover } from "./InfoPopover";
@@ -143,6 +144,20 @@ const newCondition = (): RuleCondition => ({
 });
 
 const newAction = (): RuleAction => ({ id: nextId(), kind: "setCategory", value: "" });
+
+/**
+ * Применить правку строки правила и сбросить ссылку на справочник, если
+ * поменялось то, на что она указывала (значение, поле, операция, вид действия).
+ * Иначе после синхронизации старая ссылка «подтянула» бы прежнее название
+ * поверх нового, которого ещё нет в Дзен-мани (см. `lib/ruleRefs`).
+ */
+function withoutStaleRef<T extends { refId?: string }>(item: T, patch: Partial<T>): T {
+  const next = { ...item, ...patch };
+  const touched = Object.keys(patch).some((k) => k !== "caseInsensitive" && k !== "separator");
+  if (!touched || next.refId === undefined) return next;
+  const { refId: _stale, ...rest } = next;
+  return rest as T;
+}
 
 const newGroup = (): RuleConditionGroup => ({
   id: nextId(),
@@ -272,7 +287,7 @@ function matchTitle(t: Transaction): string {
 }
 
 /**
- * Редактор правила категоризации — та же модалка-карточка, что у счёта и
+ * Редактор правила — та же модалка-карточка, что у счёта и
  * категории: шапка с живым описанием правила, поля ниже, действия внизу.
  *
  * Условий и действий может быть несколько (issue #49), поэтому окно построено
@@ -317,6 +332,16 @@ export function RuleEditModal({
         subs: [...set].sort((x, y) => x.localeCompare(y, "ru")),
       }));
   }, [categories]);
+  /**
+   * Категории для ДЕЙСТВИЯ: живой справочник, а без подключения — история, но в
+   * обоих случаях без «Перевода» и «Долга». Это ярлыки вида операции, а не
+   * категории: отправка их не примет, и правка, записанная правилом, навсегда
+   * повисла бы неотправленной. В условиях они остаются — искать по ним можно.
+   */
+  const actionCategories = useMemo(
+    () => (liveCategories ?? categoryNodes).filter((n) => !isServiceCategory(n.name)),
+    [liveCategories, categoryNodes]
+  );
   /** Валюта отчётов — в ней считается условие по сумме. */
   const base = useDataStore((s) => s.rates.base);
   const ruleRuns = useDataStore((s) => s.ruleRuns);
@@ -352,7 +377,7 @@ export function RuleEditModal({
       ...d,
       groups: d.groups.map((g) => ({
         ...g,
-        conditions: g.conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        conditions: g.conditions.map((c) => (c.id === id ? withoutStaleRef(c, patch) : c)),
       })),
     }));
   }
@@ -379,7 +404,7 @@ export function RuleEditModal({
   function patchAction(id: string, patch: Partial<RuleAction>) {
     setDraft((d) => ({
       ...d,
-      actions: d.actions.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+      actions: d.actions.map((a) => (a.id === id ? withoutStaleRef(a, patch) : a)),
     }));
   }
 
@@ -829,8 +854,9 @@ export function RuleEditModal({
                           a.value.trim() ? splitCategoryFull(a.value).subcategory ?? "" : ""
                         }
                         // Записать правило может только живую категорию:
-                        // старые имена из истории отправка не примет.
-                        categories={liveCategories ?? categoryNodes}
+                        // старые имена из истории и ярлыки сервиса отправка не
+                        // примет (см. `actionCategories`).
+                        categories={actionCategories}
                         portal
                         onChange={(cat, sub) =>
                           patchAction(a.id!, { value: joinCategoryFull(cat, sub || null) })

@@ -2,11 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import {
-  PieChart,
-  Wallet,
-  ListChecks,
   MoreHorizontal,
-  LayoutDashboard,
   Search,
   HelpCircle,
   Settings,
@@ -16,6 +12,9 @@ import {
   Moon,
   Sun,
   CloudDownload,
+  Pencil,
+  Heart,
+  SlidersHorizontal,
 } from "lucide-react";
 import clsx from "clsx";
 import { useThemeStore } from "../store/useThemeStore";
@@ -28,19 +27,13 @@ import { useZenmoneyStore } from "../store/useZenmoneyStore";
 import { useSyncCommands } from "../hooks/useSyncCommands";
 import { useSmoothNavigate } from "../hooks/useSmoothNavigate";
 import { SmoothNavLink } from "./SmoothNavLink";
-import { SECONDARY, SECONDARY_GROUPS } from "../lib/navSections";
-import logoHorizontal from "../assets/logo-horizontal.svg";
-import logoHorizontalDark from "../assets/logo-horizontal-dark.svg";
-import logoMark from "../assets/logo-mark.svg";
-
-const PRIMARY = [
-  { to: "/", label: "Главная", icon: LayoutDashboard },
-  { to: "/transactions", label: "Операции", icon: ListChecks },
-  { to: "/accounts", label: "Счета", icon: Wallet },
-  { to: "/categories", label: "Категории", icon: PieChart },
-];
-
-
+import { FiltersDock } from "./FiltersDock";
+import { fitCount, headerSections, moreGroups } from "../lib/headerNav";
+import { useHeaderNavStore } from "../store/useHeaderNavStore";
+import { useDisplayStore } from "../store/useDisplayStore";
+import { useFiltersDockStore } from "../store/useFiltersDockStore";
+import { SUPPORT_TITLE, SUPPORT_URL } from "../lib/support";
+import logoDa from "../assets/logo-da.png";
 
 /**
  * Пункт меню и кнопка-значок в дорожке — общими классами `.seg-*`: та же
@@ -69,18 +62,61 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const theme = useThemeStore((s) => s.resolved);
   const setThemeMode = useThemeStore((s) => s.setMode);
   const zenToken = useZenmoneyStore((s) => s.token);
+  const hideThanks = useDisplayStore((s) => s.hideThanks);
+  const filtersDocked = useDisplayStore((s) => s.filtersMode) === "button";
+  const filtersOpen = useFiltersDockStore((s) => s.open);
+  const filtersAvailable = useFiltersDockStore((s) => s.clients) > 0;
+  const filtersActive = useFiltersDockStore((s) => s.active);
+  const toggleFilters = useFiltersDockStore((s) => s.toggle);
   const { busy: syncBusy, runFull } = useSyncCommands();
 
-  const inSecondary = SECONDARY.some((s) => loc.pathname === s.to);
+  // Разделы шапки — из настройки (`lib/headerNav`). Сколько из них влезает,
+  // меряет скрытая копия дорожки ниже: не поместившиеся уходят в «Ещё» первой
+  // группой, а не распирают шапку.
+  const headerNav = useHeaderNavStore((s) => s.items);
+  const openHeaderEditor = useHeaderNavStore((s) => s.openEditor);
+  const headerItems = headerSections(headerNav);
+  const navWrapRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(headerItems.length);
+  const shownItems = headerItems.slice(0, fit);
+  const overflow = headerItems.slice(fit).map((s) => s.to);
+  const groups = moreGroups(headerNav, overflow);
+  const inMore = groups.some((g) => g.items.some((s) => s.to === loc.pathname));
 
-  // ←/→ листают основные разделы: Главная → Операции → Счета → Категории.
+  useLayoutEffect(() => {
+    const wrap = navWrapRef.current;
+    const track = measureRef.current;
+    if (!wrap || !track) return;
+    const measure = () => {
+      const kids = Array.from(track.children) as HTMLElement[];
+      // Копия спрятана вместе с меню ниже `lg` — там считать нечего.
+      if (kids.length < 2 || track.offsetWidth === 0) return;
+      const [logo, ...rest] = kids;
+      const more = rest.pop()!;
+      const widths = rest.map((el) => el.offsetWidth);
+      const gap = parseFloat(getComputedStyle(track).columnGap) || 0;
+      const content = kids.reduce((sum, el) => sum + el.offsetWidth, 0) + gap * (kids.length - 1);
+      // Поля и кант дорожки + знак + «Ещё» — есть в шапке всегда.
+      const fixed = track.offsetWidth - content + logo.offsetWidth + gap + more.offsetWidth;
+      setFit(fitCount(widths, wrap.clientWidth, fixed, gap));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    ro.observe(track);
+    return () => ro.disconnect();
+  }, [headerNav]);
+
+  // ←/→ листают разделы шапки в её порядке (по умолчанию Главная → Операции →
+  // Счета → Категории).
   //
   // Стрелки — клавиши занятые, поэтому обработчик молчит, когда они нужны
   // кому-то другому: при фокусе в поле (там они двигают курсор), при открытом
   // окне или боковом списке (в карточке операции те же стрелки листают
   // операции), при раскрытой панели «Ещё» и с любым модификатором.
   //
-  // Работает только на самих четырёх разделах: с «Отчёта» или «Календаря»
+  // Работает только на разделах из шапки: с «Отчёта» или «Календаря»
   // прыжок в «Операции» был бы неожиданностью. Кольца нет — на «Главной» левая
   // стрелка ничего не делает, иначе с края экрана улетаешь на другой край.
   const smoothNavigate = useSmoothNavigate();
@@ -100,21 +136,21 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         return;
       }
       if (document.querySelector('[role="dialog"], aside')) return;
-      const i = PRIMARY.findIndex((p) => p.to === loc.pathname);
+      const i = headerItems.findIndex((p) => p.to === loc.pathname);
       if (i === -1) return;
       const next = i + (e.key === "ArrowRight" ? 1 : -1);
-      if (next < 0 || next >= PRIMARY.length) return;
+      if (next < 0 || next >= headerItems.length) return;
       e.preventDefault();
       // Снимаем фокус с пункта, по которому кликали раньше: иначе на нём
       // остаётся кольцо подсветки, и рядом с залитым текущим разделом это
       // выглядит как два выбранных пункта сразу. Обработчик висит на окне и
       // фокуса не требует — листать это не мешает.
       if (ae && ae.closest("nav")) ae.blur();
-      smoothNavigate(PRIMARY[next].to);
+      smoothNavigate(headerItems[next].to);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [moreOpen, mobileOpen, loc.pathname, smoothNavigate]);
+  }, [moreOpen, mobileOpen, loc.pathname, smoothNavigate, headerItems]);
 
   // Панель закрывается по Escape — она большая, накрывает пол-экрана, и уводить
   // руку к мыши ради «передумал» незачем.
@@ -151,35 +187,34 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
   return (
     <header
       ref={headerRef}
-      className="app-header relative border-b border-border bg-panel/80 backdrop-blur sticky top-0 z-30"
+      className="relative sticky top-0 z-30"
     >
-      <div className="w-full px-4 md:px-6 py-3 flex items-center gap-2 sm:gap-3 md:gap-6">
-        {/* Меню стоит посередине СВОБОДНОГО МЕСТА — между знаком и кнопками, —
-            а не посередине шапки. Разница видна сразу: знак занимает 275
-            пикселей, кнопки справа под 450, и меню, выставленное по центру
-            шапки, честно стоит по центру, но читается сдвинутым вправо — слева
-            от него пустоты вдвое больше. Глаз меряет просветы, а не координаты,
-            поэтому равняем именно их. */}
-        <div className="flex items-center shrink-0">
-          <img
-            src={theme === "dark" ? logoHorizontalDark : logoHorizontal}
-            alt="DzenAnalytics"
-            className="hidden sm:block lg:hidden xl:block h-12 w-auto shrink-0"
-          />
-          {/* Там, где тесно, — только знак. На телефоне полный логотип занимал
-              216 пикселей из 375, и кнопки справа уезжали за край: страница
-              становилась шире окна и мельчала целиком. При 1024–1279 рядом с
-              ним не помещалось меню разделов — оно налезало на кнопки. */}
-          <img
-            src={logoMark}
-            alt="DzenAnalytics"
-            className="sm:hidden lg:block xl:hidden h-[42px] w-[42px] shrink-0"
-          />
-        </div>
+      {/* Вторым ярусом шапки — панель общих фильтров по кнопке (FiltersDock).
+          Стоит `absolute` под нижним краем, поэтому высоту шапки не меняет и
+          страницу не сдвигает, но едет вместе с ней. */}
+      <FiltersDock />
+
+      {/* Подложка и метка плавного перехода (`app-header`) — не на самой
+          шапке, а на её строке. Панель фильтров ниже носит такую же подложку.
+
+          Обе вещи на `<header>` ломали стекло панели. Элемент с
+          `view-transition-name` (как и с `backdrop-filter`) — корень для
+          размытия всех своих потомков: оно берёт фоном только то, что внутри
+          него, а не страницу. Под панелью оставались чёткие, лишь бледные цифры
+          таблицы. На строке метка ничему не мешает — внутри строки размытия нет.
+
+          Подложка — общее матовое стекло (`.glass`), та же, что у панели
+          фильтров. */}
+      <div className="app-header w-full px-4 md:px-6 py-3 flex items-center gap-2 sm:gap-3 md:gap-6 border-b border-border glass">
+        {/* Знак «DA» (проба 16.09.2026). От `lg` он первым пунктом стоит в
+            дорожке меню, перед «Главной», а меню прижато к левому краю. Ниже
+            `lg` меню разделов в шапке нет — оно в кнопке справа, — и знак стоит
+            слева сам по себе, иначе шапка осталась бы без опознавательного знака. */}
+        <img src={logoDa} alt="DzenAnalytics" className="lg:hidden h-9 w-auto shrink-0" />
 
         {/* Обёртка держит свободное место и на узком экране, где само меню
             спрятано: без неё кнопки справа сползались бы к знаку. */}
-        <div className="flex-1 flex justify-center min-w-0">
+        <div ref={navWrapRef} className="relative flex-1 flex justify-start min-w-0">
         {/* Desktop nav.
 
             Меню собрано в одну дорожку — подложка, кант, мягкая тень, — а не
@@ -193,7 +228,12 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
             значками налезало на кнопки справа. Подписи короткие и без значков
             читаются. */}
         <nav className="seg-track hidden lg:inline-flex shrink-0">
-          {PRIMARY.map(({ to, label, icon: Icon }) => (
+          <img
+            src={logoDa}
+            alt="DzenAnalytics"
+            className="h-[26px] w-auto shrink-0 mx-2.5"
+          />
+          {shownItems.map(({ to, label, icon: Icon }) => (
             <SmoothNavLink
               key={to}
               to={to}
@@ -211,13 +251,32 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
               onClick={() => setMoreOpen((o) => !o)}
               aria-expanded={moreOpen}
               aria-haspopup="true"
-              className={navItem(moreOpen || inSecondary)}
+              className={navItem(moreOpen || inMore)}
             >
               <MoreHorizontal className="w-4 h-4 max-xl:hidden" />
               Ещё
             </button>
           </div>
         </nav>
+
+        {/* Копия дорожки со ВСЕМИ разделами шапки — только для замера. Лежит в
+            коробке нулевого размера, поэтому не видна, не ловит нажатий и не
+            раздвигает страницу; разметка и классы — те же, что у меню. */}
+        <div aria-hidden className="absolute left-0 top-0 h-0 w-0 overflow-hidden invisible pointer-events-none">
+          <div ref={measureRef} className="seg-track hidden lg:inline-flex w-max">
+            <img src={logoDa} alt="" className="h-[26px] w-auto shrink-0 mx-2.5" />
+            {headerItems.map(({ to, label, icon: Icon }) => (
+              <span key={to} className={navItem(false)}>
+                <Icon className="w-4 h-4 max-xl:hidden" />
+                {label}
+              </span>
+            ))}
+            <span className={navItem(false)}>
+              <MoreHorizontal className="w-4 h-4 max-xl:hidden" />
+              Ещё
+            </span>
+          </div>
+        </div>
         </div>
 
         {/* Правая зона. Тот же вес, что и у левой, — этим и держится середина.
@@ -232,6 +291,39 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         {/* Системная дорожка. Поиск живёт здесь же: он открывает палитру
             команд, то есть тоже про приложение, а не про данные на экране. */}
         <div className="seg-track shrink-0">
+        {/* Общие фильтры — первой кнопкой (только в режиме «По кнопке»: во
+            втором режиме панель стоит на самой странице, и кнопка не нужна): панель выезжает из-под шапки поверх
+            страницы с любого места прокрутки (`FiltersDock`). Точка — заданы
+            фильтры, есть что сбросить; на страницах без фильтров кнопка
+            погашена, а не пропадает, как «Настроить главную». */}
+        {filtersDocked && (
+        <button
+          type="button"
+          onClick={() => {
+            setMoreOpen(false);
+            toggleFilters();
+          }}
+          aria-disabled={!filtersAvailable}
+          aria-pressed={filtersOpen}
+          aria-label={filtersOpen ? "Скрыть фильтры" : "Показать фильтры"}
+          title={
+            filtersAvailable
+              ? filtersOpen
+                ? "Скрыть фильтры"
+                : `Фильтры · клавиша F\nПериод, счета, категории и поиск${filtersActive ? " — заданы" : ""}`
+              : "Фильтры\nНа этой странице их нет"
+          }
+          className={iconItem(filtersOpen && filtersAvailable)}
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+          {filtersActive && filtersAvailable && !filtersOpen && (
+            <span
+              aria-hidden
+              className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent ring-2 ring-panel2"
+            />
+          )}
+        </button>
+        )}
         <button
           onClick={onOpenPalette}
           className={iconItem()}
@@ -294,6 +386,23 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
         >
           <HelpCircle className="w-4 h-4 transition-transform duration-300 ease-out group-hover:scale-110" />
         </SmoothNavLink>
+
+        {/* Благодарность автору — рядом со справкой: там же, где всё «про
+            приложение». Прежде ссылка жила в подвале, куда мало кто
+            долистывал. Серая в покое, как соседи, сердце краснеет под
+            курсором. Убирается в «Настройки → Оформление». */}
+        {!hideThanks && (
+          <a
+            href={SUPPORT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={SUPPORT_TITLE}
+            aria-label={SUPPORT_TITLE}
+            className={iconItem()}
+          >
+            <Heart className="w-4 h-4 transition-[color,fill,transform] duration-300 ease-out group-hover:text-expense group-hover:fill-current group-hover:scale-110" />
+          </a>
+        )}
         </div>
 
         {/* Меню узкого экрана — последним значком той же дорожки. Отдельной
@@ -318,8 +427,10 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
           нём, и чтобы дойти до нижних, приходилось скроллить меню. Экран
           широкий — раскладываем их в три колонки и показываем разом.
 
-          Панель считается от ШАПКИ, а не от кнопки: кнопка стоит по центру, и
-          привязанная к ней панель уехала бы вбок. */}
+          Панель считается от ШАПКИ, а не от кнопки: у кнопки место зависит от
+          того, сколько разделов в шапке, и панель ездила бы вслед за ним.
+          Группы — из `moreGroups`: не поместившиеся в шапку, убранные из неё
+          основные разделы и прежние группы без того, что стоит в шапке. */}
       {moreOpen && (
         <>
           <div
@@ -328,14 +439,41 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
             aria-hidden="true"
           />
           <div className="hidden lg:block absolute left-0 right-0 top-full z-20 px-4 md:px-6 pt-1">
-            <div className="card-tray p-5 3xl:p-6">
-              {/* Колонки прижаты к середине, под меню, а не растянуты по всей
-                  ширине: на мониторе в 1800 пикселей колонка выходила по 539, а
-                  текста в ней на 250 — строки повисали в пустоте и переставали
-                  читаться как список. */}
-              <div className="grid grid-cols-3 gap-x-10 gap-y-1 max-w-[64rem] mx-auto">
-                {SECONDARY_GROUPS.map((group) => (
-                  <div key={group.title}>
+            <div className="card-tray relative p-5 3xl:p-6">
+              {/* Настройка основного меню — значком в углу панели: тут видно,
+                  чего не хватает в шапке, и значок не отнимает места у разделов.
+                  Верх угла свободен при любом числе столбцов — заголовки групп
+                  короткие и прижаты влево. */}
+              <button
+                type="button"
+                className="btn-icon absolute top-3 right-3"
+                onClick={() => {
+                  setMoreOpen(false);
+                  openHeaderEditor();
+                }}
+                title="Настроить основное меню"
+                aria-label="Настроить основное меню"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              {/* Колонки не шире 64rem и прижаты влево, под меню, а не растянуты
+                  по всей ширине: на мониторе в 1800 пикселей колонка выходила по
+                  539, а текста в ней на 250 — строки повисали в пустоте и
+                  переставали читаться как список. */}
+              {/* Каждая группа — свой столбец: столбцов ровно столько, сколько
+                  групп (от трёх до пяти). Колонки CSS укладывали короткие группы
+                  друг под другом — «Планы» и «Инструменты» оказывались в одном
+                  столбце, и границы групп переставали читаться. При четырёх и
+                  пяти группах промежуток уже, чтобы столбцы не сжимались. */}
+              <div
+                className={clsx("grid items-start", groups.length > 3 ? "gap-x-6" : "gap-x-10")}
+                style={{
+                  gridTemplateColumns: `repeat(${groups.length}, minmax(0, 1fr))`,
+                  maxWidth: `${groups.length * 21.5}rem`,
+                }}
+              >
+                {groups.map((group) => (
+                  <div key={group.title} className="min-w-0">
                     <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-medium px-2.5 pb-2">
                       {group.title}
                     </div>
@@ -355,7 +493,7 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
                       >
                         <Icon className="w-4 h-4 shrink-0" />
                         <span className="min-w-0">
-                          <span className="block truncate leading-tight">{label}</span>
+                          <span className="block leading-tight break-words">{label}</span>
                           {hint && (
                             <span className="block truncate text-[12px] text-muted/80 leading-tight mt-0.5">
                               {hint}
@@ -394,10 +532,14 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto py-2">
-              <div className="caps-label px-4 pt-2 pb-1">
-                Основное
-              </div>
-              {PRIMARY.map(({ to, label, icon: Icon }) => (
+              {/* Первыми — разделы из шапки, в её порядке: на телефоне меню
+                  разделов в шапке нет, и настройка работает как «основное». */}
+              {headerItems.length > 0 && (
+                <div className="caps-label px-4 pt-2 pb-1">
+                  Основное
+                </div>
+              )}
+              {headerItems.map(({ to, label, icon: Icon }) => (
                 <SmoothNavLink
                   key={to}
                   to={to}
@@ -409,7 +551,7 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
                   {label}
                 </SmoothNavLink>
               ))}
-              {SECONDARY_GROUPS.map((group) => (
+              {moreGroups(headerNav).map((group) => (
                 <div key={group.title}>
                   <div className="caps-label px-4 pt-3 pb-1">
                     {group.title}
@@ -466,6 +608,18 @@ export function TopNav({ onOpenPalette }: { onOpenPalette?: () => void }) {
                 <HelpCircle className="w-4 h-4" />
                 Справка
               </SmoothNavLink>
+              {!hideThanks && (
+                <a
+                  href={SUPPORT_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMobileOpen(false)}
+                  className={sheetRow()}
+                >
+                  <Heart className="w-4 h-4" />
+                  Отблагодарить автора
+                </a>
+              )}
               {/* Подпись — то, на что переключит, как значок в шапке. Меню не
                   закрывается: смену темы видно сразу за ним. */}
               <button

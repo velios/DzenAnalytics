@@ -68,7 +68,6 @@ export function SankeyPage() {
     <PageHeader
       icon={GitFork}
       title="Потоки денег"
-      hint="Весь путь денег: от источников дохода к тратам и сбережениям"
       info={
         <InfoPopover>
           <p>
@@ -106,7 +105,7 @@ export function SankeyPage() {
         {header}
         <GlobalFilters />
         <SectionEmpty icon={GitFork} title="Нет данных для построения потоков">
-          В текущем фильтре нет доходов и расходов — измените фильтр выше.
+          В текущем фильтре нет доходов и расходов — измените фильтры кнопкой в шапке.
         </SectionEmpty>
       </div>
     );

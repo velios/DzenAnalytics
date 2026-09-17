@@ -239,7 +239,6 @@ export function GoalsPage() {
       <PageHeader
         title="Цели"
         icon={Target}
-        hint="Успеваете ли накопить к сроку при нынешнем темпе"
         right={
           // Hidden while the add form is open — the form has its own «Отмена»,
           // so a second one in the header would just be redundant.
@@ -637,11 +636,7 @@ function GoalCard({
             <Tooltip content="Редактировать цель">
               <button
                 onClick={() => (editing && !closing ? closeEdit() : openEdit())}
-                className={`p-1.5 rounded-full transition-colors duration-200 ${
-                  editing && !closing
-                    ? "text-accent bg-accent/10"
-                    : "text-muted hover:text-text hover:bg-panel2"
-                }`}
+                className={`btn-icon ${editing && !closing ? "text-accent bg-accent/10" : ""}`}
                 aria-label="Редактировать цель"
               >
                 <Pencil className="w-4 h-4" />

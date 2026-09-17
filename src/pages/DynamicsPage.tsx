@@ -223,7 +223,6 @@ export function DynamicsPage() {
       <PageHeader
         icon={Activity}
         title="Динамика"
-        hint="Как менялись траты и доходы — в целом или у одного получателя"
       />
 
       <GlobalFilters period={lp} />
@@ -310,7 +309,7 @@ export function DynamicsPage() {
 
         {series.points.length === 0 ? (
           <SectionEmpty variant="inline">
-            За выбранный период нет подходящих операций — измените фильтр выше.
+            За выбранный период нет подходящих операций — измените фильтры кнопкой в шапке.
           </SectionEmpty>
         ) : (
           <>

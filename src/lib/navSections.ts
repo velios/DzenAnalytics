@@ -21,9 +21,12 @@ import {
   GitFork,
   Hash,
   HeartPulse,
+  LayoutDashboard,
   LineChart,
+  ListChecks,
   Newspaper,
   Percent,
+  PieChart,
   Repeat,
   Sparkles,
   Table,
@@ -31,6 +34,7 @@ import {
   Target,
   Trash2,
   TrendingUp,
+  Wallet,
   Wand2,
   Zap,
 } from "lucide-react";
@@ -89,7 +93,7 @@ export const SECONDARY_GROUPS: { title: string; items: NavSection[] }[] = [
       { to: "/duplicates", label: "Дубликаты", icon: Copy, hint: "Операции, похожие на задвоенные" },
       { to: "/anomalies", label: "Аномалии", icon: Zap, hint: "Необычные траты и всплески по категориям" },
       { to: "/recurring", label: "Регулярные", icon: Repeat, hint: "Планы из Дзен-мани и найденные подписки" },
-      { to: "/rules", label: "Правила", icon: Wand2, hint: "Категории и получатели по условиям" },
+      { to: "/rules", label: "Правила", icon: Wand2, hint: "Категория, получатель, комментарий" },
       { to: "/tags", label: "Теги", icon: Hash, hint: "Операции по хэштегам и вторым категориям" },
       { to: "/wordcloud", label: "Облако слов", icon: Cloud, hint: "Частые слова в комментариях" },
       { to: "/trash", label: "Удалённые", icon: Trash2, hint: "Удалённые операции — их можно вернуть" },
@@ -97,12 +101,44 @@ export const SECONDARY_GROUPS: { title: string; items: NavSection[] }[] = [
   },
 ];
 
+/** Основные разделы, убранные из шапки, — этой группой в «Ещё» и в крошках. */
+export const PRIMARY_GROUP_TITLE = "Обзор";
+
 /** Те же разделы плоским списком — в порядке панели «Ещё». */
 export const SECONDARY: NavSection[] = SECONDARY_GROUPS.flatMap((g) => g.items);
+
+/**
+ * Основные разделы — те, что по умолчанию стоят в шапке. Основное меню
+ * настраивается (`lib/headerNav`): основной раздел можно убрать в «Ещё», и
+ * там он встаёт группой «Обзор», поэтому пояснение нужно и ему.
+ */
+export const PRIMARY_SECTIONS: NavSection[] = [
+  { to: "/", label: "Главная", icon: LayoutDashboard, hint: "Сводка месяца и виджеты" },
+  { to: "/transactions", label: "Операции", icon: ListChecks, hint: "Лента всех операций с фильтрами" },
+  { to: "/accounts", label: "Счета", icon: Wallet, hint: "Балансы и движение по счетам" },
+  { to: "/categories", label: "Категории", icon: PieChart, hint: "Куда уходят и откуда приходят деньги" },
+];
+
+/** Все разделы, которые можно поставить в шапку: основные, затем из «Ещё». */
+export const ALL_SECTIONS: NavSection[] = [...PRIMARY_SECTIONS, ...SECONDARY];
 
 const BY_PATH = new Map(SECONDARY.map((s) => [s.to, s]));
 
 /** Раздел по пути. `undefined` — путь из другой версии или просто мусор. */
 export function navSection(to: string): NavSection | undefined {
   return BY_PATH.get(to);
+}
+
+/**
+ * Группа раздела — «Обзор» у основных, своя у остальных. Ею подписана шапка
+ * раздела: «Аналитика / Календарь». Особенно нужна разделам из «Ещё» — в
+ * дорожке меню у них подсвечена только кнопка «Ещё», и по одному названию не
+ * понять, куда ты попал.
+ *
+ * `undefined` — путь не раздел вовсе (справка, настройки, поиск): крошки там
+ * не из чего собрать, остаётся одно название.
+ */
+export function sectionGroupTitle(to: string): string | undefined {
+  if (PRIMARY_SECTIONS.some((s) => s.to === to)) return PRIMARY_GROUP_TITLE;
+  return SECONDARY_GROUPS.find((g) => g.items.some((s) => s.to === to))?.title;
 }

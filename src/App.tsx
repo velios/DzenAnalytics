@@ -6,8 +6,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ThemeModal } from "./components/ThemeModal";
+import { HeaderNavModal } from "./components/HeaderNavModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { ChangelogModal } from "./components/ChangelogModal";
 import { HistRatesProgress } from "./components/HistRatesProgress";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -54,6 +54,8 @@ import { useBudgetEditsStore } from "./store/useBudgetEditsStore";
 import { installNativeTooltips } from "./lib/nativeTooltips";
 import { useDisplayStore } from "./store/useDisplayStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
+import { useCloudSettingsStore } from "./store/useCloudSettingsStore";
+import { useCategoryRulesStore } from "./store/useCategoryRulesStore";
 import { useOffBalanceStore } from "./store/useOffBalanceStore";
 import { useSlicesStore } from "./store/useSlicesStore";
 import { useNewCategoriesStore } from "./store/useNewCategoriesStore";
@@ -68,6 +70,7 @@ import { useSplitGroupsStore } from "./store/useSplitGroupsStore";
 import { useMembersStore } from "./store/useMembersStore";
 import { useFreeMoneyStore } from "./store/useFreeMoneyStore";
 import { useTagModeStore } from "./store/useTagModeStore";
+import { useHeaderNavStore } from "./store/useHeaderNavStore";
 import { useDashboardLayoutStore } from "./store/useDashboardLayoutStore";
 import { useFiltersStore } from "./store/useFiltersStore";
 import { useImportBatchesStore } from "./store/useImportBatchesStore";
@@ -120,7 +123,6 @@ function App() {
   useDisplayStore((s) => s.fractionDigits);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [changelogOpen, setChangelogOpen] = useState(false);
   useGlobalShortcuts(() => setPaletteOpen(true));
 
   useEffect(() => {
@@ -144,10 +146,16 @@ function App() {
     usePlannedDeletionsStore.getState().hydrate();
     useDashboardLayoutStore.getState().hydrate();
     useFilterMemoryStore.getState().hydrate();
+    // Правила нужны переносу настроек с первой синхронизации, а не только на
+    // страницах, где их показывают.
+    void useCategoryRulesStore.getState().hydrate();
+    // Слежка за правками сама ждёт, пока каждое хранилище прочитает своё.
+    void useCloudSettingsStore.getState().hydrate();
     useSplitGroupsStore.getState().hydrate();
     useMembersStore.getState().hydrate();
     useFreeMoneyStore.getState().hydrate();
     useTagModeStore.getState().hydrate();
+    useHeaderNavStore.getState().hydrate();
     hydrate();
     backupHydrate();
     reportPeriodHydrate();
@@ -410,7 +418,10 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col">
       <TopNav onOpenPalette={() => setPaletteOpen(true)} />
-      <main className="flex-1 w-full px-4 md:px-6 py-4 md:py-6">
+      {/* Сверху воздуха меньше, чем снизу: первая строка страницы — тонкие
+          крошки раздела (PageHeader), они читаются как продолжение шапки, и
+          отбивать их наравне с остальными блоками незачем. */}
+      <main className="flex-1 w-full px-4 md:px-6 pt-3 md:pt-4 pb-4 md:pb-6">
         <Routes>
           <Route element={<PlainLayout />}>
             <Route path="/" element={<DashboardPage />} />
@@ -459,36 +470,10 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <footer className="border-t border-border mt-4">
-        <div className="w-full px-4 md:px-6 py-3 flex items-center justify-center gap-2.5 text-xs text-muted">
-          <span>
-            DzenAnalytics{" "}
-            <span className="tabular-nums">v{__APP_VERSION__}</span>
-          </span>
-          <span className="text-border">·</span>
-          <button
-            onClick={() => setChangelogOpen(true)}
-            className="hover:text-accent transition-colors"
-          >
-            Что нового
-          </button>
-          <span className="text-border">·</span>
-          <a
-            href="https://pay.cloudtips.ru/p/bbde8948"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 hover:text-accent transition-colors"
-            title="Поддержать автора чаевыми"
-          >
-            <span aria-hidden>❤️</span>
-            Отблагодарить автора
-          </a>
-        </div>
-      </footer>
       <TransactionsDrawer />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ThemeModal />
-      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
+      <HeaderNavModal />
       <ConfirmDialog />
       <HistRatesProgress />
     </div>

@@ -16,6 +16,7 @@ import {
   applyDiff,
   cacheToDiffResponse,
   forceFetchFor,
+  diffChangesPlanSet,
 } from "../lib/zenmoneyCache";
 import { zenUsers, type ZenUserOption } from "../lib/zenUsers";
 import { useMembersStore } from "./useMembersStore";
@@ -85,7 +86,12 @@ import {
 } from "../lib/zenBudgets";
 import { formatNum } from "../lib/format";
 import { budgetCellKey } from "../lib/budgets";
-import { invalidateZenCache } from "../lib/zenCacheMemo";
+import { getZenCache, invalidateZenCache } from "../lib/zenCacheMemo";
+import { useReportPeriodStore } from "./useReportPeriodStore";
+import { useCategoryRulesStore } from "./useCategoryRulesStore";
+import { useCloudSettingsStore } from "./useCloudSettingsStore";
+import { findCloudDocs, isServiceAccountTitle } from "../lib/cloudSettings";
+import { refDictionaryFromCache } from "../lib/ruleRefs";
 import type { ImportMeta } from "../types";
 import {
   isProviderActive,
@@ -360,10 +366,14 @@ async function readLiveAccounts(): Promise<LiveAccount[] | null> {
   // уже скрыты (#95). Условия те же, что у операций: знаем, кто мы, и режим
   // включён. Общие счета (`role: null`) остаются всегда.
   const { ownerId, hideForeignPrivate } = useMembersStore.getState();
+  // Служебные счета — наш для переноса настроек и Zerro — не деньги
+  // пользователя: ни в списках, ни в фильтрах их быть не должно.
+  const serviceId = findCloudDocs(cache).accountId;
+  const own = cache.accounts.filter((a) => a.id !== serviceId && !isServiceAccountTitle(a.title));
   const visible =
     ownerId != null && hideForeignPrivate
-      ? cache.accounts.filter((a) => a.role == null || a.role === ownerId)
-      : cache.accounts;
+      ? own.filter((a) => a.role == null || a.role === ownerId)
+      : own;
   return visible.map((a) => ({
     id: a.id,
     title: a.title,
@@ -794,6 +804,13 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     // потом принесёт свежий кэш, разбор счетов обновится сам — он сбрасывается
     // после каждой записи кэша.
     void getLiveAccountsFromCache().catch(() => {});
+    // День начала месяца при подключённом Дзен-мани — его собственный: берём
+    // из кэша сразу, не дожидаясь синхронизации.
+    if (token) {
+      void getZenCache()
+        .then((c) => useReportPeriodStore.getState().adoptZenDay(c?.user?.[0]?.monthStartDay))
+        .catch(() => {});
+    }
 
     // Priority: a persisted token means manual mode (upstream behaviour).
     // Otherwise, if the build wired up a provider AND the user hasn't
@@ -839,6 +856,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
 
   removeToken: async () => {
     await db.saveJSON(TOKEN_KEY, null);
+    // Без Дзен-мани снова действует свой день начала месяца.
+    useReportPeriodStore.getState().adoptZenDay(null);
     await db.saveJSON(TIMESTAMP_KEY, 0);
     await db.saveJSON(LAST_SYNC_KEY, null);
     await clearZenCache();
@@ -873,6 +892,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
 
   disconnectProvider: async () => {
     await db.saveJSON(PROVIDER_OPT_OUT_KEY, true);
+    // Без Дзен-мани снова действует свой день начала месяца.
+    useReportPeriodStore.getState().adoptZenDay(null);
     set({
       token: null,
       providerMode: false,
@@ -891,6 +912,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       return;
     }
     await db.saveJSON(PROVIDER_OPT_OUT_KEY, true);
+    useReportPeriodStore.getState().adoptZenDay(null);
     set({ token: null, providerMode: false, status: "idle", error: null });
   },
 
@@ -927,12 +949,35 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       // Перезабор планов — полный список, а не добавка: только так из кэша
       // уходят операции удалённых планов, о которых Дзен-мани сообщил
       // удалением самого плана, а не каждой операции (issue #71).
-      const nextCache = applyDiff(prevCache, diff, {
+      let nextCache = applyDiff(prevCache, diff, {
         replaceMarkers: backfill.includes("reminderMarker"),
+      });
+      // Состав планов поменялся — список их операций берём целиком и заменяем
+      // им наш: только так уходит старая дата перенесённой операции, о которой
+      // сервер в diff не сообщает (issue #99). Второй запрос идёт от новой
+      // метки времени, поэтому остального почти не несёт. Упадёт — упадёт вся
+      // синхронизация, и следующая повторит оба шага с прежней метки.
+      if (!backfill.includes("reminderMarker") && diffChangesPlanSet(prevCache, diff)) {
+        const plans = await fetchDiff(token, nextCache.serverTimestamp, undefined, [
+          "reminderMarker",
+        ]);
+        nextCache = applyDiff(nextCache, plans, { replaceMarkers: true });
+      }
+      // Настройки и правила, перенесённые с других устройств, — и отправка
+      // своих, если облако отстало. Выключено — шаг ничего не делает; упал —
+      // синхронизация операций от этого не страдает.
+      nextCache = await useCloudSettingsStore.getState().step({
+        token,
+        cache: nextCache,
+        deletions: diff.deletion ?? [],
       });
       await saveZenCache(nextCache);
       invalidateLiveAccounts();
       invalidateZenCache();
+      useReportPeriodStore.getState().adoptZenDay(nextCache.user?.[0]?.monthStartDay);
+      // Правила — вслед за справочниками: переименованная категория, счёт или
+      // контрагент подтягивается в правила по id.
+      await useCategoryRulesStore.getState().reconcileRefs(refDictionaryFromCache(nextCache));
       const mapped = mapZenmoneyDiff(cacheToDiffResponse(nextCache));
       const isFull = fromTs === 0;
 

@@ -910,7 +910,6 @@ export function BudgetsPage() {
       <PageHeader
         icon={Wallet}
         title="Бюджет"
-        hint="Сколько ещё можно потратить по каждой статье"
       />
 
       {/* Панель: вид и период (слева), действия (справа). */}
@@ -961,13 +960,12 @@ export function BudgetsPage() {
               // 79 (самое длинное «Февр. 2026», замерено) + 16 (значок) +
               // 8 (просвет) + 24 (поля) + 2 (кант) = 129, берём 132. Поля стали
               // по 12: у пилюли восьмипиксельные прижимали подпись к канту.
-              // Пилюля, а не скруглённое поле: вокруг одни пилюли, и
-              // двенадцатипиксельный радиус посреди них был единственным на всю
-              // строку.
-              className="input text-sm font-medium w-[132px] !px-3 !py-2.5 !rounded-full"
+              // Скругление — общее у поля: пилюлей оно было, пока пилюлями были
+              // и кнопки вокруг.
+              className="input text-sm font-medium w-[132px] !px-3 !py-2.5"
             />
           ) : (
-            <span className="text-sm font-medium tabular-nums px-4 py-2.5 rounded-full bg-panel2 border border-border">
+            <span className="input w-auto text-sm font-medium tabular-nums !px-4 !py-2.5">
               {year}
             </span>
           )}

@@ -34,6 +34,8 @@ import {
   Area,
 } from "recharts";
 import { ArrowRight } from "lucide-react";
+import { Segmented } from "../Segmented";
+import { useFreeMoneyStore } from "../../store/useFreeMoneyStore";
 import { Link } from "react-router-dom";
 import {
   Scale, Target, TrendingUp, ArrowUpRight, ArrowUp, ArrowDown, Clock, Lightbulb, Sigma,
@@ -62,7 +64,7 @@ const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн"
   "июл", "авг", "сен", "окт", "ноя", "дек"];
 import type { DashboardModel } from "../../hooks/useDashboardModel";
 import type { FreeMoneyModel } from "../../hooks/useFreeMoney";
-import type { PlanLeft } from "../../lib/freeMoney";
+import type { BalanceMode, PlanLeft } from "../../lib/freeMoney";
 import type { PlannedOp } from "../../lib/plannedOps";
 import type { Currency } from "../../types";
 import { SectionEmpty } from "../SectionEmpty";
@@ -70,16 +72,24 @@ import { ProgressBar } from "../ProgressBar";
 
 /* ─────────────────────────────  мелочи  ───────────────────────────── */
 
-export function SectionLabel({ children }: { children: ReactNode }) {
+export function SectionLabel({
+  children,
+  right,
+}: {
+  children: ReactNode;
+  /** Контрол раздела в конце строки — после черты, вровень с подписью. */
+  right?: ReactNode;
+}) {
   return (
     <div className="flex items-center gap-3">
       {/* Настоящий заголовок раздела, а не просто мелкий текст: на старой
           главной не было ни одного h2–h6, и с клавиатуры страница читалась
           как одно сплошное полотно. */}
-      <h2 className="text-[11.5px] uppercase tracking-[0.12em] text-muted font-medium">
+      <h2 className="text-[11.5px] uppercase tracking-[0.12em] text-muted font-medium whitespace-nowrap">
         {children}
       </h2>
       <span className="flex-1 h-px bg-border" />
+      {right && <div className="shrink-0">{right}</div>}
     </div>
   );
 }
@@ -1321,20 +1331,39 @@ function planLines(rows: readonly PlanLeft[]): PlanLine[] {
 /**
  * Подсказка виджета. `withPlan` — стоит ли рядом список статей: у узкого
  * варианта его нет, и объяснять там вложенность под-статей не на чем.
+ *
+ * Термины — ровно те подписи, что стоят в самом виджете (issue #100): раньше
+ * подсказка объясняла «Деньги», а такой строки в виджете нет.
  */
-function freeMoneyInfo(withPlan: boolean) {
+function freeMoneyInfo(withPlan: boolean, balanceMode: BalanceMode) {
+  const opening = balanceMode === "includeOpeningBalance";
   return (
     <>
       <p>
-        Сколько можно потратить, не залезая в запланированное. Считаем как
-        Дзен-мани: <InfoTerm>деньги до конца периода</InfoTerm> минус{" "}
-        <InfoTerm>план на месяц</InfoTerm>.
+        <InfoTerm>Свободно до…</InfoTerm> — сколько можно потратить до конца
+        периода, не залезая в запланированное. Считаем как Дзен-мани:{" "}
+        {opening ? "«На счетах»" : "«Баланс периода»"} плюс «Ещё поступит»
+        минус «План на месяц».
       </p>
       <p>
-        <InfoTerm>Деньги</InfoTerm> — приход минус расход за период плюс то, что
-        ещё поступит по планам и бюджету. Остаток на счетах к началу периода не
-        считается: так настроен ваш Дзен-мани, и эту настройку мы берём у него, а
-        не заводим свою.
+        {opening ? (
+          <>
+            <InfoTerm>На счетах</InfoTerm> — сколько сейчас лежит на счетах из
+            расчёта, вместе с тем, что было к началу периода.
+          </>
+        ) : (
+          <>
+            <InfoTerm>Баланс периода</InfoTerm> — приход минус расход с начала
+            периода. Остаток на счетах к его началу не считается.
+          </>
+        )}{" "}
+        Так настроен ваш Дзен-мани, и эту настройку мы берём у него, а не
+        заводим свою.
+      </p>
+      <p>
+        <InfoTerm>Ещё поступит</InfoTerm> — доход, который ждёт бюджет и
+        назначенные поступления, за вычетом того, что уже пришло. Пришедшая
+        зарплата отсюда уходит: она уже в балансе.
       </p>
       <p>
         <InfoTerm>План на месяц</InfoTerm> — сколько ещё предстоит потратить по
@@ -1364,7 +1393,7 @@ function freeMoneyInfo(withPlan: boolean) {
         </p>
       )}
       <p>
-        <InfoTerm>Кольцо</InfoTerm> — сегодняшний день: сколько из положенного на
+        <InfoTerm>На сегодня</InfoTerm> — кольцо: сколько из положенного на
         сегодня ещё цело. Оно пустеет только от трат сверх плана, поэтому
         обычный день его не трогает. Лимит дня считается от свободных денег на
         утро: сегодняшняя трата сегодняшний же лимит не урезает.
@@ -1396,6 +1425,37 @@ function FreeMoneyEmpty() {
  * Живёт отдельно от списка статей: в широком виджете это левая колонка, в
  * узком — всё его содержимое.
  */
+/**
+ * Как делить свободные деньги по дням — прямо в виджете. Та же настройка, что
+ * в «Настройках → Расчёты → Виджет «Свободные деньги»»: переключить метод
+ * хочется, глядя на число дня, а не уходя за ним в настройки.
+ */
+function FreeMethodSwitch() {
+  const method = useFreeMoneyStore((s) => s.method);
+  const setMethod = useFreeMoneyStore((s) => s.setMethod);
+  return (
+    <Segmented
+      size="sm"
+      tight
+      label="Как делить свободные деньги по дням"
+      value={method}
+      onChange={(v) => void setMethod(v)}
+      options={[
+        {
+          value: "cumulative",
+          label: "Накопительный",
+          title: "Лимит на день один на весь период, непотраченное копится",
+        },
+        {
+          value: "daily",
+          label: "Ежедневный",
+          title: "Остаток делится на оставшиеся дни заново каждое утро",
+        },
+      ]}
+    />
+  );
+}
+
 function FreeMoneySummary({ f, base }: { f: FreeMoneyModel; base: Currency }) {
   const { allowance, money } = f;
   // Свободных денег нет вовсе — план съел всё, что будет. Дневного лимита в
@@ -1409,7 +1469,7 @@ function FreeMoneySummary({ f, base }: { f: FreeMoneyModel; base: Currency }) {
   return (
     <div className="flex-1 flex flex-col min-h-0 divide-y divide-border">
       <div className="flex-1 flex flex-col pb-5">
-        <SectionLabel>На сегодня</SectionLabel>
+        <SectionLabel right={<FreeMethodSwitch />}>На сегодня</SectionLabel>
         <div className="flex-1 flex items-center gap-4 mt-2.5">
           <AllowanceRing ratio={noBudget ? 0 : over ? 1 : f.ratio} tone={tone} />
           <div className="min-w-0">
@@ -1567,7 +1627,7 @@ export function FreeMoneyBlock({ f, base }: { f: FreeMoneyModel; base: Currency 
         title="Свободные деньги"
         to="/budgets"
         linkLabel="Бюджет"
-        info={freeMoneyInfo(true)}
+        info={freeMoneyInfo(true, f.balanceMode)}
       />
 
       {/* Две колонки: слева ответ на «сколько можно сегодня» и из чего он
@@ -1645,7 +1705,7 @@ export function FreeMoneyCompactBlock({ f, base }: { f: FreeMoneyModel; base: Cu
         title="Свободные деньги"
         to="/budgets"
         linkLabel="Бюджет"
-        info={freeMoneyInfo(false)}
+        info={freeMoneyInfo(false, f.balanceMode)}
       />
       <FreeMoneySummary f={f} base={base} />
     </>

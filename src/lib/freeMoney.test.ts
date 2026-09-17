@@ -4,6 +4,7 @@ import {
   dailyAllowance,
   freeSpentToday,
   freeToSpend,
+  incomeStillToCome,
   moneyBreakdown,
   planRemainder,
   savedSoFar,
@@ -429,5 +430,43 @@ describe("allowanceRatio", () => {
 
   it("нулевой лимит не делится", () => {
     expect(allowanceRatio(0, 0)).toBe(0);
+  });
+});
+
+describe("incomeStillToCome — «Ещё поступит» (#100)", () => {
+  const m = (o: Record<string, number>) => new Map(Object.entries(o));
+  const roots = new Map<string, string | null>();
+
+  it("живой аккаунт: сходится с приложением по всем доходным категориям сразу", () => {
+    // Работа: бюджет 100, аванс уже пришёл 110, зарплата 100 назначена на конец
+    // месяца — ждём её целиком. Прочее: бюджет 2, ничего не пришло. Кэшбек:
+    // бюджет 1, пришло 5 — ноль. Проценты: бюджет 20, пришло 21 — ноль.
+    const plan = m({ work: 100, other: 2, cashback: 1, interest: 20 });
+    const upcoming = m({ work: 100 });
+    const received = m({ work: 110, cashback: 5, interest: 21 });
+    expect(incomeStillToCome(plan, upcoming, received, roots)).toBe(102);
+  });
+
+  it("бюджет без назначенных поступлений гасится пришедшим, не ниже нуля", () => {
+    expect(incomeStillToCome(m({ salary: 100 }), m({}), m({ salary: 40 }), roots)).toBe(60);
+    expect(incomeStillToCome(m({ salary: 100 }), m({}), m({ salary: 130 }), roots)).toBe(0);
+  });
+
+  it("будущее назначенное поступление пришедшим не гасится", () => {
+    expect(incomeStillToCome(m({}), m({ salary: 100 }), m({ salary: 100 }), roots)).toBe(100);
+  });
+
+  it("из бюджета и будущего назначенного — большее, не сумма", () => {
+    expect(incomeStillToCome(m({ salary: 100 }), m({ salary: 120 }), m({}), roots)).toBe(120);
+    expect(incomeStillToCome(m({ salary: 150 }), m({ salary: 120 }), m({}), roots)).toBe(150);
+  });
+
+  it("доход по под-категории гасит бюджет родителя", () => {
+    const parents = new Map<string, string | null>([["advance", "salary"], ["salary", null]]);
+    expect(incomeStillToCome(m({ salary: 100 }), m({}), m({ advance: 30 }), parents)).toBe(70);
+  });
+
+  it("доход вне плана остаток не трогает", () => {
+    expect(incomeStillToCome(m({ salary: 100 }), m({}), m({ gift: 5 }), roots)).toBe(100);
   });
 });

@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Trash2,
   Palette,
+  PanelTop,
   Replace,
   Layers,
   Download,
@@ -30,6 +31,7 @@ import {
   LogOut,
   Users,
   Calculator,
+  Coins,
   ALargeSmall,
   ArrowLeftRight,
   ArrowRight,
@@ -41,6 +43,7 @@ import { SettingsSectionHeader } from "../components/SettingsSectionHeader";
 import { PendingChangesModal } from "../components/PendingChangesModal";
 import { SlicesSettings } from "../components/SlicesSettings";
 import { SettingRow } from "../components/SettingRow";
+import { CloudSettingsCard } from "../components/CloudSettingsCard";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
 import { Switch } from "../components/Switch";
 import { Segmented } from "../components/Segmented";
@@ -74,6 +77,8 @@ import { useFilterMemoryStore } from "../store/useFilterMemoryStore";
 import { useDisplayStore, type TableFontLevel } from "../store/useDisplayStore";
 import { useThemeStore } from "../store/useThemeStore";
 import { useThemeModalStore } from "../store/useThemeModalStore";
+import { useHeaderNavStore } from "../store/useHeaderNavStore";
+import { headerSections } from "../lib/headerNav";
 import { parseAndValidateBackup, restoreBackupPayload } from "../lib/backup";
 import { snapshotSummary } from "../lib/snapshotLabel";
 import { readSnapshotFile } from "../lib/snapshotFile";
@@ -90,7 +95,6 @@ import {
 } from "../store/useCounterpartyEditsStore";
 import * as db from "../lib/db";
 import { ImportXlsxCard } from "../components/ImportXlsxCard";
-import { Callout } from "../components/Callout";
 import { RangeInput } from "../components/Slider";
 
 type Mode = "replace" | "merge";
@@ -203,6 +207,8 @@ export function ImportPage() {
   const themeMode = useThemeStore((s) => s.mode);
   const resolvedTheme = useThemeStore((s) => s.resolved);
   const showThemeModal = useThemeModalStore((s) => s.show);
+  const headerNavItems = useHeaderNavStore((s) => s.items);
+  const openHeaderNavEditor = useHeaderNavStore((s) => s.openEditor);
   const lightSchemeName = useThemeStore((s) => schemeById(s.lightScheme)?.name ?? "");
   const darkSchemeName = useThemeStore((s) => schemeById(s.darkScheme)?.name ?? "");
   const fractionDigits = useDisplayStore((s) => s.fractionDigits);
@@ -210,6 +216,10 @@ export function ImportPage() {
   const rememberFilters = useFilterMemoryStore((s) => s.enabled);
   const setRememberFilters = useFilterMemoryStore((s) => s.setEnabled);
   const setStatementLine = useDisplayStore((s) => s.setStatementLine);
+  const filtersMode = useDisplayStore((s) => s.filtersMode);
+  const setFiltersMode = useDisplayStore((s) => s.setFiltersMode);
+  const hideThanks = useDisplayStore((s) => s.hideThanks);
+  const setHideThanks = useDisplayStore((s) => s.setHideThanks);
   const setFractionDigits = useDisplayStore((s) => s.setFractionDigits);
   const tableFontLevel = useDisplayStore((s) => s.tableFontLevel);
   const setTableFontLevel = useDisplayStore((s) => s.setTableFontLevel);
@@ -675,6 +685,8 @@ export function ImportPage() {
   const reportPeriodLoaded = useReportPeriodStore((s) => s.loaded);
   const reportPeriodHydrate = useReportPeriodStore((s) => s.hydrate);
   const setMonthStartDay = useReportPeriodStore((s) => s.setMonthStartDay);
+  /** День из настроек Дзен-мани; при нём своя настройка не действует. */
+  const zenMonthStartDay = useReportPeriodStore((s) => s.zenDay);
   useEffect(() => {
     if (!reportPeriodLoaded) reportPeriodHydrate();
   }, [reportPeriodLoaded, reportPeriodHydrate]);
@@ -846,7 +858,6 @@ export function ImportPage() {
       <PageHeader
         icon={Settings}
         title="Настройки"
-        hint="Данные, расчёты, оформление и бэкапы"
       />
 
       {/* Horizontal tab bar — top-level grouping for the long
@@ -866,10 +877,10 @@ export function ImportPage() {
         className="self-start -mt-1 scroll-soft-x max-w-full"
         options={[
           { value: "source", label: "Данные", icon: Database },
-          { value: "operations", label: "Справочники", icon: ArrowLeftRight },
-          { value: "processing", label: "Расчёты", icon: Calculator },
-          { value: "interface", label: "Оформление", icon: ALargeSmall },
           { value: "backups", label: "Бэкапы", icon: History },
+          { value: "interface", label: "Оформление", icon: ALargeSmall },
+          { value: "processing", label: "Расчёты", icon: Calculator },
+          { value: "operations", label: "Справочники", icon: ArrowLeftRight },
         ]}
       />
 
@@ -1450,7 +1461,7 @@ export function ImportPage() {
       <div className="card-tray card-pad">
         <SettingsSectionHeader icon={Palette} title="Внешний вид" className="mb-1" />
         <p className="text-xs text-muted mb-3">
-          Как сервис выглядит и в каком виде показывает суммы.
+          Как сервис выглядит и как им удобнее пользоваться.
         </p>
 
         <SettingRow
@@ -1480,6 +1491,29 @@ export function ImportPage() {
         />
 
         <SettingRow
+          title="Основное меню"
+          status={
+            headerNavItems.length === 0
+              ? "Все разделы — в «Ещё»"
+              : headerSections(headerNavItems).map((s) => s.label).join(", ")
+          }
+          help={
+            <p>
+              Какие разделы стоят в основном меню в шапке и в каком порядке. Любой
+              раздел из «Ещё» можно поставить в меню, а основной — убрать в «Ещё».
+              Если на узком экране разделы не помещаются, последние сами уходят в
+              «Ещё». Открыть настройку можно и значком с карандашом в панели «Ещё».
+            </p>
+          }
+          control={
+            <button type="button" className="btn-ghost" onClick={openHeaderNavEditor}>
+              <PanelTop className="w-4 h-4" />
+              Настроить
+            </button>
+          }
+        />
+
+        <SettingRow
           title="Дробная часть сумм"
           status={`Например: ${formatMoney(1234.1, rates.base)}`}
           help={
@@ -1497,6 +1531,47 @@ export function ImportPage() {
               options={[
                 { value: 0, label: "1 234", title: "Без дробной части" },
                 { value: 2, label: "1 234,10", title: "С дробной частью" },
+              ]}
+            />
+          }
+        />
+
+        <SettingRow
+          title="Панель фильтров"
+          status={
+            filtersMode === "button"
+              ? "По кнопке в шапке — не занимает места"
+              : "На странице — всегда на виду"
+          }
+          help={
+            <>
+              <p>
+                Общие фильтры — период, счета, категории, валюты и поиск —
+                работают на всех аналитических страницах. Показывать их можно
+                двумя способами.
+              </p>
+              <p className="mt-2">
+                <strong>По кнопке в шапке.</strong> Панель не занимает места на
+                странице: открывается кнопкой с ползунками справа в шапке, с
+                любого места прокрутки выезжает поверх страницы и ничего не
+                сдвигает. Прячется той же кнопкой, клавишей Escape и при
+                переходе в другой раздел. Точка на кнопке — фильтры заданы.
+              </p>
+              <p className="mt-2">
+                <strong>На странице.</strong> Панель стоит первым блоком
+                каждой страницы и всегда на виду, как было раньше; кнопки в
+                шапке в этом случае нет.
+              </p>
+            </>
+          }
+          control={
+            <Segmented
+              label="Панель фильтров"
+              value={filtersMode}
+              onChange={(m) => setFiltersMode(m)}
+              options={[
+                { value: "button", label: "По кнопке" },
+                { value: "page", label: "На странице" },
               ]}
             />
           }
@@ -1537,52 +1612,27 @@ export function ImportPage() {
         />
 
         <SettingRow
-          title="Размер текста в таблицах"
-          status={`${TABLE_FONT_LABELS[tableFontLevel]} (${tableFontLevel}/5)`}
+          title="Убрать иконку благодарности"
+          status={
+            hideThanks
+              ? "Сердечко скрыто"
+              : "Сердечко «Поддержать проект» — в шапке рядом со справкой"
+          }
           help={
             <p>
-              Размер шрифта в списках операций: лента «Операции», поиск, окно
-              операций, дубликаты, удалённые и подобные таблицы. Остальной
-              интерфейс не меняется.
+              Значок с сердечком ведёт на страницу, где можно оставить автору
+              чаевые. Если он мешает — включите, и значок пропадёт из шапки и из
+              меню на телефоне. Больше ничего не меняется.
             </p>
           }
           control={
-            <div className="flex items-center gap-2">
-              <span className="text-muted text-[12px]" aria-hidden>
-                А
-              </span>
-              <RangeInput
-                value={tableFontLevel}
-                min={1}
-                max={5}
-                onChange={(v) => setTableFontLevel(v as TableFontLevel)}
-                ariaLabel="Размер текста в таблицах"
-                valueText={TABLE_FONT_LABELS[tableFontLevel]}
-                className="w-40"
-              />
-              <span className="text-muted text-[18px]" aria-hidden>
-                А
-              </span>
-            </div>
+            <Switch
+              checked={hideThanks}
+              label="Убрать иконку благодарности"
+              onChange={(next) => setHideThanks(next)}
+            />
           }
-        >
-          {/* Живой пример — на той же CSS-переменной, что и таблицы, поэтому
-              масштабируется прямо во время перетаскивания. */}
-          <div className="mt-3 rounded-lg border border-border bg-panel2/40 px-3 py-2 flex items-center justify-between gap-3">
-            <span
-              className="text-muted truncate"
-              style={{ fontSize: "var(--tbl-font)" }}
-            >
-              01.06.2026 · Пятёрочка · Еда дома
-            </span>
-            <span
-              className="tabular-nums font-medium text-expense whitespace-nowrap"
-              style={{ fontSize: "var(--tbl-font)" }}
-            >
-              {formatMoney(-1234, rates.base)}
-            </span>
-          </div>
-        </SettingRow>
+        />
 
         <SettingRow
           title="Запоминать фильтры"
@@ -1673,6 +1723,54 @@ export function ImportPage() {
             }
           />
         )}
+
+        <SettingRow
+          title="Размер текста в таблицах"
+          status={`${TABLE_FONT_LABELS[tableFontLevel]} (${tableFontLevel}/5)`}
+          help={
+            <p>
+              Размер шрифта в списках операций: лента «Операции», поиск, окно
+              операций, дубликаты, удалённые и подобные таблицы. Остальной
+              интерфейс не меняется.
+            </p>
+          }
+          control={
+            <div className="flex items-center gap-2">
+              <span className="text-muted text-[12px]" aria-hidden>
+                А
+              </span>
+              <RangeInput
+                value={tableFontLevel}
+                min={1}
+                max={5}
+                onChange={(v) => setTableFontLevel(v as TableFontLevel)}
+                ariaLabel="Размер текста в таблицах"
+                valueText={TABLE_FONT_LABELS[tableFontLevel]}
+                className="w-40"
+              />
+              <span className="text-muted text-[18px]" aria-hidden>
+                А
+              </span>
+            </div>
+          }
+        >
+          {/* Живой пример — на той же CSS-переменной, что и таблицы, поэтому
+              масштабируется прямо во время перетаскивания. */}
+          <div className="mt-3 rounded-lg border border-border bg-panel2/40 px-3 py-2 flex items-center justify-between gap-3">
+            <span
+              className="text-muted truncate"
+              style={{ fontSize: "var(--tbl-font)" }}
+            >
+              01.06.2026 · Пятёрочка · Еда дома
+            </span>
+            <span
+              className="tabular-nums font-medium text-expense whitespace-nowrap"
+              style={{ fontSize: "var(--tbl-font)" }}
+            >
+              {formatMoney(-1234, rates.base)}
+            </span>
+          </div>
+        </SettingRow>
       </div>
 
       </>)}
@@ -1732,9 +1830,10 @@ export function ImportPage() {
         <SettingRow
           title="Первый день отчётного месяца"
           status={
-            monthStartDay === 1
+            (zenMonthStartDay !== null ? "Как в Дзен-мани · " : "") +
+            (monthStartDay === 1
               ? "Календарный месяц"
-              : `С ${monthStartDay}-го числа по ${monthStartDay - 1}-е следующего`
+              : `С ${monthStartDay}-го числа по ${monthStartDay - 1}-е следующего`)
           }
           help={
             <>
@@ -1753,9 +1852,15 @@ export function ImportPage() {
                 Допустимы значения 1–28. Числа 29, 30 и 31 есть не в каждом
                 месяце, поэтому их не предлагаем.
               </p>
+              <p>
+                При подключённом Дзен-мани день берётся из его настроек, чтобы
+                отчёты не расходились с приложением, — поменять его можно там.
+                Своё значение здесь действует в режиме CSV.
+              </p>
             </>
           }
           control={
+            zenMonthStartDay !== null ? undefined : (
             <input
               type="number"
               min={1}
@@ -1770,6 +1875,7 @@ export function ImportPage() {
                  однозначное число не висело у левого края. */
               className="input text-sm w-16 tabular-nums text-center"
             />
+            )
           }
         />
 
@@ -1857,93 +1963,6 @@ export function ImportPage() {
           }
         />
 
-        {/* Виджет «Свободные деньги» (#96). Настройки живут в «Расчётах», а не
-            в «Оформлении»: они меняют не вид, а само число. */}
-        <SettingRow
-          title="Свободные деньги: расчёт на день"
-          status={
-            freeMethod === "cumulative"
-              ? "Накопительный: непотраченное переносится на завтра"
-              : "Ежедневный: лимит считается заново каждый день"
-          }
-          help={
-            <>
-              <p>
-                Виджет «Свободные деньги» на главной делит свободные деньги на
-                дни до конца отчётного периода. Делить можно двумя способами —
-                теми же, что предлагает Дзен-мани.
-              </p>
-              <p>
-                <InfoTerm>Накопительный</InfoTerm> — лимит на день один на весь
-                период, а непотраченное копится отдельной суммой: не потратив
-                ничего три дня, на четвёртый можно потратить вчетверо больше.
-                Прощает неровные дни, а неровными траты и бывают.
-              </p>
-              <p>
-                <InfoTerm>Ежедневный</InfoTerm> — остаток делится на оставшиеся
-                дни заново каждое утро. Вчерашняя экономия не пропадает, но
-                отдельно её не видно: она просто чуть поднимает лимит.
-              </p>
-              <p>
-                Начало периода виджет берёт из настроек самого Дзен-мани, а не
-                отсюда: иначе он молча разошёлся бы с приложением на телефоне.
-              </p>
-            </>
-          }
-          control={
-            <Segmented
-              label="Метод расчёта свободных на день"
-              value={freeMethod}
-              onChange={(v) => void setFreeMethod(v)}
-              options={[
-                { value: "cumulative", label: "Накопительный" },
-                { value: "daily", label: "Ежедневный" },
-              ]}
-            />
-          }
-        />
-
-        <SettingRow
-          title="Неснижаемый остаток"
-          status={
-            freeReserve > 0
-              ? `${formatMoney(freeReserve, rates.base)} не попадут в свободные`
-              : "Не задан — свободными считаются все деньги на счетах"
-          }
-          help={
-            <>
-              <p>
-                Сумма, которую вы не собираетесь тратить: подушка на счёте,
-                отложенное на крупную покупку. Вычитается из свободных денег
-                сразу, поэтому виджет не предложит потратить то, что трогать не
-                планировалось.
-              </p>
-              <p>
-                Это не то же самое, что счета вне баланса: там вы убираете счёт
-                целиком, здесь — часть суммы на обычных счетах.
-              </p>
-            </>
-          }
-          control={
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                step={1000}
-                value={freeReserve || ""}
-                placeholder="0"
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  void setFreeReserve(Number.isFinite(n) ? n : 0);
-                }}
-                aria-label="Неснижаемый остаток"
-                className="input text-sm w-32 tabular-nums text-right"
-              />
-              <span className="text-sm text-muted">{rates.base}</span>
-            </div>
-          }
-        />
-
         {!zenToken && (
           <SettingRow
             title="Курсы валют"
@@ -2017,6 +2036,109 @@ export function ImportPage() {
             })()}
           </SettingRow>
         )}
+      </div>
+
+      {/* Виджет «Свободные деньги» (#96) — своей карточкой. Это настройки
+          одного виджета на главной, а не правила всех расчётов: в общей
+          карточке «Как считать» они читались как глобальные. В «Расчётах», а
+          не в «Оформлении», потому что меняют само число, а не вид. */}
+      <div className="card-tray card-pad">
+        <SettingsSectionHeader
+          icon={Coins}
+          title="Виджет «Свободные деньги»"
+          className="mb-1"
+        />
+        <p className="text-xs text-muted mb-3">
+          Действуют только на этот виджет на главной — остальные итоги и
+          отчёты не меняют.
+        </p>
+
+        <SettingRow
+          title="Расчёт на день"
+          status={
+            freeMethod === "cumulative"
+              ? "Накопительный: непотраченное переносится на завтра"
+              : "Ежедневный: лимит считается заново каждый день"
+          }
+          help={
+            <>
+              <p>
+                Виджет «Свободные деньги» на главной делит свободные деньги на
+                дни до конца отчётного периода. Делить можно двумя способами —
+                теми же, что предлагает Дзен-мани.
+              </p>
+              <p>
+                <InfoTerm>Накопительный</InfoTerm> — лимит на день один на весь
+                период, а непотраченное копится отдельной суммой: не потратив
+                ничего три дня, на четвёртый можно потратить вчетверо больше.
+                Прощает неровные дни, а неровными траты и бывают.
+              </p>
+              <p>
+                <InfoTerm>Ежедневный</InfoTerm> — остаток делится на оставшиеся
+                дни заново каждое утро. Вчерашняя экономия не пропадает, но
+                отдельно её не видно: она просто чуть поднимает лимит.
+              </p>
+              <p>
+                Переключить метод можно и прямо в виджете — у заголовка «На
+                сегодня». Начало периода виджет берёт из настроек самого
+                Дзен-мани, а не отсюда: иначе он молча разошёлся бы с
+                приложением на телефоне.
+              </p>
+            </>
+          }
+          control={
+            <Segmented
+              label="Метод расчёта свободных на день"
+              value={freeMethod}
+              onChange={(v) => void setFreeMethod(v)}
+              options={[
+                { value: "cumulative", label: "Накопительный" },
+                { value: "daily", label: "Ежедневный" },
+              ]}
+            />
+          }
+        />
+
+        <SettingRow
+          title="Неснижаемый остаток"
+          status={
+            freeReserve > 0
+              ? `${formatMoney(freeReserve, rates.base)} не попадут в свободные`
+              : "Не задан — свободными считаются все деньги на счетах"
+          }
+          help={
+            <>
+              <p>
+                Сумма, которую вы не собираетесь тратить: подушка на счёте,
+                отложенное на крупную покупку. Вычитается из свободных денег
+                сразу, поэтому виджет не предложит потратить то, что трогать не
+                планировалось.
+              </p>
+              <p>
+                Это не то же самое, что счета вне баланса: там вы убираете счёт
+                целиком, здесь — часть суммы на обычных счетах.
+              </p>
+            </>
+          }
+          control={
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                step={1000}
+                value={freeReserve || ""}
+                placeholder="0"
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  void setFreeReserve(Number.isFinite(n) ? n : 0);
+                }}
+                aria-label="Неснижаемый остаток"
+                className="input text-sm w-32 tabular-nums text-right"
+              />
+              <span className="text-sm text-muted">{rates.base}</span>
+            </div>
+          }
+        />
       </div>
 
       {/* «Группировка получателей» отключена (2026-08).
@@ -2477,6 +2599,10 @@ export function ImportPage() {
           один, — на личном аккаунте настраивать нечего. */}
       {settingsTab === "source" && zenToken && sourceTab === "api" && <UsersSettings />}
 
+      {/* Перенос своих настроек между устройствами через Дзен-мани — перед
+          отправкой правок: это тоже про то, что уходит в Дзен-мани. */}
+      {settingsTab === "source" && zenToken && sourceTab === "api" && <CloudSettingsCard />}
+
       {/* Push в облако — Phase 1, opt-in via the toggle below.
           Only visible when an API token is connected; the safety-net
           snapshot (in the Бэкапы tab) is the prerequisite. */}
@@ -2636,40 +2762,6 @@ export function ImportPage() {
               </div>
             </div>
 
-            {orphanEditIds.length > 0 && (
-                  <Callout tone="warn" className="mb-3">
-                    <div>
-                      <div>
-                        <strong>{orphanEditIds.length}</strong>{" "}
-                        {pluralRu(orphanEditIds.length, ["правка", "правки", "правок"])}{" "}
-                        {pluralRu(orphanEditIds.length, ["зависла", "зависли", "зависли"])}{" "}
-                        — подходящей операции в данных нет. Обычно остаётся после
-                        перехода с CSV на API (меняются id): такие правки не
-                        применяются и не уходят в облако, а ре-синк их не убирает.
-                      </div>
-                      <button
-                        onClick={async () => {
-                          const n = orphanEditIds.length;
-                          const ok = await confirm({
-                            title: "Убрать зависшие правки?",
-                            message: `${n} ${pluralRu(n, ["правка", "правки", "правок"])} без подходящей операции ${pluralRu(n, ["будет удалена", "будут удалены", "будут удалены"])} из локального оверлея. На облако не влияет.`,
-                            confirmLabel: "Убрать",
-                            tone: "danger",
-                          });
-                          if (!ok) return;
-                          await clearManyEdits(orphanEditIds);
-                          await reapplyRules();
-                        }}
-                        className="btn-danger text-xs mt-2"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Убрать {orphanEditIds.length}{" "}
-                        {pluralRu(orphanEditIds.length, ["зависшую", "зависшие", "зависших"])}{" "}
-                        {pluralRu(orphanEditIds.length, ["правку", "правки", "правок"])}
-                      </button>
-                    </div>
-                  </Callout>
-                )}
 
             {/* Sync history, merged into this card. Rendered as an inset panel
                 (the same nested-block treatment the Бэкапы tab uses) so the
@@ -2710,6 +2802,41 @@ export function ImportPage() {
                             посмотреть и откатить
                           </button>
                         </>
+                      )}
+                      {/* Зависшие правки — в этой же строке, а не плашкой над
+                          журналом: плашка появлялась и меняла высоту карточки. */}
+                      {orphanEditIds.length > 0 && (
+                        <span className="text-warn">
+                          {" · "}
+                          {formatNum(orphanEditIds.length)}{" "}
+                          {pluralRu(orphanEditIds.length, ["правка зависла", "правки зависли", "правок зависли"])}
+                          <InfoPopover label="Что такое зависшие правки">
+                            <p>
+                              Подходящей операции в данных нет. Обычно остаётся после
+                              перехода с CSV на API (меняются id): такие правки не
+                              применяются и не уходят в облако, а ре-синк их не убирает.
+                              Убрать их можно здесь — на облако это не влияет.
+                            </p>
+                          </InfoPopover>{" "}
+                          <button
+                            type="button"
+                            className="text-expense hover:underline"
+                            onClick={async () => {
+                              const n = orphanEditIds.length;
+                              const ok = await confirm({
+                                title: "Убрать зависшие правки?",
+                                message: `${n} ${pluralRu(n, ["правка", "правки", "правок"])} без подходящей операции ${pluralRu(n, ["будет удалена", "будут удалены", "будут удалены"])} из локального оверлея. На облако не влияет.`,
+                                confirmLabel: "Убрать",
+                                tone: "danger",
+                              });
+                              if (!ok) return;
+                              await clearManyEdits(orphanEditIds);
+                              await reapplyRules();
+                            }}
+                          >
+                            убрать
+                          </button>
+                        </span>
                       )}
                     </span>
                     {pushStatus === "syncing" ? (
