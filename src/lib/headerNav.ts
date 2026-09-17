@@ -5,9 +5,9 @@
  * панели «Ещё»: основные разделы группой «Обзор», остальные — своими
  * группами, как раньше. По умолчанию в шапке прежние четыре раздела.
  *
- * Сколько разделов влезет, зависит от ширины окна, поэтому список — это
- * пожелание, а не обещание: не поместившиеся в шапку разделы шапка сама
- * отдаёт в «Ещё» первой группой (`fitCount`, `moreGroups`).
+ * Всё, что человек поставил в меню, в меню и остаётся: не поместившиеся по
+ * ширине разделы не уходят в «Ещё», а дорожка меню листается вбок (17.09.2026 —
+ * раньше лишнее пряталось в «Ещё», и выбранный раздел приходилось искать там).
  */
 
 import {
@@ -60,20 +60,16 @@ export interface NavGroup {
   items: NavSection[];
 }
 
-/** Группа не поместившихся — первой в «Ещё». */
-export const OVERFLOW_GROUP_TITLE = "Не поместились в меню";
 /** Основные разделы, убранные из шапки. Имя группы общее с крошками. */
 export { PRIMARY_GROUP_TITLE };
 
 /**
- * Группы панели «Ещё»: сначала разделы из шапки, которым не хватило места,
- * затем убранные основные, затем прежние группы без того, что стоит в шапке.
- * Пустые группы не показываются.
+ * Группы панели «Ещё»: убранные основные, затем прежние группы без того, что
+ * стоит в шапке. Пустые группы не показываются.
  */
-export function moreGroups(items: readonly string[], overflow: readonly string[] = []): NavGroup[] {
+export function moreGroups(items: readonly string[]): NavGroup[] {
   const inHeader = new Set(items);
   const groups: NavGroup[] = [
-    { title: OVERFLOW_GROUP_TITLE, items: headerSections(overflow) },
     { title: PRIMARY_GROUP_TITLE, items: PRIMARY_SECTIONS.filter((s) => !inHeader.has(s.to)) },
     ...SECONDARY_GROUPS.map((g) => ({ title: g.title, items: g.items.filter((s) => !inHeader.has(s.to)) })),
   ];
@@ -81,23 +77,24 @@ export function moreGroups(items: readonly string[], overflow: readonly string[]
 }
 
 /**
- * Сколько пунктов влезает в дорожку подряд, с начала списка.
- *
- * `fixed` — всё, что есть в дорожке всегда: поля и кант самой дорожки, знак и
- * кнопка «Ещё». `gap` — промежуток между соседними элементами дорожки. Пункт,
- * который не влез, обрывает список: следующий за ним короткий не встаёт на его
- * место, иначе порядок в шапке переставал бы совпадать с настройкой.
+ * Ширина кнопок меню в виде «Только значки»: ступень 0 — стандартная кнопка
+ * (36 px, поля по бокам значка), дальше десять ступеней по 4 px — до 76 px.
+ * Шире значок в кнопке уже теряется, а меню из десятка разделов не влезает.
  */
-export function fitCount(itemWidths: readonly number[], available: number, fixed: number, gap: number): number {
-  let used = fixed;
-  let n = 0;
-  for (const w of itemWidths) {
-    const next = used + gap + w;
-    if (next > available) break;
-    used = next;
-    n++;
-  }
-  return n;
+export const ICON_WIDTH_STEPS = 10;
+export const ICON_WIDTH_BASE_PX = 36;
+export const ICON_WIDTH_STEP_PX = 4;
+
+export function normalizeIconWidth(saved: unknown): number {
+  return typeof saved === "number" && Number.isInteger(saved) && saved >= 0 && saved <= ICON_WIDTH_STEPS
+    ? saved
+    : 0;
+}
+
+/** Ширина кнопки в пикселях для ступени; `null` у стандартной — ширину задают поля. */
+export function iconButtonWidth(level: number): number | null {
+  const l = normalizeIconWidth(level);
+  return l === 0 ? null : ICON_WIDTH_BASE_PX + l * ICON_WIDTH_STEP_PX;
 }
 
 /** Переставить пункт на соседнее место. За краем списка — без изменений. */

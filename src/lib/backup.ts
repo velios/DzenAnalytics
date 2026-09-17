@@ -95,6 +95,8 @@ export const BACKUP_META_KEYS = [
   "accountsView", // как настроена страница «Счета»: вкладка, фильтры, порядок
   "dashboardLayout", // как разложены виджеты на главной
   "headerNav", // какие разделы стоят в меню шапки, а какие — в «Ещё»
+  "headerNavIconsOnly", // меню шапки одними значками
+  "headerNavIconWidth", // ширина кнопок меню одними значками
   "analyticsExcludedCategories", // категории, убранные из аналитики
   "categoryMeta", // иконки и цвета категорий
   "backupInterval", // как часто напоминать о бэкапе

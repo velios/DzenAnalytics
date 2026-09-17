@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ICON_WIDTH_STEPS,
+  iconButtonWidth,
+  normalizeIconWidth,
   DEFAULT_HEADER_NAV,
-  OVERFLOW_GROUP_TITLE,
   PRIMARY_GROUP_TITLE,
-  fitCount,
   isDefaultHeaderNav,
   moreGroups,
   moveItem,
@@ -41,27 +42,19 @@ describe("основное меню", () => {
     expect(custom[0].title).toBe(PRIMARY_GROUP_TITLE);
   });
 
-  it("не поместившиеся в шапку — первой группой «Ещё»", () => {
-    const groups = moreGroups(["/", "/transactions", "/budgets"], ["/budgets"]);
-    expect(groups[0]).toMatchObject({ title: OVERFLOW_GROUP_TITLE });
-    expect(groups[0].items.map((s) => s.to)).toEqual(["/budgets"]);
-    // В своей обычной группе не повторяется.
-    expect(groups.slice(1).flatMap((g) => g.items.map((s) => s.to))).not.toContain("/budgets");
-  });
-
-  it("fitCount: пункты подряд, пока влезают, с промежутками", () => {
-    // fixed 100, промежуток 2: 100+2+80=182, +2+90=274, +2+60=336 > 300.
-    expect(fitCount([80, 90, 60], 300, 100, 2)).toBe(2);
-    expect(fitCount([80, 90, 60], 1000, 100, 2)).toBe(3);
-    expect(fitCount([80], 150, 100, 2)).toBe(0);
-    // Короткий пункт после не влезшего место не занимает.
-    expect(fitCount([80, 500, 10], 300, 100, 2)).toBe(1);
-  });
-
   it("moveItem: соседняя перестановка и края", () => {
     expect(moveItem(["a", "b", "c"], "b", -1)).toEqual(["b", "a", "c"]);
     expect(moveItem(["a", "b", "c"], "b", 1)).toEqual(["a", "c", "b"]);
     expect(moveItem(["a", "b", "c"], "a", -1)).toEqual(["a", "b", "c"]);
     expect(moveItem(["a", "b", "c"], "x", 1)).toEqual(["a", "b", "c"]);
+  });
+
+  it("ширина кнопок-значков: 0 — стандартная, дальше по 4 px до 76", () => {
+    expect(iconButtonWidth(0)).toBeNull();
+    expect(iconButtonWidth(1)).toBe(40);
+    expect(iconButtonWidth(ICON_WIDTH_STEPS)).toBe(76);
+    // Мусор из сохранения или с другого устройства — стандартная ширина.
+    for (const bad of [-1, 11, 2.5, "3", null, undefined]) expect(normalizeIconWidth(bad)).toBe(0);
+    expect(iconButtonWidth(99)).toBeNull();
   });
 });

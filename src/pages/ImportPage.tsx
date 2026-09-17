@@ -208,6 +208,8 @@ export function ImportPage() {
   const resolvedTheme = useThemeStore((s) => s.resolved);
   const showThemeModal = useThemeModalStore((s) => s.show);
   const headerNavItems = useHeaderNavStore((s) => s.items);
+  const headerNavIconsOnly = useHeaderNavStore((s) => s.iconsOnly);
+  const headerNavIconWidth = useHeaderNavStore((s) => s.iconWidth);
   const openHeaderNavEditor = useHeaderNavStore((s) => s.openEditor);
   const lightSchemeName = useThemeStore((s) => schemeById(s.lightScheme)?.name ?? "");
   const darkSchemeName = useThemeStore((s) => schemeById(s.darkScheme)?.name ?? "");
@@ -1495,14 +1497,19 @@ export function ImportPage() {
           status={
             headerNavItems.length === 0
               ? "Все разделы — в «Ещё»"
-              : headerSections(headerNavItems).map((s) => s.label).join(", ")
+              : `${headerNavIconsOnly ? `Только значки${headerNavIconWidth > 0 ? `, ширина ${headerNavIconWidth} из 10` : ""} · ` : ""}${headerSections(headerNavItems)
+                  .map((s) => s.label)
+                  .join(", ")}`
           }
           help={
             <p>
               Какие разделы стоят в основном меню в шапке и в каком порядке. Любой
               раздел из «Ещё» можно поставить в меню, а основной — убрать в «Ещё».
-              Если на узком экране разделы не помещаются, последние сами уходят в
-              «Ещё». Открыть настройку можно и значком с карандашом в панели «Ещё».
+              Меню можно показывать одними значками — название раздела тогда
+              появляется при наведении.
+              Если разделы не помещаются в шапку, меню листается вбок. Открыть
+              настройку можно и значком с карандашом в панели «Ещё», а если все
+              разделы стоят в меню — последним пунктом самого меню.
             </p>
           }
           control={
