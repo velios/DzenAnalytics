@@ -19,6 +19,7 @@ export interface PeriodController {
   setPreset: (p: DatePreset) => void;
   setRange: (from: string | null, to: string | null) => void;
   setMonth: (ym: string) => void;
+  setPeriodMonth: (ym: string) => void;
   setYear: (year: number) => void;
   /** Шагнуть на соседний период — единица берётся из пресета: месяц или год. */
   stepPeriod: (delta: number, fallbackMaxYM: string) => void;
@@ -54,7 +55,9 @@ export function useLocalPeriod(
   // page should still open on its own wide span.
   const pinned = initialMonthYM || null;
   const [preset, setPreset] = useState<DatePreset>(
-    pinned ? "month" : gPreset === "custom" ? "custom" : defaultPreset
+    // Месяц из ссылки — отчётный: страницу открывают с главной, и отрезок
+    // должен совпасть с тем, что показал её виджет.
+    pinned ? "period" : gPreset === "custom" ? "custom" : defaultPreset
   );
   const [monthYM, setMonthYM] = useState<string | null>(
     pinned ??
@@ -107,6 +110,12 @@ export function useLocalPeriod(
         setPreset("month");
         setMonthYM(ym);
       },
+      setPeriodMonth: (ym: string) => {
+        setPreset("period");
+        setMonthYM(ym);
+        setFrom(null);
+        setTo(null);
+      },
       setYear: (year: number) => {
         setPreset("year");
         setMonthYM(
@@ -114,10 +123,15 @@ export function useLocalPeriod(
         );
       },
       stepPeriod: (delta: number, fallbackMaxYM: string) => {
-        const anchored = preset === "month" || preset === "year";
+        const anchored = preset === "month" || preset === "year" || preset === "period";
         const cur = anchored && monthYM ? monthYM : fallbackMaxYM;
-        setPreset(preset === "year" ? "year" : "month");
+        // Единица шага сохраняется: отчётный месяц листается отчётными.
+        setPreset(preset === "year" ? "year" : preset === "period" ? "period" : "month");
         setMonthYM(shiftPeriod(cur, delta * (preset === "year" ? 12 : 1)));
+        if (preset === "period") {
+          setFrom(null);
+          setTo(null);
+        }
       },
     }),
     [preset, monthYM, from, to]

@@ -40,8 +40,8 @@ import {
 import { buildNeedsWants, type NeedsWantsSplit } from "../lib/needsWants";
 import { useBudgetsStore } from "../store/useBudgetsStore";
 import { buildNotices, type Notice } from "../lib/dashboardNotices";
-import { plannedFor } from "../lib/budgets";
-import { currentPeriod, periodKey } from "../lib/period";
+import { plannedFor, planTotals } from "../lib/budgets";
+import { currentPeriod, periodKey, yearRange } from "../lib/period";
 import {
   monthProgress,
   paceRatio,
@@ -73,8 +73,10 @@ export interface DashboardModel {
   base: Currency;
   /** Текущий период в виде YYYY-MM. */
   ym: string;
-  /** Первый день отчётного месяца — по нему подписываются даты периода. */
+  /** Первый день отчётного периода — по нему подписываются его даты. */
   monthStartDay: number;
+  /** Откуда взялся этот день: подсказка к пилюле объясняет это человеку. */
+  monthStartDaySource: "zen" | "own" | "calendar";
   month: MonthProgress;
 
   /** Совокупный баланс и его история. */
@@ -150,6 +152,13 @@ export function useDashboardModel(): DashboardModel {
   const rates = useDataStore((s) => s.rates);
   const base = rates.base;
   const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+  const ownDaySet = useReportPeriodStore((s) => s.ownSet);
+  const zenDay = useReportPeriodStore((s) => s.zenDay);
+  const monthStartDaySource: DashboardModel["monthStartDaySource"] = ownDaySet
+    ? "own"
+    : zenDay !== null
+      ? "zen"
+      : "calendar";
 
   const categoryMeta = useCategoryMetaStore((s) => s.meta);
   const metaHydrate = useCategoryMetaStore((s) => s.hydrate);
@@ -196,12 +205,21 @@ export function useDashboardModel(): DashboardModel {
   const netWorthSeries = useNetWorthSeries(transactions);
   const dayMap = useMemo(() => dailyExpenseMap(transactions), [transactions]);
   const recurring = useMemo(() => detectRecurring(transactions), [transactions]);
-  const spikes = useMemo(() => detectMonthSpikes(transactions), [transactions]);
+  const spikes = useMemo(
+    () => detectMonthSpikes(transactions, 1.5, monthStartDay),
+    [transactions, monthStartDay]
+  );
 
   const insights = useMemo(() => {
-    const year = new Date().getFullYear().toString();
-    return buildInsights(transactions.filter((t) => t.date.startsWith(year)));
-  }, [transactions]);
+    // Год — отчётный: с первым днём не 1-го числа он сдвинут так же, как месяц,
+    // иначе «в этом месяце» в наблюдениях считало бы чужой отрезок.
+    const year = new Date().getFullYear();
+    const { from, to } = yearRange(year, monthStartDay);
+    return buildInsights(
+      transactions.filter((t) => t.date >= from && t.date <= to),
+      monthStartDay
+    );
+  }, [transactions, monthStartDay]);
 
   const thisMonthTxs = useMemo(
     () => transactions.filter((t) => periodKey(t.date, monthStartDay) === ym),
@@ -322,17 +340,12 @@ export function useDashboardModel(): DashboardModel {
 
   const free = freeMoney({ factIncome, factExpense });
 
-  // План месяца берём из тех же строк бюджета, что и раздел «Бюджет».
+  // План месяца берём из тех же строк бюджета и по тому же правилу, что и
+  // раздел «Бюджет»: под-статья под «запертым» родителем в итог не идёт.
   const { planIncome, planExpense } = useMemo(() => {
     if (!budgetLines.length) return { planIncome: null, planExpense: null };
-    let inc = 0;
-    let exp = 0;
-    for (const line of budgetLines) {
-      const p = plannedFor(line, ym);
-      if (line.kind === "income") inc += p;
-      else exp += p;
-    }
-    return { planIncome: inc, planExpense: exp };
+    const { income, expense } = planTotals(budgetLines, ym);
+    return { planIncome: income, planExpense: expense };
   }, [budgetLines, ym]);
 
   // Факт по статьям за месяц — в том же виде, в каком его ждёт фильтр наблюдений.
@@ -378,6 +391,7 @@ export function useDashboardModel(): DashboardModel {
     base,
     ym,
     monthStartDay,
+    monthStartDaySource,
     month,
     netWorth,
     netWorthSeries,

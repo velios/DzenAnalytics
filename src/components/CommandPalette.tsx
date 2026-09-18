@@ -40,7 +40,9 @@ import { useHeaderNavStore } from "../store/useHeaderNavStore";
 import { useFiltersStore } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { groupByCategory, topPayees, NO_PAYEE_LABEL } from "../lib/aggregations";
-import { monthLabel, ymKey } from "../lib/format";
+import { monthLabel } from "../lib/format";
+import { periodKey } from "../lib/period";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { SectionEmpty } from "./SectionEmpty";
 import { useSmoothNavigate } from "../hooks/useSmoothNavigate";
 import { ALL_SCHEMES } from "../lib/themeSchemes";
@@ -120,7 +122,8 @@ export function CommandPalette({ open, onClose }: Props) {
   const setScheme = useThemeStore((s) => s.setScheme);
   const showThemeModal = useThemeModalStore((s) => s.show);
   const openHeaderNavEditor = useHeaderNavStore((s) => s.openEditor);
-  const setMonth = useFiltersStore((s) => s.setMonth);
+  const setPeriodMonth = useFiltersStore((s) => s.setPeriodMonth);
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const views = useSavedViewsStore((s) => s.views);
   const filtersStore = useFiltersStore;
 
@@ -177,9 +180,12 @@ export function CommandPalette({ open, onClose }: Props) {
     );
 
     if (transactions.length > 0) {
+      // Месяцы собираем ОТЧЁТНЫЕ: выбор пункта ставит фильтру отчётный период,
+      // и с календарным списком самый свежий пункт мог указывать на период, в
+      // котором операций ещё нет.
       const months = new Set<string>();
       for (const t of transactions) {
-        if (t.date) months.add(ymKey(t.date));
+        if (t.date) months.add(periodKey(t.date, monthStartDay));
       }
       const sortedMonths = Array.from(months).sort().reverse().slice(0, 24);
       for (const ym of sortedMonths) {
@@ -189,7 +195,8 @@ export function CommandPalette({ open, onClose }: Props) {
           title: monthLabel(ym),
           hint: ym,
           icon: CalendarDays,
-          action: () => setMonth(ym),
+          // Месяцы в списке собраны отчётными — открываем их же.
+          action: () => setPeriodMonth(ym),
         });
       }
 
@@ -258,7 +265,7 @@ export function CommandPalette({ open, onClose }: Props) {
     }
 
     return list;
-  }, [transactions, views, nav, setMode, setScheme, showThemeModal, openHeaderNavEditor, setMonth, showDrill, filtersStore]);
+  }, [transactions, views, nav, setMode, setScheme, showThemeModal, openHeaderNavEditor, setPeriodMonth, monthStartDay, showDrill, filtersStore]);
 
   const filtered = useMemo(() => {
     if (!query) return items.slice(0, 80);

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, ChevronDown, CalendarRange } from "lucide-react";
 import clsx from "clsx";
 import { MONTHS_SHORT } from "../lib/months";
-import { monthLabel } from "../lib/format";
+import { monthLabelFull } from "../lib/format";
 
 
 /**
@@ -22,6 +22,7 @@ export function MonthPicker({
   minYM,
   maxYM,
   active,
+  dimmed,
   mode = "month",
   hint,
   size = "sm",
@@ -35,6 +36,8 @@ export function MonthPicker({
   maxYM: string;
   /** Whether the month filter is the active date mode. */
   active: boolean;
+  /** Период задан не им: дорожка приглушается, чтобы рабочий контрол был виден. */
+  dimmed?: boolean;
   /** Что выбираем — месяц или год. */
   mode?: "month" | "year";
   /**
@@ -114,7 +117,7 @@ export function MonthPicker({
     <div
       // Дорожка и пункты — общие `.seg-*`: та же пилюля, что у `Segmented`
       // той же ступени, и выбранная подпись светится так же.
-      className={clsx("seg-track", active && "!border-accent")}
+      className={clsx("seg-track", active && "!border-accent bg-accent/5", dimmed && "opacity-55")}
       title={isYear ? "Перейти к одному году" : "Перейти к одному месяцу"}
     >
       <button
@@ -139,13 +142,19 @@ export function MonthPicker({
         aria-expanded={open}
         title={hint}
         className={clsx(
-          "seg-item",
-          size === "md" ? "seg-item-md min-w-[132px]" : "seg-item-sm min-w-[118px]",
+          // `flex-1` — чтобы подпись стояла по центру, когда дорожка растянута
+          // на всю ширину (узкое окно): иначе месяц жался к левой стрелке, а
+          // справа зияла пустота.
+          "seg-item flex-1",
+          // Ширины хватает на самый длинный месяц («Сентябрь 26 г.») целиком:
+          // сокращение «Сент.» экономило пиксели там, где их и так достаточно,
+          // а читалось хуже.
+          size === "md" ? "seg-item-md min-w-[160px]" : "seg-item-sm min-w-[148px]",
           active && "seg-on"
         )}
       >
         <CalendarRange className={size === "md" ? "w-4 h-4" : "w-3.5 h-3.5"} />
-        {isYear ? year : value ? monthLabel(value) : "Месяц"}
+        {isYear ? year : value ? monthLabelFull(value) : "Месяц"}
         <ChevronDown
           className={clsx(size === "md" ? "w-4 h-4" : "w-3.5 h-3.5", "transition-transform", open && "rotate-180")}
         />
@@ -201,7 +210,20 @@ export function MonthPicker({
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="text-sm font-semibold tabular-nums">{viewYear}</span>
+                {/* Год в шапке — кнопка: из списка месяцев часто нужен «весь
+                    этот год», а дорога к нему шла через кнопку «Год» в ряду
+                    пресетов и возврат к нужному году стрелками. */}
+                <button
+                  onClick={() => {
+                    onSelectYear?.(viewYear);
+                    setOpen(false);
+                  }}
+                  disabled={!onSelectYear}
+                  className="px-2 py-0.5 rounded-md text-sm font-semibold tabular-nums transition-colors hover:bg-panel2 disabled:hover:bg-transparent"
+                  title={onSelectYear ? `Показать весь ${viewYear} год` : undefined}
+                >
+                  {viewYear}
+                </button>
                 <button
                   onClick={() => setViewYear((y) => y + 1)}
                   disabled={viewYear >= maxY}

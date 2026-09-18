@@ -171,22 +171,67 @@ function PlannedTotals({ out, income, base }: { out: number; income: number; bas
 /* ─────────────────────────────  итоги месяца  ───────────────────────────── */
 
 /**
- * Даты отчётного периода — подсказкой к пилюле. При первом дне не 1-м одно
- * название обманывает: «Август» с днём 28 идёт по 27 сентября.
+ * Что это за период и откуда он взялся — подсказкой к пилюле. Первый день
+ * месяца приезжает из настроек Дзен-мани молча, и человек вправе спросить,
+ * почему «Сентябрь» начинается пятнадцатого.
  */
-function monthPillHint(m: DashboardModel): string | undefined {
-  if (m.monthStartDay === 1) return undefined;
+function monthPillHint(m: DashboardModel): string {
   const r = periodRange(m.ym, m.monthStartDay);
-  return formatDate(r.from, "full") + " — " + formatDate(r.to, "full");
+  const span = `Отчётный период: ${formatDate(r.from, "full")} — ${formatDate(r.to, "full")}.`;
+  if (m.monthStartDaySource === "calendar") {
+    return `${span} Месяц календарный; свой первый день задаётся в «Настройки → Расчёты».`;
+  }
+  const day = `Месяц начинается ${m.monthStartDay}-го числа`;
+  return m.monthStartDaySource === "zen"
+    ? `${span} ${day} — так задано в Дзен-мани.`
+    : `${span} ${day} — так задано в «Настройки → Расчёты».`;
 }
 
-/** Подпись пилюли месяца: название и сколько дней осталось. */
-function monthPill(m: DashboardModel): string {
+/** Сколько периода осталось — хвост пилюли. */
+function monthLeft(m: DashboardModel): string {
+  return m.month.left === 0
+    ? "Последний день"
+    : `Осталось ${m.month.left} ${pluralRu(m.month.left, ["день", "дня", "дней"])}`;
+}
+
+/**
+ * Пилюля периода: название, его даты и остаток — через тонкие разделители.
+ *
+ * Разделители, а не точки: тремя равноправными кусками через точку строка
+ * читалась одной длинной фразой, в которой ничего не главное. Даты и остаток
+ * набраны обычным регистром — в сплошном капсе с широким трекингом они
+ * сливались с названием. Даты показываем, только когда месяц не календарный:
+ * там они ничего не добавляют.
+ */
+function MonthPill({ m, size }: { m: DashboardModel; size: "sm" | "md" }) {
+  const shifted = m.monthStartDay !== 1;
+  const r = periodRange(m.ym, m.monthStartDay);
+  const sep = (
+    <span
+      aria-hidden="true"
+      className={`w-px self-center bg-border ${size === "md" ? "h-3.5" : "h-3"}`}
+    />
+  );
   return (
-    monthName(m.ym) +
-    (m.month.left === 0
-      ? " · последний день"
-      : ` · осталось ${m.month.left} ${pluralRu(m.month.left, ["день", "дня", "дней"])}`)
+    <span
+      className={`inline-flex flex-wrap items-baseline justify-center ${
+        size === "md" ? "gap-x-2.5" : "gap-x-2"
+      }`}
+    >
+      <span>{monthName(m.ym)}</span>
+      {shifted && (
+        <>
+          {sep}
+          <span className="tabular-nums tracking-normal normal-case font-medium text-muted">
+            {formatDate(r.from, "short").slice(0, 5)}
+            {" – "}
+            {formatDate(r.to, "short").slice(0, 5)}
+          </span>
+        </>
+      )}
+      {sep}
+      <span className="tracking-normal normal-case text-muted">{monthLeft(m)}</span>
+    </span>
   );
 }
 
@@ -225,7 +270,7 @@ function HeroOpen({ m, sunken }: { m: DashboardModel; sunken?: boolean }) {
         }`}
         title={monthPillHint(m)}
       >
-        {monthPill(m)}
+        <MonthPill m={m} size="md" />
       </h1>
 
       <div
@@ -366,7 +411,7 @@ function HeroSplit({ m }: { m: DashboardModel }) {
         className="self-start rounded-full px-3.5 py-1 text-[11px] uppercase tracking-[0.14em] bg-panel2 border border-border text-text font-semibold"
         title={monthPillHint(m)}
       >
-        {monthPill(m)}
+        <MonthPill m={m} size="sm" />
       </h1>
 
       {/* Разворот раскрывается только там, где колонка достаточно широка. На
