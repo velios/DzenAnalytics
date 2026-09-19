@@ -6,7 +6,7 @@
 
 import { create } from "zustand";
 import * as db from "../lib/db";
-import { fetchDiff, checkToken, ZenApiError } from "../lib/zenmoney";
+import { fetchDiff, ZenApiError } from "../lib/zenmoney";
 import type { ZenTermUnit } from "../lib/zenmoney";
 import { mapZenmoneyDiff } from "../lib/zenmoneyMap";
 import {
@@ -93,15 +93,7 @@ import { useCloudSettingsStore } from "./useCloudSettingsStore";
 import { findCloudDocs, isServiceAccountTitle } from "../lib/cloudSettings";
 import { refDictionaryFromCache } from "../lib/ruleRefs";
 import type { ImportMeta } from "../types";
-import {
-  isProviderActive,
-  fetchProviderToken,
-  redirectToLogin,
-  postLogout,
-  wipeLocalDb,
-  shouldWipeForUser,
-  shouldAutoConnectProvider,
-} from "../lib/authProvider";
+import { wipeLocalDb, shouldWipeForUser } from "../lib/oauth";
 
 const TOKEN_KEY = "zenmoneyToken";
 const TIMESTAMP_KEY = "zenmoneyServerTimestamp";
@@ -113,10 +105,7 @@ const SNAPSHOT_POLICY_KEY = "zenmoneySnapshotPolicy";
 const AUTO_SYNC_ENABLED_KEY = "zenmoneyAutoSyncEnabled";
 const AUTO_SYNC_VALUE_KEY = "zenmoneyAutoSyncValue";
 const AUTO_SYNC_UNIT_KEY = "zenmoneyAutoSyncUnit";
-// Set when the user explicitly disconnects from the SSO provider. Blocks the
-// silent boot-time auto-connect so a still-live session cookie can't re-adopt
 // the account on the next reload. Cleared when the user opts back in via login.
-const PROVIDER_OPT_OUT_KEY = "zenmoneyProviderOptOut";
 
 /**
  * Overlay pending tag edits onto a freshly-mapped `categoryMeta` map so
@@ -567,10 +556,6 @@ export interface PushResult {
 
 interface ZenmoneyState {
   token: string | null;
-  /** True when the token came from the external provider (in-memory, not
-   *  persisted). Drives the 401→login redirect and the "Подключено через
-   *  zen-platform" UI. Stays false in manual-token / CSV mode. */
-  providerMode: boolean;
   serverTimestamp: number;
   lastSyncAt: string | null;
   status: SyncStatus;
@@ -605,32 +590,8 @@ interface ZenmoneyState {
   autoSyncUnit: AutoSyncUnit;
 
   hydrate: () => Promise<void>;
-  saveToken: (token: string) => Promise<void>;
   validateAndSaveToken: (token: string) => Promise<boolean>;
   removeToken: () => Promise<void>;
-  /**
-   * Local disconnect from the SSO provider: drop the in-memory token and
-   * persist an opt-out so the next boot does NOT silently re-fetch the token
-   * by cookie. Keeps local data (mirrors `removeToken`'s "data stays"
-   * contract); does NOT end the server-side SSO session — that's the auth
-   * provider's own logout. Returns the user to the source-choice screen.
-   */
-  disconnectProvider: () => Promise<void>;
-  /**
-   * Full SSO logout: POST the logout endpoint to end the server-side session,
-   * then (only on confirmed success) do the same local reset as
-   * `disconnectProvider`. On failure leaves the session intact and surfaces an
-   * error. Callers gate the button on `isLogoutConfigured()`. The opt-out is
-   * set defensively so even a partial logout can't silently re-adopt the
-   * session on the next boot.
-   */
-  logoutFromProvider: () => Promise<void>;
-  /**
-   * Opt back into the provider and go to login. Clears the opt-out first
-   * (awaited, so the write lands before navigation) — otherwise the return
-   * trip would skip auto-connect and look "broken".
-   */
-  loginViaProvider: () => Promise<void>;
   /**
    * Synchronise with Zenmoney. By default uses the last `serverTimestamp`
    * for an incremental diff; pass `{force: true}` to drop the local cache
@@ -672,58 +633,8 @@ interface ZenmoneyState {
 /** In-flight guard for hydrate() — see the comment there. */
 let hydrating = false;
 
-/**
- * Resolve the Zenmoney `user.id` behind a token. Cheap incremental probe
- * first (most servers echo `user` regardless of serverTimestamp); falls
- * back to a full pull, which always carries it.
- * ponytail: the fallback full pull only fires if the API never echoes user
- * on an incremental diff — if that's the case, cache a user-id stamp to skip it.
- */
-async function fetchProviderUserId(token: string): Promise<number | null> {
-  const now = Math.floor(Date.now() / 1000);
-  const inc = await fetchDiff(token, now);
-  if (inc.user?.length) return inc.user[0].id;
-  const full = await fetchDiff(token, 0);
-  return full.user?.[0]?.id ?? null;
-}
-
-/**
- * Boot the provider session: fetch the token by cookie, then either show
- * the choice screen (no session), wipe+reload on a user switch, or set the
- * in-memory token and sync. Nothing is wiped unless the ZenMoney user id of
- * the new token differs from the locally-cached one.
- */
-async function initProviderSession(): Promise<void> {
-  const store = useZenmoneyStore;
-  const token = await fetchProviderToken();
-  if (!token) return; // 401 / no session → EmptyState shows the choice screen
-  // Detect a user switch (explicit "переключить" OR an external change of
-  // the shared session's active account) before adopting the token.
-  const cache = await loadZenCache();
-  const cachedId = cache?.user?.[0]?.id ?? null;
-  if (cachedId != null) {
-    try {
-      const tokenId = await fetchProviderUserId(token);
-      if (shouldWipeForUser(cachedId, tokenId)) {
-        await wipeLocalDb(); // reloads; fresh full sync runs for the new user
-        return;
-      }
-    } catch {
-      // Couldn't determine the new user's id (network / bad token). Don't
-      // wipe on uncertainty — fall through to sync, which redirects on 401.
-    }
-  }
-  store.setState({ token, providerMode: true });
-  try {
-    await store.getState().sync(); // incremental if cache exists, else full
-  } catch {
-    /* surfaced in store state + sync log */
-  }
-}
-
 export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   token: null,
-  providerMode: false,
   serverTimestamp: 0,
   lastSyncAt: null,
   status: "idle",
@@ -743,7 +654,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   hydrate: async () => {
     // Two effects (App + ImportPage) both call hydrate guarded only by
     // `!loaded`, which flips asynchronously — guard the in-flight window
-    // too so provider init (and its sync) can't fire twice.
+    // too so concurrent hydrations cannot overwrite each other.
     if (get().loaded || hydrating) return;
     hydrating = true;
     try {
@@ -758,7 +669,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       autoSyncEnabled,
       autoSyncValue,
       autoSyncUnit,
-      providerOptOut,
     ] = await Promise.all([
       db.loadJSON<string>(TOKEN_KEY),
       db.loadJSON<number>(TIMESTAMP_KEY),
@@ -770,7 +680,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       db.loadJSON<boolean>(AUTO_SYNC_ENABLED_KEY),
       db.loadJSON<number>(AUTO_SYNC_VALUE_KEY),
       db.loadJSON<AutoSyncUnit>(AUTO_SYNC_UNIT_KEY),
-      db.loadJSON<boolean>(PROVIDER_OPT_OUT_KEY),
     ]);
     // Migration: callers from the boolean-toggle era stored
     // `pushEnabled: true` without a mode. Treat that as "manual" so
@@ -799,10 +708,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     // первой отрисовке ответ обычно уже есть — страница рисуется с остатками
     // сразу, без второго кадра «сначала по операциям, потом по кэшу».
     //
-    // Идёт ПЕРЕД входом через провайдера намеренно: это чтение локального
-    // хранилища, ждать его нечего, а сессия провайдера уходит в сеть. Если она
-    // потом принесёт свежий кэш, разбор счетов обновится сам — он сбрасывается
-    // после каждой записи кэша.
     void getLiveAccountsFromCache().catch(() => {});
     // День начала месяца при подключённом Дзен-мани — его собственный: берём
     // из кэша сразу, не дожидаясь синхронизации.
@@ -812,40 +717,42 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         .catch(() => {});
     }
 
-    // Priority: a persisted token means manual mode (upstream behaviour).
-    // Otherwise, if the build wired up a provider AND the user hasn't
-    // explicitly disconnected, try the SSO session.
-    // ponytail: brief EmptyState flash while the background fetch+sync
-    // runs is acceptable — not worth a dedicated loading gate.
-    if (shouldAutoConnectProvider(isProviderActive(), !!token, providerOptOut === true)) {
-      await initProviderSession();
-    }
     } finally {
       hydrating = false;
     }
   },
 
-  saveToken: async (token) => {
-    const trimmed = token.trim();
-    await db.saveJSON(TOKEN_KEY, trimmed);
-    set({ token: trimmed, providerMode: false, error: null });
-  },
-
   validateAndSaveToken: async (token) => {
     const trimmed = token.trim();
-    if (!trimmed) {
+    if (!trimmed || trimmed.length > 8192 || /\s/.test(trimmed)) {
       set({ error: "Введите токен" });
       return false;
     }
     set({ status: "checking", error: null });
     try {
-      const ok = await checkToken(trimmed);
-      if (!ok) {
-        set({ status: "error", error: "Токен отклонён сервером (401)" });
+      const probe = await fetchDiff(trimmed, Math.floor(Date.now() / 1000), AbortSignal.timeout(15_000), ["user"]);
+      const users = Array.isArray(probe.user) ? probe.user.filter(user => user?.parent === null) : [];
+      const userId = users[0]?.id;
+      if (users.length !== 1 || !Number.isSafeInteger(userId) || userId <= 0) {
+        set({ status: "error", error: "Не удалось определить аккаунт Дзен-мани. Данные сохранены, вход не выполнен." });
+        return false;
+      }
+      const cache = await loadZenCache();
+      const cachedId = cache?.user?.find(user => user.parent === null)?.id ?? cache?.user?.[0]?.id ?? null;
+      if (cache && cachedId === null) {
+        set({ status: "error", error: "Не удалось определить владельца локального кэша. Вход остановлен, данные сохранены." });
+        return false;
+      }
+      if (shouldWipeForUser(cachedId, userId)) {
+        await wipeLocalDb();
+        await db.saveJSON(TOKEN_KEY, trimmed);
+        sessionStorage.setItem("dzenanalyticsSyncAfterLogin", "1");
+        set({ token: null, status: "checking" });
+        location.reload();
         return false;
       }
       await db.saveJSON(TOKEN_KEY, trimmed);
-      set({ token: trimmed, providerMode: false, status: "idle", error: null });
+      set({ token: trimmed, status: "idle", error: null });
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Не удалось проверить токен";
@@ -882,43 +789,11 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     ]);
     set({
       token: null,
-      providerMode: false,
-      serverTimestamp: 0,
+          serverTimestamp: 0,
       lastSyncAt: null,
       status: "idle",
       error: null,
     });
-  },
-
-  disconnectProvider: async () => {
-    await db.saveJSON(PROVIDER_OPT_OUT_KEY, true);
-    // Без Дзен-мани снова действует свой день начала месяца.
-    useReportPeriodStore.getState().adoptZenDay(null);
-    set({
-      token: null,
-      providerMode: false,
-      status: "idle",
-      error: null,
-    });
-  },
-
-  logoutFromProvider: async () => {
-    // End the server session first. Only reset local state on a confirmed
-    // logout — otherwise we'd drop the user to the choice screen while still
-    // logged in server-side, and the next boot would silently reconnect.
-    const ok = await postLogout();
-    if (!ok) {
-      set({ error: "Не удалось выйти из zen-platform. Попробуйте ещё раз." });
-      return;
-    }
-    await db.saveJSON(PROVIDER_OPT_OUT_KEY, true);
-    useReportPeriodStore.getState().adoptZenDay(null);
-    set({ token: null, providerMode: false, status: "idle", error: null });
-  },
-
-  loginViaProvider: async () => {
-    await db.saveJSON(PROVIDER_OPT_OUT_KEY, false);
-    redirectToLogin();
   },
 
   sync: async (opts = {}) => {
@@ -1149,12 +1024,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         },
       };
     } catch (e) {
-      // Provider mode: a 401 means the SSO session expired — send the user
-      // to re-login instead of showing a dead-end inline error.
-      if (e instanceof ZenApiError && e.status === 401 && get().providerMode) {
-        redirectToLogin();
-        throw e; // page is navigating away
-      }
       let msg: string;
       if (e instanceof ZenApiError) {
         msg =
@@ -1826,10 +1695,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       });
       return result;
     } catch (e) {
-      if (e instanceof ZenApiError && e.status === 401 && get().providerMode) {
-        redirectToLogin();
-        throw e; // page is navigating away
-      }
       let msg: string;
       if (e instanceof ZenApiError) {
         msg =

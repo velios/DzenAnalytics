@@ -1,0 +1,28 @@
+name: Prepare OAuth SPA
+on:
+  push:
+    branches: [codex/oauth-token-broker]
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Check upstream standalone build
+        run: npm run build:standalone
+      - name: Log in to registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Build preparation image
+        run: |
+          docker build --build-arg VITE_TOKEN_BROKER_URL=https://token.zentable.ru \
+            -f docker/Dockerfile -t ghcr.io/velios/dzenanalytics:$GITHUB_SHA .
+          docker push ghcr.io/velios/dzenanalytics:$GITHUB_SHA

@@ -5,9 +5,7 @@ declare const __APP_VERSION__: string;
 /** Однофайловая сборка из релиза (`npm run build:standalone`). */
 declare const __STANDALONE__: boolean;
 
-// Optional external token-provider config (see src/lib/authProvider.ts).
+// Optional OAuth broker; unset preserves manual-token and CSV entry points.
 interface ImportMetaEnv {
-  readonly VITE_TOKEN_PROVIDER_URL?: string;
-  readonly VITE_LOGIN_URL?: string;
-  readonly VITE_LOGOUT_URL?: string;
+  readonly VITE_TOKEN_BROKER_URL?: string;
 }

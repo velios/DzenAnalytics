@@ -10,12 +10,8 @@ RUN npm install
 
 COPY . /app/
 
-# Optional external token-provider config, inlined by Vite at build time
-# (see src/lib/authProvider.ts). Unset -> feature inert (upstream behaviour);
-# the concrete URLs are supplied via --build-arg in deploy.yml.
-ARG VITE_TOKEN_PROVIDER_URL
-ARG VITE_LOGIN_URL
-ARG VITE_LOGOUT_URL
+# Optional OAuth entry point; unset keeps upstream manual token / CSV mode.
+ARG VITE_TOKEN_BROKER_URL
 
 RUN npm run build
 
