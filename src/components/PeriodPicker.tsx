@@ -1,19 +1,36 @@
 import { useRef, useState } from "react";
-import { CalendarCheck, CalendarRange, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarCheck, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { DateField } from "./DateField";
 import { MonthMenu } from "./MonthMenu";
 import { monthLabelFull } from "../lib/format";
 import { shiftDays, spanDays } from "../lib/period";
 import { MONTHS, MONTHS_SHORT } from "../lib/months";
+import { StableWidth } from "./StableWidth";
 
-/** «15 авг. 2026» — дата словами; год прячем, когда обе границы в одном году. */
-function textDate(iso: string, withYear: boolean): string {
+/**
+ * Все двенадцать подписей месяцев этого года — по ним кнопка берёт ширину.
+ * Считать «самый длинный» по числу букв нельзя: шрифт пропорциональный, и
+ * «Февраль» шире «Сентября» в одних начертаниях и уже в других.
+ */
+function monthLabels(year: number): string[] {
+  return MONTHS.map((_, i) => monthLabelFull(`${year}-${String(i + 1).padStart(2, "0")}`));
+}
+
+/**
+ * «01 авг. 2026» — дата словами, всегда одной длины.
+ *
+ * День с ведущим нулём и год у обеих границ — не для красоты: короткая запись
+ * («1 сен.» против «30 сент. 2026») оставляла в поле пустое место, и между
+ * месяцем и датами зияла дыра. Одинаковая длина заполняет отведённое место и
+ * заодно держит контрол неподвижным при листании.
+ */
+function textDate(iso: string): string {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   if (!y || !m || !d) return "";
   const short = MONTHS_SHORT[m - 1];
   const dot = short === MONTHS[m - 1] ? "" : ".";
-  return `${d} ${short.toLowerCase()}${dot}${withYear ? ` ${y}` : ""}`;
+  return `${String(d).padStart(2, "0")} ${short.toLowerCase()}${dot} ${y}`;
 }
 
 /** «15.08.26» — компактная запись для узких окон. */
@@ -23,6 +40,18 @@ function numericDate(iso: string): string {
 }
 
 /**
+ * Варианты подписи даты — по ним поле берёт ширину.
+ *
+ * Даты в дорожке меняются чаще всего, и каждая смена двигала контрол: «2 янв.
+ * 2023» заметно уже «18 сент. 2025», и от переключения пресета весь ряд
+ * фильтров перекладывался. Берём самый широкий случай: двузначный день, любой
+ * месяц, четырёхзначный год — он же и есть максимум для этого поля.
+ */
+const DATE_CANDIDATES = MONTHS_SHORT.map(
+  (short, i) => `00 ${short.toLowerCase()}${short === MONTHS[i] ? "" : "."} 2026`
+);
+
+/**
  * Подпись поля: словами везде, кроме телефона.
  *
  * Прежде словами печаталось только от 1536 — и на обычном ноутбуке дата всегда
@@ -30,12 +59,15 @@ function numericDate(iso: string): string {
  * 14.10.26» всего пара десятков пикселей, а дорожка и так тянется на остаток
  * строки.
  */
-function dateLabel(iso: string | null, withYear: boolean) {
+function dateLabel(iso: string | null) {
   if (!iso) return undefined;
   return (
     <>
-      <span className="hidden sm:inline">{textDate(iso, withYear)}</span>
-      <span className="sm:hidden">{numericDate(iso)}</span>
+      <span className="hidden dates:inline">
+        <StableWidth value={textDate(iso)} candidates={DATE_CANDIDATES} />
+      </span>
+      {/* Цифры — моноширинные: «11.11.26» и «30.09.26» иначе разной ширины. */}
+      <span className="dates:hidden tabular-nums">{numericDate(iso)}</span>
     </>
   );
 }
@@ -112,7 +144,6 @@ export function PeriodPicker({
   const item = size === "md" ? "seg-item-md" : "seg-item-sm";
   const isYear = mode === "year";
   const year = Number(monthYM?.slice(0, 4)) || new Date().getFullYear();
-  const sameYear = !!from && !!to && from.slice(0, 4) === to.slice(0, 4);
 
   const windowStep = from && to ? spanDays(from, to) : 0;
   const canStep = stepsByWindow ? windowStep > 0 : true;
@@ -129,9 +160,15 @@ export function PeriodPicker({
   return (
     <div
       className={clsx(
-        // На телефоне дорожка переносит даты на свою строку: в 390 пикселей
-        // месяц, две даты и четыре значка в один ряд не встают — даты
-        // сжимались до нуля и печатались одна поверх другой.
+        // Дорожка забирает остаток строки, но не больше разумного: на широком
+        // экране (и при уменьшенном масштабе) она иначе оставляла перед кнопкой
+        // сброса дыру в пол-экрана. Запас забирают ДАТЫ: у названия своя
+        // заливка, и растянутое, оно читается как половина контрола, а не как
+        // выбранный месяц.
+        //
+        // На телефоне даты переносятся на свою строку: в 390 пикселей месяц,
+        // две даты и четыре значка в один ряд не встают — даты сжимались до
+        // нуля и печатались одна поверх другой.
         "seg-track flex-1 min-w-fit max-sm:w-full max-sm:min-w-0 max-sm:flex-wrap",
         (monthActive || rangeActive) && "!border-accent bg-accent/5"
       )}
@@ -155,8 +192,12 @@ export function PeriodPicker({
         title={monthHint ?? (isYear ? "Выбрать год" : "Выбрать месяц")}
         className={clsx("seg-item shrink-0", item, monthActive && "seg-on")}
       >
-        <CalendarRange className={size === "md" ? "w-4 h-4" : "w-3.5 h-3.5"} />
-        {isYear ? year : monthLabelFull(monthYM)}
+        {/* Ширина держится по месяцам даже в режиме года: «2026» вдвое уже
+            «Сентября», и переключение «Месяц ↔ Год» дёргало бы весь ряд. */}
+        <StableWidth
+          value={isYear ? year : monthLabelFull(monthYM)}
+          candidates={monthLabels(year)}
+        />
         <ChevronDown className="w-3 h-3 opacity-60" aria-hidden="true" />
       </button>
 
@@ -166,7 +207,7 @@ export function PeriodPicker({
           половину каждая, они прижимались к стрелкам, и середина зияла. */}
       <div
         className={clsx(
-          "flex-1 flex items-center justify-center gap-1.5 min-w-0 rounded-control-sm",
+          "flex-1 flex items-center justify-center gap-1 min-w-0 rounded-control-sm",
           "max-sm:basis-full max-sm:order-last",
           rangeActive && "seg-on px-1"
         )}
@@ -175,7 +216,7 @@ export function PeriodPicker({
           value={from || ""}
           onChange={(e) => onRangeChange(e.target.value || null, to)}
           className={clsx(
-            "seg-item min-w-0",
+            "seg-item min-w-0 !px-2",
             item,
             // Внутри залитой зоны подпись берёт её цвет, а наведение
             // подсвечивается по самой заливке: общий `hover:bg-panel` выбелил бы
@@ -184,7 +225,7 @@ export function PeriodPicker({
           )}
           wrapperClassName="min-w-0"
           icon={false}
-          display={dateLabel(from, !sameYear)}
+          display={dateLabel(from)}
           placeholder="Начало"
         />
         <span
@@ -197,13 +238,13 @@ export function PeriodPicker({
           value={to || ""}
           onChange={(e) => onRangeChange(from, e.target.value || null)}
           className={clsx(
-            "seg-item min-w-0",
+            "seg-item min-w-0 !px-2",
             item,
             rangeActive ? "text-inherit hover:bg-black/10 hover:text-inherit" : "text-accent"
           )}
           wrapperClassName="min-w-0"
           icon={false}
-          display={dateLabel(to, true)}
+          display={dateLabel(to)}
           placeholder="Конец"
         />
       </div>
