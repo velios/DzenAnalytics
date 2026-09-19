@@ -10,7 +10,7 @@ import {
   CartesianGrid,
   ReferenceLine,
 } from "recharts";
-import { PieChart as PieIcon, Home, ShoppingBag, PiggyBank, Info, ChevronDown } from "lucide-react";
+import { PieChart as PieIcon, Home, ShoppingBag, PiggyBank, Info, ChevronDown, Target } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import {
   useFiltersStore,
@@ -21,10 +21,12 @@ import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { useCategoryMetaStore } from "../store/useCategoryMetaStore";
 import { buildNeedsWants, savingsRateSeries } from "../lib/needsWants";
 import { PeriodPills } from "../components/PeriodPills";
+import { SectionControls } from "../components/SectionControls";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { CardHeader } from "../components/CardHeader";
 import { SeriesTooltip } from "../components/TooltipFacts";
-import { Stat } from "../components/Stat";
+import { StatCell, StatRow } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
 import {
   formatMoney,
@@ -32,11 +34,13 @@ import {
   chartTooltipProps,
   chartGridStroke,
   chartAxisStroke,
+  chartColor,
 } from "../lib/format";
+import { Callout } from "../components/Callout";
 
-const NEEDS_COLOR = "#3B82F6";
-const WANTS_COLOR = "#F59E0B";
-const SAVINGS_COLOR = "#10B981";
+const NEEDS_COLOR = chartColor.accent;
+const WANTS_COLOR = chartColor.warn;
+const SAVINGS_COLOR = chartColor.income;
 
 /**
  * «50/30/20» — fixed expenses (needs) vs everything else (wants) vs what's
@@ -90,11 +94,11 @@ export function Budget503020Page() {
   );
   const trend = useMemo(
     () =>
-      savingsRateSeries(trendFiltered, 12).map((p) => ({
+      savingsRateSeries(trendFiltered, 12, monthStartDay).map((p) => ({
         month: monthLabel(p.ym),
         rate: Math.round(p.rate * 1000) / 10,
       })),
-    [trendFiltered]
+    [trendFiltered, monthStartDay]
   );
 
   if (transactions.length === 0) return <EmptyState />;
@@ -111,10 +115,14 @@ export function Budget503020Page() {
       <PageHeader
         icon={PieIcon}
         title="50/30/20"
-        hint="Нужды / желания / сбережения против бюджетного ориентира 50/30/20"
-        right={<PeriodPills value={period} onChange={setPeriod} />}
       />
-      <GlobalFilters showDateRange={false} dateRangeHint="Правило 50/30/20 считается за месяц, выбранный ниже" />
+      <GlobalFilters showDateRange={false} dateRangeHint="Правило 50/30/20 считается за период, выбранный ниже" />
+
+      {/* Свой период раздела — рядом контролов раздела, под фильтром: подпись
+          фильтра говорит «выбранный ниже», а пилюли стояли выше, в шапке. */}
+      <SectionControls>
+        <PeriodPills value={period} onChange={setPeriod} />
+      </SectionControls>
 
       <details className="card-tray card-pad text-sm group">
         <summary className="cursor-pointer flex items-center gap-2 font-medium list-none">
@@ -159,57 +167,55 @@ export function Budget503020Page() {
         </div>
       </details>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Stat
+      <StatRow>
+        <StatCell
           label="Нужды"
           value={pct(split.needsPct)}
           tone={split.needsPct > 0.5 ? "expense" : "default"}
           icon={<Home className="w-4 h-4" />}
-          hint={`${formatMoney(split.needs, base)} · цель ≤ 50%`}
+          note={`${formatMoney(split.needs, base)} · цель ≤ 50%`}
         />
-        <Stat
+        <StatCell
           label="Желания"
           value={pct(split.wantsPct)}
           tone={split.wantsPct > 0.3 ? "warn" : "default"}
           icon={<ShoppingBag className="w-4 h-4" />}
-          hint={`${formatMoney(split.wants, base)} · цель ≤ 30%`}
+          note={`${formatMoney(split.wants, base)} · цель ≤ 30%`}
         />
-        <Stat
+        <StatCell
           label="Сбережения"
           value={pct(split.savingsPct)}
           tone={split.savingsPct >= 0.2 ? "income" : "expense"}
           icon={<PiggyBank className="w-4 h-4" />}
-          hint={`${formatMoney(split.savings, base, { signed: true })} · цель ≥ 20%`}
+          note={`${formatMoney(split.savings, base, { signed: true })} · цель ≥ 20%`}
         />
-      </div>
+      </StatRow>
 
       {split.needs > 0 && split.wants === 0 && (
-        <div className="card card-pad bg-accent/5 border-accent/40 flex items-start gap-2 text-sm">
-          <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
-          <span className="text-muted">
-            Все расходы засчитаны в «нужды» — по умолчанию все категории считаются
-            обязательными. Чтобы перенести часть в «желания», отметьте такие
-            категории как <strong>«Необязательная»</strong> в блоке{" "}
-            <strong>«Обязательность расходов в категориях»</strong> на странице{" "}
-            <Link to="/categories" className="text-accent hover:underline">
-              «Категории»
-            </Link>{" "}
-            (изменение уйдёт в облако Дзен-мани).
-          </span>
-        </div>
+        <Callout size="banner">
+          Все расходы засчитаны в «нужды» — по умолчанию все категории считаются
+          обязательными. Чтобы перенести часть в «желания», отметьте такие
+          категории как <strong>«Необязательная»</strong> в блоке{" "}
+          <strong>«Обязательность расходов в категориях»</strong> на странице{" "}
+          <Link to="/categories" className="text-accent hover:underline">
+            «Категории»
+          </Link>{" "}
+          (изменение уйдёт в облако Дзен-мани).
+        </Callout>
       )}
 
       <div className="card-tray card-pad">
-        <div className="font-semibold mb-1">Факт против цели</div>
-        <div className="text-xs text-muted mb-4">
-          Доли от дохода. Пунктир — границы правила 50/30/20.
-        </div>
+        <CardHeader
+          icon={Target}
+          title="Факт против цели"
+          subtitle="Доли от дохода. Пунктир — границы правила 50/30/20."
+        />
         <div className="relative">
           <div className="flex h-8 rounded-full overflow-hidden">
             {split.needs > 0 && (
               <div
                 style={{ width: `${w(split.needs)}%`, backgroundColor: NEEDS_COLOR }}
-                className="flex items-center justify-center text-white text-xs font-medium"
+                className="flex items-center justify-center text-on-tone text-xs font-medium"
               >
                 {w(split.needs) > 8 ? pct(split.needsPct) : ""}
               </div>
@@ -217,7 +223,7 @@ export function Budget503020Page() {
             {split.wants > 0 && (
               <div
                 style={{ width: `${w(split.wants)}%`, backgroundColor: WANTS_COLOR }}
-                className="flex items-center justify-center text-white text-xs font-medium"
+                className="flex items-center justify-center text-on-tone text-xs font-medium"
               >
                 {w(split.wants) > 8 ? pct(split.wantsPct) : ""}
               </div>
@@ -225,7 +231,7 @@ export function Budget503020Page() {
             {split.savings > 0 && (
               <div
                 style={{ width: `${w(split.savings)}%`, backgroundColor: SAVINGS_COLOR }}
-                className="flex items-center justify-center text-white text-xs font-medium"
+                className="flex items-center justify-center text-on-tone text-xs font-medium"
               >
                 {w(split.savings) > 8 ? pct(split.savingsPct) : ""}
               </div>
@@ -263,10 +269,11 @@ export function Budget503020Page() {
       </div>
 
       <div className="card-tray card-pad">
-        <div className="font-semibold mb-1">Норма сбережений за 12 месяцев</div>
-        <div className="text-xs text-muted mb-4">
-          (доход − расход) / доход по месяцам. Пунктир — цель 20%.
-        </div>
+        <CardHeader
+          icon={PiggyBank}
+          title="Норма сбережений за 12 месяцев"
+          subtitle="(доход − расход) / доход по месяцам. Пунктир — цель 20%."
+        />
         <div className="h-72">
           <ResponsiveContainer>
             <AreaChart data={trend}>
@@ -285,9 +292,9 @@ export function Budget503020Page() {
               />
               <ReferenceLine
                 y={20}
-                stroke="#888780"
+                stroke={chartColor.muted}
                 strokeDasharray="5 4"
-                label={{ value: "цель 20%", position: "right", fontSize: 10, fill: "#888780" }}
+                label={{ value: "цель 20%", position: "right", fontSize: 10, fill: chartColor.muted }}
               />
               <Area
                 type="monotone"

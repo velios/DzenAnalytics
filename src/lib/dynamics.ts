@@ -11,6 +11,7 @@
 
 import { periodKey, periodRange } from "./period";
 import { monthLabel } from "./format";
+import { MONTHS } from "./months";
 import { expenseDelta, cashDelta } from "./txKindStyle";
 import type { Transaction } from "../types";
 
@@ -75,7 +76,7 @@ export interface DynamicsSeries {
  * нужны все операции целиком и реальные остатки для привязки.
  */
 export interface BalanceSource {
-  /** Все операции без отборов по категории и получателю. */
+  /** Все операции без фильтров по категории и получателю. */
   all: Transaction[];
   /** Выбранные счета (null — все). */
   accounts: Set<string> | null;
@@ -207,10 +208,6 @@ const MONTHS_GENITIVE = [
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ];
 
-const MONTHS_NOMINATIVE = [
-  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-];
 
 function bucketLabels(
   key: string,
@@ -220,7 +217,7 @@ function bucketLabels(
   const [y, m, d] = key.split("-");
   const mi = Number(m) - 1;
   if (granularity === "month") {
-    return { label: monthLabel(`${y}-${m}`), fullLabel: `${MONTHS_NOMINATIVE[mi]} ${y}` };
+    return { label: monthLabel(`${y}-${m}`), fullLabel: `${MONTHS[mi]} ${y}` };
   }
   const short = `${Number(d)} ${MONTHS_SHORT[mi]} ${y.slice(2)}`;
   const full = `${Number(d)} ${MONTHS_GENITIVE[mi]} ${y}`;
@@ -343,7 +340,7 @@ export function buildDynamics(
  * Баланс — отдельная ветка, и не из вредности.
  *
  * Остаток не выводится из отобранных операций: он равен начальному остатку
- * счёта плюс ВЕСЬ его оборот. Поэтому идём по всем операциям (отборы по
+ * счёта плюс ВЕСЬ его оборот. Поэтому идём по всем операциям (фильтры по
  * категории и получателю к остатку неприменимы), копим поток по обеим ногам
  * каждой операции и в конце поднимаем всю кривую до реальных остатков. Иначе
  * график показывал бы «накоплено с нуля» и спокойно уходил в минус у человека

@@ -1,5 +1,5 @@
 /**
- * Движок правил категоризации второго поколения (issue #49).
+ * Движок правил второго поколения (issue #49).
  *
  * ЭТО ШОВ между движком и интерфейсом: типы и сигнатуры здесь фиксированы,
  * чтобы обе стороны можно было делать независимо.
@@ -116,6 +116,13 @@ export interface RuleCondition {
   /** Пусто для `empty` / `not_empty`. */
   value: string;
   caseInsensitive: boolean;
+  /**
+   * id тега, счёта или контрагента Дзен-мани, на который указывает `value`, —
+   * только у «равно» по категории, счёту и получателю. По нему название
+   * подтягивается после переименования (`lib/ruleRefs`). Движок на него не
+   * смотрит: сравнивает по-прежнему `value`.
+   */
+  refId?: string;
 }
 
 /** Как объединяются условия правила. */
@@ -148,6 +155,8 @@ export interface RuleAction {
    *  строка означает «вплотную», и это осмысленный выбор, поэтому отличаем её
    *  от «не задано». */
   separator?: string;
+  /** id тега (категория) или контрагента (получатель) Дзен-мани — см. `RuleCondition.refId`. */
+  refId?: string;
 }
 
 /** Поле операции, которое занимает действие. Нужно, чтобы понимать, кто из
@@ -164,6 +173,20 @@ export function actionTarget(kind: RuleActionKind): RuleTargetField {
   if (kind === "setCategory") return "category";
   if (kind === "setPayee") return "payee";
   return "comment";
+}
+
+/** Подпись поля, которое занимает действие, — «Что меняет» в таблице и списках правил. */
+export const RULE_TARGET_LABELS: Record<RuleTargetField, string> = {
+  category: "Категория",
+  payee: "Получатель",
+  comment: "Комментарий",
+};
+
+/** Какие поля правило меняет — по заполненным действиям, без повторов, по порядку. */
+export function ruleTargets(rule: { actions: readonly RuleAction[] }): RuleTargetField[] {
+  return Array.from(
+    new Set(rule.actions.filter((a) => (a.value ?? "").trim()).map((a) => actionTarget(a.kind)))
+  );
 }
 
 /**

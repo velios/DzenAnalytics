@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { MONTHS, MONTHS_SHORT } from "../lib/months";
 
 /**
  * A fully Russian date field. The native <input type="date"> and its
@@ -16,14 +17,6 @@ import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
  */
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const MONTHS = [
-  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-];
-const MONTHS_SHORT = [
-  "Янв", "Фев", "Мар", "Апр", "Май", "Июн",
-  "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек",
-];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const toISO = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
@@ -38,9 +31,11 @@ function parseYM(s: string): { y: number; m: number } | null {
   return x ? { y: +x[1], m: +x[2] - 1 } : null;
 }
 
-function toDisplay(iso: string): string {
+function toDisplay(iso: string, shortYear = false): string {
   const p = parseISO(iso);
-  return p ? `${pad(p.d)}.${pad(p.m + 1)}.${p.y}` : "";
+  if (!p) return "";
+  const year = shortYear ? pad(p.y % 100) : String(p.y);
+  return `${pad(p.d)}.${pad(p.m + 1)}.${year}`;
 }
 
 /**
@@ -82,6 +77,22 @@ interface Props {
    * Russian calendar component instead of a native <input type="month">.
    */
   granularity?: "day" | "month";
+  /**
+   * Показывать значок календаря. Внутри дорожки со стрелками он лишний: там
+   * уже есть свои значки по краям, а место занимает именно дата.
+   */
+  icon?: boolean;
+  /**
+   * Год двумя цифрами: «02.09.26». Нужно там, где рядом стоит вторая дата и
+   * две полных записи разносят дорожку по ширине экрана.
+   */
+  shortYear?: boolean;
+  /**
+   * Своя подпись вместо разобранной даты — когда соседний контрол знает о дате
+   * больше поля: например, что год у обеих границ один и печатать его дважды
+   * незачем.
+   */
+  display?: ReactNode;
 }
 
 export function DateField({
@@ -92,13 +103,16 @@ export function DateField({
   placeholder,
   centered = false,
   granularity = "day",
+  icon = true,
+  shortYear = false,
+  display: displayOverride,
 }: Props) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const display = value
     ? granularity === "month"
       ? toDisplayMonth(value)
-      : toDisplay(value)
+      : toDisplay(value, shortYear)
     : "";
   const ph = placeholder || (granularity === "month" ? "месяц год" : "дд.мм.гггг");
   const emit = (v: string) => onChange?.({ target: { value: v } });
@@ -116,15 +130,15 @@ export function DateField({
           centered ? "gap-1.5" : "gap-2"
         } text-left`}
       >
-        {centered && <span className="w-4 shrink-0" aria-hidden />}
+        {centered && icon && <span className="w-4 shrink-0" aria-hidden />}
         <span
-          className={`truncate ${centered ? "flex-1 text-center" : ""} ${
+          className={`truncate min-w-0 ${centered ? "flex-1 text-center" : ""} ${
             display ? "" : "text-muted"
           }`}
         >
-          {display || ph}
+          {display ? (displayOverride ?? display) : ph}
         </span>
-        <Calendar className="w-4 h-4 shrink-0 text-muted" />
+        {icon && <Calendar className="w-4 h-4 shrink-0 text-muted" />}
       </button>
       {open && (
         <CalendarPopup
@@ -255,7 +269,7 @@ function CalendarPopup({
             <button
               type="button"
               onClick={() => setMode("months")}
-              className="font-semibold text-sm px-2 py-0.5 rounded-full transition-colors hover:bg-panel2"
+              className="btn-text"
             >
               {MONTHS[view.m]} {view.y}
             </button>
@@ -263,7 +277,7 @@ function CalendarPopup({
               <button
                 type="button"
                 onClick={prevMonth}
-                className="p-1 rounded-full text-muted transition-colors hover:text-text hover:bg-panel2"
+                className="btn-icon btn-icon-sm"
                 aria-label="Предыдущий месяц"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -271,7 +285,7 @@ function CalendarPopup({
               <button
                 type="button"
                 onClick={nextMonth}
-                className="p-1 rounded-full text-muted transition-colors hover:text-text hover:bg-panel2"
+                className="btn-icon btn-icon-sm"
                 aria-label="Следующий месяц"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -326,7 +340,7 @@ function CalendarPopup({
                 setYearStart(view.y - 6);
                 setMode("years");
               }}
-              className="font-semibold text-sm px-2 py-0.5 rounded-full transition-colors hover:bg-panel2"
+              className="btn-text"
             >
               {view.y}
             </button>
@@ -334,7 +348,7 @@ function CalendarPopup({
               <button
                 type="button"
                 onClick={() => setView((v) => ({ ...v, y: v.y - 1 }))}
-                className="p-1 rounded-full text-muted transition-colors hover:text-text hover:bg-panel2"
+                className="btn-icon btn-icon-sm"
                 aria-label="Предыдущий год"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -342,7 +356,7 @@ function CalendarPopup({
               <button
                 type="button"
                 onClick={() => setView((v) => ({ ...v, y: v.y + 1 }))}
-                className="p-1 rounded-full text-muted transition-colors hover:text-text hover:bg-panel2"
+                className="btn-icon btn-icon-sm"
                 aria-label="Следующий год"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -391,7 +405,7 @@ function CalendarPopup({
               <button
                 type="button"
                 onClick={() => setYearStart((s) => s - 12)}
-                className="p-1 rounded-full text-muted transition-colors hover:text-text hover:bg-panel2"
+                className="btn-icon btn-icon-sm"
                 aria-label="Предыдущие годы"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -399,7 +413,7 @@ function CalendarPopup({
               <button
                 type="button"
                 onClick={() => setYearStart((s) => s + 12)}
-                className="p-1 rounded-full text-muted transition-colors hover:text-text hover:bg-panel2"
+                className="btn-icon btn-icon-sm"
                 aria-label="Следующие годы"
               >
                 <ChevronRight className="w-4 h-4" />

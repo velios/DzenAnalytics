@@ -4,14 +4,12 @@ import {
   takeSnapshot as takeSnapshotImpl,
   deleteSnapshot as deleteSnapshotImpl,
   clearAllSnapshots as clearAllImpl,
+  pruneForeignSnapshots,
   downloadSnapshot as downloadSnapshotImpl,
   importSnapshotFromJson as importSnapshotImpl,
-  restoreSnapshotToCloud as restoreSnapshotImpl,
   type CloudSnapshotSummary,
-  type RestoreResult,
-  type RestoreProgress,
 } from "../lib/cloudSnapshots";
-import { loadZenCache } from "../lib/zenmoneyCache";
+import { readSnapshotFile } from "../lib/snapshotFile";
 import { useZenmoneyStore } from "./useZenmoneyStore";
 
 /**
@@ -28,15 +26,13 @@ interface State {
   loaded: boolean;
   /** Set while a network/IO operation is in flight — UI greys out the buttons. */
   busy: boolean;
+  /**
+   * КАКАЯ именно работа идёт. Один флаг `busy` на всё врал в подписях: пока шла
+   * уборка справочников, кнопка снимка бодро сообщала «Делаю снимок…».
+   */
+  busyOp: "snapshot" | "import" | "check" | "restore" | "cleanup" | null;
   /** Last error message from `takeSnapshot` for inline display. Cleared on next call. */
   error: string | null;
-  /** Last successful restore result (counts of accepted entities). */
-  lastRestoreResult: RestoreResult | null;
-  /** Live progress signal during an in-flight restore. UI consumes
-   *  it to render a status bar like "Восстановление: Счета 5 / 31".
-   *  Reset to null when restore finishes (success or failure). */
-  restoreProgress: RestoreProgress | null;
-
   hydrate: () => Promise<void>;
   takeSnapshot: () => Promise<void>;
   deleteSnapshot: (id: string) => Promise<void>;
@@ -45,21 +41,32 @@ interface State {
   /** Import a previously-downloaded snapshot file into the local
    *  IndexedDB. Validated; throws via `error` state on bad input. */
   importFromFile: (file: File) => Promise<void>;
-  /** Push the snapshot's contents back to the cloud via `pushDiff`.
-   *  Returns the per-entity acceptance counts. Caller is expected
-   *  to surface a confirmation dialog before invoking — restore is
-   *  potentially destructive (overwrites cloud state). */
-  restore: (id: string) => Promise<RestoreResult>;
+  /**
+   * Выбросить снимки чужого аккаунта. Зовётся, когда становится известен
+   * пользователь текущего токена: слотов пять, и занимать их копиями от
+   * прежнего аккаунта незачем.
+   */
+  pruneForeign: (currentUserId: number) => Promise<number>;
+}
+
+/**
+ * Текст ошибки для человека: объяснение — наше, ответ сервера — дословно и в
+ * кавычках. Дзен-мани отвечает по-английски, и показывать его строку как
+ * собственную речь нельзя. Наши сообщения уже по-русски, их пропускаем.
+ */
+function errText(e: unknown, fallback: string): string {
+  const raw = e instanceof Error ? e.message.trim() : "";
+  if (!raw) return fallback;
+  if (/[А-Яа-яЁё]/.test(raw)) return raw;
+  return `${fallback}. Ответ Дзен-мани: «${raw}»`;
 }
 
 export const useCloudSnapshotStore = create<State>((set) => ({
   snapshots: [],
   loaded: false,
   busy: false,
+  busyOp: null,
   error: null,
-  lastRestoreResult: null,
-  restoreProgress: null,
-
   hydrate: async () => {
     const list = await loadSnapshotIndex();
     set({ snapshots: list, loaded: true });
@@ -71,43 +78,40 @@ export const useCloudSnapshotStore = create<State>((set) => ({
     // too — e.g. the future "auto-snapshot before push" hook.
     const token = useZenmoneyStore.getState().token;
     if (!token) {
-      set({ error: "Сначала подключите токен Дзен-мани API" });
+      set({ error: "Сначала подключите Дзен-мани на вкладке «Данные»" });
       return;
     }
-    set({ busy: true, error: null });
+    set({ busy: true, busyOp: "snapshot", error: null });
     try {
       await takeSnapshotImpl(token);
       const list = await loadSnapshotIndex();
-      set({ snapshots: list, busy: false });
+      set({ snapshots: list, busy: false, busyOp: null });
     } catch (e) {
       set({
-        busy: false,
-        error:
-          e instanceof Error
-            ? e.message
-            : "Не удалось сделать снимок (см. консоль браузера)",
+        busy: false, busyOp: null,
+        error: errText(e, "Не удалось сделать снимок"),
       });
     }
   },
 
   deleteSnapshot: async (id) => {
-    set({ busy: true });
+    set({ busy: true, busyOp: null });
     try {
       await deleteSnapshotImpl(id);
       const list = await loadSnapshotIndex();
-      set({ snapshots: list, busy: false });
+      set({ snapshots: list, busy: false, busyOp: null });
     } catch {
-      set({ busy: false });
+      set({ busy: false, busyOp: null });
     }
   },
 
   clearAll: async () => {
-    set({ busy: true });
+    set({ busy: true, busyOp: null });
     try {
       await clearAllImpl();
-      set({ snapshots: [], busy: false });
+      set({ snapshots: [], busy: false, busyOp: null });
     } catch {
-      set({ busy: false });
+      set({ busy: false, busyOp: null });
     }
   },
 
@@ -116,58 +120,26 @@ export const useCloudSnapshotStore = create<State>((set) => ({
   },
 
   importFromFile: async (file) => {
-    set({ busy: true, error: null });
+    set({ busy: true, busyOp: "import", error: null });
     try {
-      const text = await file.text();
+      // Не `file.text()`: бэкап ZenTable приходит пожатым (.json.gz), и
+      // читать его как текст значит скормить импорту двоичный мусор.
+      const text = await readSnapshotFile(file);
       await importSnapshotImpl(text);
       const list = await loadSnapshotIndex();
-      set({ snapshots: list, busy: false });
+      set({ snapshots: list, busy: false, busyOp: null });
     } catch (e) {
       set({
-        busy: false,
-        error:
-          e instanceof Error
-            ? e.message
-            : "Не удалось импортировать снимок",
+        busy: false, busyOp: null,
+        error: errText(e, "Не удалось загрузить снимок"),
       });
     }
   },
 
-  restore: async (id) => {
-    const token = useZenmoneyStore.getState().token;
-    if (!token) {
-      const msg = "Сначала подключите токен Дзен-мани API";
-      set({ error: msg });
-      throw new Error(msg);
-    }
-    // Pull current user id + accounts from the local cache. The
-    // restore impl uses these to (a) detect cross-account restores
-    // and rewrite `user` fields accordingly, and (b) special-case
-    // singular system accounts like the per-user debt account.
-    const cache = await loadZenCache();
-    const currentUserId = cache?.user?.[0]?.id ?? null;
-    const currentAccounts = cache?.accounts ?? [];
-
-    set({ busy: true, error: null, restoreProgress: null });
-    try {
-      const result = await restoreSnapshotImpl(
-        id,
-        token,
-        { userId: currentUserId, currentAccounts },
-        (progress) => set({ restoreProgress: progress })
-      );
-      set({ busy: false, lastRestoreResult: result, restoreProgress: null });
-      return result;
-    } catch (e) {
-      set({
-        busy: false,
-        restoreProgress: null,
-        error:
-          e instanceof Error
-            ? e.message
-            : "Не удалось восстановить снимок (см. консоль)",
-      });
-      throw e;
-    }
+  pruneForeign: async (currentUserId) => {
+    const removed = await pruneForeignSnapshots(currentUserId);
+    if (removed > 0) set({ snapshots: await loadSnapshotIndex() });
+    return removed;
   },
+
 }));

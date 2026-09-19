@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
+import { isViewTransitionUpdate } from "./lib/viewTransition";
 import { TopNav } from "./components/TopNav";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TransactionsDrawer } from "./components/TransactionsDrawer";
 import { CommandPalette } from "./components/CommandPalette";
+import { ThemeModal } from "./components/ThemeModal";
+import { HeaderNavModal } from "./components/HeaderNavModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { ChangelogModal } from "./components/ChangelogModal";
 import { HistRatesProgress } from "./components/HistRatesProgress";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -29,7 +31,7 @@ import { SearchPage } from "./pages/SearchPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
 import { UncategorizedPage } from "./pages/UncategorizedPage";
-import { TrashPage } from "./pages/TrashPage";
+import { DeletedPage } from "./pages/DeletedPage";
 import { SankeyPage } from "./pages/SankeyPage";
 import { HelpPage } from "./pages/HelpPage";
 import { RulesPage } from "./pages/RulesPage";
@@ -52,6 +54,8 @@ import { useBudgetEditsStore } from "./store/useBudgetEditsStore";
 import { installNativeTooltips } from "./lib/nativeTooltips";
 import { useDisplayStore } from "./store/useDisplayStore";
 import { useReportPeriodStore } from "./store/useReportPeriodStore";
+import { useCloudSettingsStore } from "./store/useCloudSettingsStore";
+import { useCategoryRulesStore } from "./store/useCategoryRulesStore";
 import { useOffBalanceStore } from "./store/useOffBalanceStore";
 import { useSlicesStore } from "./store/useSlicesStore";
 import { useNewCategoriesStore } from "./store/useNewCategoriesStore";
@@ -61,6 +65,12 @@ import {
 } from "./store/useCounterpartyEditsStore";
 import { useTagDeletionsStore } from "./store/useTagDeletionsStore";
 import { usePlannedDeletionsStore } from "./store/usePlannedDeletionsStore";
+import { useFilterMemoryStore } from "./store/useFilterMemoryStore";
+import { useSplitGroupsStore } from "./store/useSplitGroupsStore";
+import { useMembersStore } from "./store/useMembersStore";
+import { useFreeMoneyStore } from "./store/useFreeMoneyStore";
+import { useTagModeStore } from "./store/useTagModeStore";
+import { useHeaderNavStore } from "./store/useHeaderNavStore";
 import { useDashboardLayoutStore } from "./store/useDashboardLayoutStore";
 import { useFiltersStore } from "./store/useFiltersStore";
 import { useImportBatchesStore } from "./store/useImportBatchesStore";
@@ -75,12 +85,21 @@ function PlainLayout() {
   // Re-key the boundary on the route so a crash on one page is cleared the
   // moment you navigate elsewhere (the boundary remounts fresh).
   const { pathname } = useLocation();
+  // Играть ли появление — решаем ОДИН раз на адрес, в той отрисовке, что
+  // сменила страницу. Переход плавной сменой кадров уже проявил её целиком, и
+  // своя анимация была бы лишней. Раньше её гасила пометка на <html> на время
+  // перехода: пометку снимали — анимация запускалась заново, и страница
+  // «открывалась» второй раз.
+  const [enter, setEnter] = useState({ path: pathname, animate: true });
+  if (enter.path !== pathname) {
+    setEnter({ path: pathname, animate: !isViewTransitionUpdate() });
+  }
   return (
     <ErrorBoundary key={pathname}>
       {/* Обёртка нужна только ради появления: ключ по адресу заставляет её
           пересоздаваться на каждом переходе, а с новым узлом заново
           проигрывается и анимация. */}
-      <div key={pathname} className="page-enter">
+      <div key={pathname} className={enter.animate ? "page-enter" : undefined}>
         <Outlet />
       </div>
     </ErrorBoundary>
@@ -104,7 +123,6 @@ function App() {
   useDisplayStore((s) => s.fractionDigits);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [changelogOpen, setChangelogOpen] = useState(false);
   useGlobalShortcuts(() => setPaletteOpen(true));
 
   useEffect(() => {
@@ -127,11 +145,27 @@ function App() {
     useTagDeletionsStore.getState().hydrate();
     usePlannedDeletionsStore.getState().hydrate();
     useDashboardLayoutStore.getState().hydrate();
+    useFilterMemoryStore.getState().hydrate();
+    // Правила нужны переносу настроек с первой синхронизации, а не только на
+    // страницах, где их показывают.
+    void useCategoryRulesStore.getState().hydrate();
+    // Слежка за правками сама ждёт, пока каждое хранилище прочитает своё.
+    void useCloudSettingsStore.getState().hydrate();
+    useSplitGroupsStore.getState().hydrate();
+    useMembersStore.getState().hydrate();
+    useFreeMoneyStore.getState().hydrate();
+    useTagModeStore.getState().hydrate();
+    useHeaderNavStore.getState().hydrate();
     hydrate();
     backupHydrate();
     reportPeriodHydrate();
     return initTheme();
   }, [hydrate, backupHydrate, reportPeriodHydrate, initTheme]);
+
+  // Складываем фильтр на диск, пока включена его память. Подписка стоит всегда:
+  // сам стор проверяет флажок, и включение настройки начинает работать сразу,
+  // без перезагрузки страницы.
+  useEffect(() => useFilterMemoryStore.getState().watch(), []);
 
   // Ask the browser to keep our IndexedDB as PERSISTENT storage, so it isn't
   // silently evicted on a browser update / "clear site data under pressure"
@@ -156,13 +190,25 @@ function App() {
   // start with the correct window when startDay != 1. We do this only
   // once on first hydrate to avoid stomping over the user's manual
   // month-step navigation later in the session.
-  const reportPeriodReconciled = useRef(false);
+  //
+  // День может смениться и ПОСЛЕ первой сверки: при подключённом Дзен-мани он
+  // приходит из его настроек позже — из кэша или с синхронизацией. Раньше
+  // сверка шла один раз, по своему дню, и «Сентябрь» в фильтре оставался
+  // отрезком по старому дню: при другом начале месяца в Дзен-мани аналитика
+  // показывала пустой или соседний период, хотя операции были. Теперь текущий
+  // месяц идёт за днём — если человек сам период не листал.
+  const reconciledStartDay = useRef<number | null>(null);
+  const followStartDay = useFiltersStore((s) => s.followStartDay);
+  const displayLoaded = useDisplayStore((s) => s.loaded);
+  // Ждём и настройки отображения: в них лежит вид месяца, а «текущий период»
+  // считается по нему.
   useEffect(() => {
-    if (!reportPeriodLoaded) return;
-    if (reportPeriodReconciled.current) return;
-    reportPeriodReconciled.current = true;
-    resetToCurrentPeriod(monthStartDay);
-  }, [reportPeriodLoaded, monthStartDay, resetToCurrentPeriod]);
+    if (!reportPeriodLoaded || !displayLoaded) return;
+    const prev = reconciledStartDay.current;
+    reconciledStartDay.current = monthStartDay;
+    if (prev === null) resetToCurrentPeriod(monthStartDay);
+    else followStartDay(prev, monthStartDay);
+  }, [reportPeriodLoaded, displayLoaded, monthStartDay, resetToCurrentPeriod, followStartDay]);
 
   // Once backup settings are loaded, check on mount + every 10 minutes.
   useEffect(() => {
@@ -376,7 +422,7 @@ function App() {
   if (!loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center text-muted">
-        Загрузка...
+        Загрузка…
       </div>
     );
   }
@@ -384,7 +430,10 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col">
       <TopNav onOpenPalette={() => setPaletteOpen(true)} />
-      <main className="flex-1 w-full px-4 md:px-6 py-4 md:py-6">
+      {/* Сверху воздуха меньше, чем снизу: первая строка страницы — тонкие
+          крошки раздела (PageHeader), они читаются как продолжение шапки, и
+          отбивать их наравне с остальными блоками незачем. */}
+      <main className="flex-1 w-full px-4 md:px-6 pt-3 md:pt-4 pb-4 md:pb-6">
         <Routes>
           <Route element={<PlainLayout />}>
             <Route path="/" element={<DashboardPage />} />
@@ -400,7 +449,7 @@ function App() {
             <Route path="/goals" element={<GoalsPage />} />
             <Route path="/duplicates" element={<DuplicatesPage />} />
             <Route path="/uncategorized" element={<UncategorizedPage />} />
-            <Route path="/trash" element={<TrashPage />} />
+            <Route path="/trash" element={<DeletedPage />} />
             <Route path="/help" element={<HelpPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/health" element={<HealthPage />} />
@@ -412,7 +461,7 @@ function App() {
                 the title sits above the filter bar.
 
                 Раньше они стояли ВНЕ общего слоя — привычка тех времён, когда
-                у них была своя обёртка с панелью отборов. Отборы давно
+                у них была своя обёртка с панелью фильтров. Фильтры давно
                 переехали внутрь самих страниц, а страницы так и остались
                 снаружи, мимо перезапуска обработчика ошибок и появления при
                 переходе. */}
@@ -433,35 +482,10 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <footer className="border-t border-border mt-4">
-        <div className="w-full px-4 md:px-6 py-3 flex items-center justify-center gap-2.5 text-xs text-muted">
-          <span>
-            DzenAnalytics{" "}
-            <span className="tabular-nums">v{__APP_VERSION__}</span>
-          </span>
-          <span className="text-border">·</span>
-          <button
-            onClick={() => setChangelogOpen(true)}
-            className="hover:text-accent transition-colors"
-          >
-            Что нового
-          </button>
-          <span className="text-border">·</span>
-          <a
-            href="https://pay.cloudtips.ru/p/bbde8948"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 hover:text-accent transition-colors"
-            title="Поддержать автора чаевыми"
-          >
-            <span aria-hidden>❤️</span>
-            Отблагодарить автора
-          </a>
-        </div>
-      </footer>
       <TransactionsDrawer />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
-      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
+      <ThemeModal />
+      <HeaderNavModal />
       <ConfirmDialog />
       <HistRatesProgress />
     </div>

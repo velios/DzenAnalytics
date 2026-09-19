@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, ArrowLeft, ChartPie, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ChartPie, type LucideIcon } from "lucide-react";
 import { formatMoney, formatPct } from "../lib/format";
 import { colorForCategory, subcategoryColor } from "../lib/categoryColor";
 import { zenIconToLucide } from "../lib/zenIconLucide";
 import { pluralOps } from "../lib/plural";
 import { useDrillStore } from "../store/useDrillStore";
-import { CategoryDot } from "./CategoryDot";
 import { KindSwitcher } from "./KindSwitcher";
+import { CategoryTable, type CategoryTableRow } from "./CategoryTable";
 
 // A Budgera-style two-ring category donut: the inner ring is the top-level
 // categories (each with its glyph), the outer thin ring breaks every category
@@ -99,7 +99,9 @@ export function CategorySunburst({
   // В плитке вид задан самим виджетом: переключателя нет, и рисовать его
   // некуда — заголовок карточки уже говорит, расходы это или доходы.
   const kindSwitcher =
-    compact || !onKindChange ? null : <KindSwitcher kind={kind} onChange={onKindChange} />;
+    // Крупная ступень, как в «Топе»: переключатель стоит над всем содержимым
+    // раздела, а рядом в шапке — сегменты вида той же высоты.
+    compact || !onKindChange ? null : <KindSwitcher kind={kind} onChange={onKindChange} size="md" />;
   const [drill, setDrill] = useState<string | null>(null);
   // Which direction the ring last moved — drives the zoom-in / zoom-out
   // animation (replayed by re-keying the <svg> on every level change).
@@ -136,9 +138,20 @@ export function CategorySunburst({
   const [hoverCenter, setHoverCenter] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // Кольцо рисует только положительные категории — отрицательный сектор
+  // нарисовать нельзя. Но категория, где возвраты перекрыли траты, из ИТОГА не
+  // выпадает: раньше она пропадала и из заголовка, и из таблицы, и «Расходы»
+  // здесь выходили больше, чем в «Операциях», ровно на её минус.
   const cats = useMemo(() => data.filter((c) => c.total > 0), [data]);
-  const total = useMemo(() => cats.reduce((s, c) => s + c.total, 0), [cats]);
-  const totalCount = useMemo(() => cats.reduce((s, c) => s + c.count, 0), [cats]);
+  const negativeCats = useMemo(() => data.filter((c) => c.total < 0), [data]);
+  /** Сумма секторов — от неё доли и углы кольца. */
+  const ringTotal = useMemo(() => cats.reduce((s, c) => s + c.total, 0), [cats]);
+  /** Чистый итог с возвратами — тот же, что «Расходы» в «Операциях». */
+  const total = useMemo(
+    () => ringTotal + negativeCats.reduce((s, c) => s + c.total, 0),
+    [ringTotal, negativeCats]
+  );
+  const totalCount = useMemo(() => data.reduce((s, c) => s + c.count, 0), [data]);
 
   const kindWord = kind === "expense" ? "Расходы" : "Доходы";
 
@@ -147,6 +160,37 @@ export function CategorySunburst({
   const effectiveDrill = drillNode ? drill : null;
 
   const color = (name: string) => colorForCategory(name, meta);
+
+  // Список рядом с кольцом — общей таблицей категорий. В приближении — одна
+  // категория с раскрытыми подкатегориями.
+  const legendRows: CategoryTableRow[] = (
+    effectiveDrill && drillNode ? [drillNode] : [...cats, ...negativeCats]
+  ).map((c) => {
+    const cc = color(c.name);
+    return {
+      key: c.name,
+      name: c.name,
+      value: c.total,
+      count: c.count,
+      share: ringTotal > 0 ? c.total / ringTotal : 0,
+      children: c.subs
+        .filter((sub) => sub.total > 0)
+        .map((sub) => ({
+          key: sub.fullName,
+          name: sub.name,
+          parent: c.name,
+          value: sub.total,
+          count: sub.count,
+          share: ringTotal > 0 ? sub.total / ringTotal : 0,
+          dotFallback: cc,
+        })),
+    };
+  });
+  const hoverKey = hover
+    ? hover.sub
+      ? cats.find((c) => c.name === hover.cat)?.subs.find((x) => x.name === hover.sub)?.fullName ?? null
+      : hover.cat
+    : null;
 
   // ── Slice geometry ────────────────────────────────────────────────────
   interface Slice {
@@ -167,7 +211,7 @@ export function CategorySunburst({
 
   const slices = useMemo<Slice[]>(() => {
     const out: Slice[] = [];
-    if (total <= 0) return out;
+    if (ringTotal <= 0) return out;
 
     if (effectiveDrill && drillNode) {
       // Drilled: outer solid band = the category itself, inner ring = its subs.
@@ -230,7 +274,7 @@ export function CategorySunburst({
     // Top level: inner ring = categories, outer ring = their subcategories.
     let a = 0;
     for (const c of cats) {
-      const span = (c.total / total) * TAU;
+      const span = (c.total / ringTotal) * TAU;
       const ca = color(c.name);
       out.push({
         key: c.name,
@@ -270,7 +314,7 @@ export function CategorySunburst({
       a += span;
     }
     return out;
-  }, [cats, total, effectiveDrill, drillNode, meta]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cats, ringTotal, effectiveDrill, drillNode, meta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDim = (s: Slice) => {
     if (!hover) return false;
@@ -299,9 +343,9 @@ export function CategorySunburst({
         if (hover.sub) {
           const sub = cat.subs.find((s) => s.name === hover.sub);
           if (sub)
-            return { name: sub.name, value: sub.total, count: sub.count, pct: sub.total / total };
+            return { name: sub.name, value: sub.total, count: sub.count, pct: sub.total / ringTotal };
         }
-        return { name: cat.name, value: cat.total, count: cat.count, pct: cat.total / total };
+        return { name: cat.name, value: cat.total, count: cat.count, pct: cat.total / ringTotal };
       }
     }
     if (drillNode)
@@ -309,7 +353,7 @@ export function CategorySunburst({
         name: drillNode.name,
         value: drillNode.total,
         count: drillNode.count,
-        pct: drillNode.total / total,
+        pct: drillNode.total / ringTotal,
       };
     return { name: `Все ${kindWord.toLowerCase()}`, value: total, count: totalCount, pct: 1 };
   })();
@@ -341,12 +385,6 @@ export function CategorySunburst({
       </div>
     );
   }
-
-  // «Развернуть все» (top level only): expand / collapse every category that
-  // has subcategories at once — mirrors the Bars view.
-  const expandableCats = cats.filter((c) => c.subs.some((s) => s.total > 0));
-  const allCatsOpen =
-    expandableCats.length > 0 && expandableCats.every((c) => expanded.has(c.name));
 
   return (
     <div
@@ -511,138 +549,26 @@ export function CategorySunburst({
           // is em-relative), matching the Bars view and operation tables.
           style={{ fontSize: "var(--tbl-font)" }}
         >
-          <div className="shrink-0 bg-panel flex items-center gap-2 px-1.5 pb-1 mb-1 border-b border-border text-[0.85em] text-muted uppercase tracking-wide">
-            <span className="flex-1 min-w-0">Категория</span>
-            <span className="w-14 text-left shrink-0">%</span>
-            <span className="w-20 text-left shrink-0">Операции</span>
-            <span className="w-28 text-left shrink-0">Сумма</span>
-            <span className="w-8 shrink-0 flex items-center justify-center">
-              {!effectiveDrill && expandableCats.length > 0 && (
-                <button
-                  onClick={() =>
-                    setExpanded(
-                      allCatsOpen ? new Set() : new Set(expandableCats.map((c) => c.name))
-                    )
-                  }
-                  title={allCatsOpen ? "Свернуть все" : "Развернуть все"}
-                  aria-label={allCatsOpen ? "Свернуть все" : "Развернуть все"}
-                  className="-m-1 p-1 rounded-md text-muted hover:text-accent hover:bg-panel2"
-                >
-                  <ChevronDown
-                    className={`w-4 h-4 transition-transform duration-300 ${
-                      allCatsOpen ? "rotate-180" : ""
-                    }`}
-                  />
-                </button>
-              )}
-            </span>
-          </div>
-          <div className="shrink-0 space-y-0.5 animate-fade" key={effectiveDrill ?? "__top"}>
-          {(effectiveDrill && drillNode ? [drillNode] : cats).map((c) => {
-            const posSubs = c.subs.filter((s) => s.total > 0);
-            const open = effectiveDrill ? true : expanded.has(c.name);
-            const cc = color(c.name);
-            return (
-              <div key={c.name}>
-                <div
-                  className={`flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-panel2/50 cursor-pointer ${
-                    hover?.cat === c.name ? "bg-panel2/50" : ""
-                  }`}
-                  onMouseEnter={() => setHover({ cat: c.name })}
-                  onMouseLeave={() => setHover(null)}
-                  onClick={() =>
-                    effectiveDrill
-                      ? onOpenCategory(c.name)
-                      : posSubs.length
-                        ? drillInto(c.name)
-                        : onOpenCategory(c.name)
-                  }
-                >
-                  <CategoryDot category={c.name} size="w-7 h-7" />
-                  <span className="flex-1 min-w-0 truncate">{c.name}</span>
-                  <span className="w-14 text-left tabular-nums shrink-0">
-                    {formatPct(c.total / total, 1)}
-                  </span>
-                  <span className="w-20 text-left tabular-nums shrink-0">
-                    {c.count}
-                  </span>
-                  <span className="w-28 text-left tabular-nums shrink-0">
-                    {formatMoney(c.total, base)}
-                  </span>
-                  {/* Chevron column — always reserved (invisible without subs)
-                      so the amounts above stay aligned. */}
-                  <span className="w-8 shrink-0 flex items-center justify-center">
-                    {!effectiveDrill && posSubs.length > 0 && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setExpanded((prev) => {
-                            const n = new Set(prev);
-                            if (n.has(c.name)) n.delete(c.name);
-                            else n.add(c.name);
-                            return n;
-                          });
-                        }}
-                        className="p-1 rounded-md text-muted hover:text-accent hover:bg-panel2"
-                        title={open ? "Свернуть" : "Подкатегории"}
-                      >
-                        {open ? (
-                          <ChevronDown className="w-5 h-5" />
-                        ) : (
-                          <ChevronRight className="w-5 h-5" />
-                        )}
-                      </button>
-                    )}
-                  </span>
-                </div>
-                {open && posSubs.length > 0 && (
-                  <div
-                    className="mb-2 space-y-0.5"
-                    style={{ marginLeft: "19px", borderLeft: `3px solid ${cc}` }}
-                  >
-                    {posSubs.map((sub) => (
-                      <div
-                        key={sub.fullName}
-                        className={`flex items-center gap-2 rounded-md pl-2 pr-1.5 py-1.5 hover:bg-panel2/50 cursor-pointer ${
-                          hover?.cat === c.name && hover?.sub === sub.name
-                            ? "bg-panel2/50"
-                            : ""
-                        }`}
-                        onMouseEnter={() => setHover({ cat: c.name, sub: sub.name })}
-                        onMouseLeave={() => setHover(null)}
-                        onClick={() => onOpenSubcategory(sub.fullName)}
-                      >
-                        {/* Icon badge (own icon/colour, else the parent's). The
-                            coloured rail on the left already groups these rows as
-                            the category's children. */}
-                        <span className="shrink-0">
-                          <CategoryDot
-                            category={sub.name}
-                            parent={c.name}
-                            fallback={cc}
-                            size="w-6 h-6"
-                          />
-                        </span>
-                        <span className="flex-1 min-w-0 truncate text-muted">
-                          {sub.name}
-                        </span>
-                        <span className="w-14 text-left text-muted tabular-nums shrink-0">
-                          {formatPct(sub.total / total, 1)}
-                        </span>
-                        <span className="w-20 text-left text-muted tabular-nums shrink-0">
-                          {sub.count}
-                        </span>
-                        <span className="w-28 text-left text-muted tabular-nums shrink-0">
-                          {formatMoney(sub.total, base)}
-                        </span>
-                        <span className="w-8 shrink-0" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          <div className="shrink-0 animate-fade" key={effectiveDrill ?? "__top"}>
+            <CategoryTable
+              rows={legendRows}
+              base={base}
+              kind={kind}
+              expanded={effectiveDrill ? new Set([effectiveDrill]) : expanded}
+              onExpandedChange={effectiveDrill ? undefined : setExpanded}
+              hoverKey={hoverKey}
+              onHover={(r) =>
+                setHover(
+                  r ? (r.parent ? { cat: r.parent, sub: r.name } : { cat: r.name }) : null
+                )
+              }
+              onRowClick={(r) => {
+                if (r.parent) onOpenSubcategory(r.key);
+                // Категорию в минусе в кольце не приблизить — её сектора нет.
+                else if (effectiveDrill || !r.children?.length || r.value < 0) onOpenCategory(r.name);
+                else drillInto(r.name);
+              }}
+            />
           </div>
           {/* Empty area below the (often short) drilled list is a silent
               «back» target — clicking it pops up one level (mirrors Esc, the

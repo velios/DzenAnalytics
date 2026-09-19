@@ -2,12 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, ChevronDown, CalendarRange } from "lucide-react";
 import clsx from "clsx";
-import { monthLabel } from "../lib/format";
+import { MONTHS_SHORT } from "../lib/months";
+import { monthLabelFull } from "../lib/format";
 
-const MONTHS = [
-  "Янв", "Фев", "Мар", "Апр", "Май", "Июн",
-  "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек",
-];
 
 /**
  * Month filter control: ‹ prev › step arrows around a label button that opens
@@ -25,7 +22,10 @@ export function MonthPicker({
   minYM,
   maxYM,
   active,
+  dimmed,
   mode = "month",
+  hint,
+  size = "sm",
   onSelect,
   onSelectYear,
   onStep,
@@ -36,8 +36,21 @@ export function MonthPicker({
   maxYM: string;
   /** Whether the month filter is the active date mode. */
   active: boolean;
+  /** Период задан не им: дорожка приглушается, чтобы рабочий контрол был виден. */
+  dimmed?: boolean;
   /** Что выбираем — месяц или год. */
   mode?: "month" | "year";
+  /**
+   * Подсказка к подписи: при отчётном месяце не с 1-го числа название месяца
+   * само по себе обманывает — «Август» с днём 28 идёт по 27 сентября. Даты
+   * отрезка показываем подсказкой, чтобы не растить кнопку.
+   */
+  hint?: string;
+  /**
+   * Ступень: `sm` 34 — ряд общего фильтра и шапки карточек, `md` 42 — ряд
+   * контролов раздела, где рядом дорожки крупной ступени.
+   */
+  size?: "sm" | "md";
   onSelect: (ym: string) => void;
   onSelectYear?: (year: number) => void;
   onStep: (dir: -1 | 1) => void;
@@ -59,17 +72,13 @@ export function MonthPicker({
   const years: number[] = [];
   for (let y = maxY; y >= minY; y--) years.push(y);
 
-  // Sync the visible year to the selected month whenever the picker opens.
-  useEffect(() => {
-    if (open) setViewYear(Number(value?.slice(0, 4)) || new Date().getFullYear());
-  }, [open, value]);
-
   useLayoutEffect(() => {
     const el = btnRef.current;
-    if (!open || !el) {
-      setPos(null);
-      return;
-    }
+    // Сбрасывать `pos` не нужно: список живёт только при `open`, а при
+    // следующем открытии `useLayoutEffect` пересчитает координаты ДО того,
+    // как браузер нарисует кадр, — старое значение показать некому. Лишний
+    // сброс стоил перерисовки на каждом закрытии.
+    if (!open || !el) return;
     const r = el.getBoundingClientRect();
     const estH = 240;
     const below = window.innerHeight - r.bottom - 8;
@@ -106,16 +115,15 @@ export function MonthPicker({
 
   return (
     <div
-      className={clsx(
-        "flex items-center bg-panel2 rounded-full p-1 border shadow-tray",
-        active ? "border-accent" : "border-border"
-      )}
+      // Дорожка и пункты — общие `.seg-*`: та же пилюля, что у `Segmented`
+      // той же ступени, и выбранная подпись светится так же.
+      className={clsx("seg-track", active && "!border-accent bg-accent/5", dimmed && "opacity-55")}
       title={isYear ? "Перейти к одному году" : "Перейти к одному месяцу"}
     >
       <button
         onClick={() => onStep(-1)}
         disabled={!canPrev}
-        className="p-1 rounded-full hover:text-accent hover:bg-panel/70 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        className={clsx("seg-icon", size === "md" ? "seg-icon-md" : "seg-icon-sm")}
         title={isYear ? "Предыдущий год" : "Предыдущий месяц"}
       >
         <ChevronLeft className="w-4 h-4" />
@@ -123,23 +131,39 @@ export function MonthPicker({
 
       <button
         ref={btnRef}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          // Открываем — показываем год выбранного месяца. Это следствие
+          // нажатия, а не состояния: эффектом оно правилось уже ПОСЛЕ
+          // отрисовки, лишним проходом, и год успевал мигнуть прошлым.
+          if (!open) setViewYear(Number(value?.slice(0, 4)) || new Date().getFullYear());
+          setOpen((o) => !o);
+        }}
         aria-haspopup="dialog"
         aria-expanded={open}
+        title={hint}
         className={clsx(
-          "px-2.5 py-1 text-xs rounded-full flex items-center gap-1.5 transition-colors duration-200 min-w-[118px] justify-center",
-          active ? "bg-accent text-accent-fg font-medium" : "text-muted hover:text-text"
+          // `flex-1` — чтобы подпись стояла по центру, когда дорожка растянута
+          // на всю ширину (узкое окно): иначе месяц жался к левой стрелке, а
+          // справа зияла пустота.
+          "seg-item flex-1",
+          // Ширины хватает на самый длинный месяц («Сентябрь 26 г.») целиком:
+          // сокращение «Сент.» экономило пиксели там, где их и так достаточно,
+          // а читалось хуже.
+          size === "md" ? "seg-item-md min-w-[160px]" : "seg-item-sm min-w-[148px]",
+          active && "seg-on"
         )}
       >
-        <CalendarRange className="w-3 h-3" />
-        {isYear ? year : value ? monthLabel(value) : "Месяц"}
-        <ChevronDown className={clsx("w-3 h-3 transition-transform", open && "rotate-180")} />
+        <CalendarRange className={size === "md" ? "w-4 h-4" : "w-3.5 h-3.5"} />
+        {isYear ? year : value ? monthLabelFull(value) : "Месяц"}
+        <ChevronDown
+          className={clsx(size === "md" ? "w-4 h-4" : "w-3.5 h-3.5", "transition-transform", open && "rotate-180")}
+        />
       </button>
 
       <button
         onClick={() => onStep(1)}
         disabled={!canNext}
-        className="p-1 rounded-full hover:text-accent hover:bg-panel/70 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        className={clsx("seg-icon", size === "md" ? "seg-icon-md" : "seg-icon-sm")}
         title={isYear ? "Следующий год" : "Следующий месяц"}
       >
         <ChevronRight className="w-4 h-4" />
@@ -181,16 +205,29 @@ export function MonthPicker({
                 <button
                   onClick={() => setViewYear((y) => y - 1)}
                   disabled={viewYear <= minY}
-                  className="p-1 rounded-full hover:text-accent hover:bg-panel/70 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="btn-icon btn-icon-sm"
                   title="Предыдущий год"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="text-sm font-semibold tabular-nums">{viewYear}</span>
+                {/* Год в шапке — кнопка: из списка месяцев часто нужен «весь
+                    этот год», а дорога к нему шла через кнопку «Год» в ряду
+                    пресетов и возврат к нужному году стрелками. */}
+                <button
+                  onClick={() => {
+                    onSelectYear?.(viewYear);
+                    setOpen(false);
+                  }}
+                  disabled={!onSelectYear}
+                  className="px-2 py-0.5 rounded-md text-sm font-semibold tabular-nums transition-colors hover:bg-panel2 disabled:hover:bg-transparent"
+                  title={onSelectYear ? `Показать весь ${viewYear} год` : undefined}
+                >
+                  {viewYear}
+                </button>
                 <button
                   onClick={() => setViewYear((y) => y + 1)}
                   disabled={viewYear >= maxY}
-                  className="p-1 rounded-full hover:text-accent hover:bg-panel/70 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="btn-icon btn-icon-sm"
                   title="Следующий год"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -198,7 +235,7 @@ export function MonthPicker({
               </div>
 
               <div className="grid grid-cols-3 gap-1">
-                {MONTHS.map((m, i) => {
+                {MONTHS_SHORT.map((m, i) => {
                   const ym = `${viewYear}-${String(i + 1).padStart(2, "0")}`;
                   const disabled = (!!minYM && ym < minYM) || (!!maxYM && ym > maxYM);
                   const isSel = ym === value;
@@ -230,5 +267,41 @@ export function MonthPicker({
           document.body
         )}
     </div>
+  );
+}
+
+/**
+ * Выбор года — `MonthPicker` в режиме года с границами по годам.
+ *
+ * Один на все разделы («Календарь», «Итоги года», «Сравнение», «Год к году» в
+ * Cash-flow): прежде каждый собирал его заново из семи пропсов, а «Год к году»
+ * и вовсе держал свою перелистывалку — без подписи-кнопки и другой высоты.
+ */
+export function YearPicker({
+  year,
+  minYear,
+  maxYear,
+  onChange,
+  size = "sm",
+}: {
+  year: number;
+  minYear: number;
+  maxYear: number;
+  onChange: (year: number) => void;
+  /** `md` 42 — год раздела в ряду контролов; `sm` 34 — в шапке карточки. */
+  size?: "sm" | "md";
+}) {
+  return (
+    <MonthPicker
+      size={size}
+      value={`${year}-01`}
+      minYM={`${minYear}-01`}
+      maxYM={`${maxYear}-12`}
+      active
+      mode="year"
+      onSelect={(ym) => onChange(Number(ym.slice(0, 4)))}
+      onSelectYear={onChange}
+      onStep={(dir) => onChange(Math.min(maxYear, Math.max(minYear, year + dir)))}
+    />
   );
 }

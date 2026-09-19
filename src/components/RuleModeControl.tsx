@@ -3,7 +3,6 @@ import {
   Ban,
   CalendarClock,
   ChevronDown,
-  HelpCircle,
   MousePointerClick,
   Play,
   Zap,
@@ -25,13 +24,14 @@ import {
 } from "../lib/ruleSchedule";
 import type { RuleMode } from "../lib/ruleMode";
 import type { RuleSchedule, ScheduleDepth, ScheduleEvery } from "../lib/ruleSchedule";
+import { InfoPopover } from "./InfoPopover";
 
 /**
  * Режим правила — одним контролом вместо трёх сегментов и кнопки расписания.
  *
  * Сегменты не давали места объяснению: смысл каждого лежал в `title`, то есть
  * открывался по наведению — и только тому, кто догадался навести. Три равных по
- * весу варианта рядом при этом читались как отбор, а не как состояние правила.
+ * весу варианта рядом при этом читались как фильтр, а не как состояние правила.
  * Расписание же было ВТОРЫМ контролом той же ячейки и уезжало на вторую строку,
  * из-за чего строки таблицы прыгали по высоте.
  *
@@ -222,7 +222,7 @@ export function RuleModePanel({
                     setSchedule({ everyN: Math.min(999, Math.round(n)) });
                 }}
                 aria-label="Как часто, число"
-                className="input h-8 text-xs !px-2 !py-1 w-14 tabular-nums"
+                className="input h-[34px] text-xs !px-2 !py-1 w-14 tabular-nums"
               />
             )}
             <Select
@@ -267,7 +267,7 @@ export function RuleModePanel({
                         setSchedule({ depthN: Math.min(999, Math.round(n)) });
                     }}
                     aria-label="Глубина, число"
-                    className="input h-8 text-xs !px-2 !py-1 w-14 tabular-nums"
+                    className="input h-[34px] text-xs !px-2 !py-1 w-14 tabular-nums"
                   />
                 )}
                 <Select
@@ -311,31 +311,23 @@ export function RuleModePanel({
                 {push.text}
               </div>
             </div>
-            <Tooltip
-              content={
-                <>
-                  <p>
-                    Новые операции правило в режиме «Авто» размечает при каждой
-                    синхронизации, даже когда расписание стоит на «Только новые».
-                    Расписание и глубина — только про то, что уже лежит в истории.
-                  </p>
-                  <p>
-                    Минуты и часы идут сами, пока приложение открыто. Дни и месяцы
-                    ждут захода в приложение или синхронизации: браузерное
-                    приложение ночью не работает.
-                  </p>
-                  <p>
-                    Записанное правилом — обычная правка операции: видно в списке
-                    изменений, откатывается построчно. В облако она уедет по
-                    правилам вашего режима отправки — о нём третья строка.
-                  </p>
-                </>
-              }
-            >
-              <span className="shrink-0 text-muted hover:text-accent cursor-help">
-                <HelpCircle className="w-4 h-4" />
-              </span>
-            </Tooltip>
+            <InfoPopover label="Как работает «Авто»">
+              <p>
+                Новые операции правило в режиме «Авто» размечает при каждой
+                синхронизации, даже когда расписание стоит на «Только новые».
+                Расписание и глубина — только про то, что уже лежит в истории.
+              </p>
+              <p>
+                Минуты и часы идут сами, пока приложение открыто. Дни и месяцы
+                ждут захода в приложение или синхронизации: браузерное
+                приложение ночью не работает.
+              </p>
+              <p>
+                Записанное правилом — обычная правка операции: видно в списке
+                изменений, откатывается построчно. В облако она уедет по
+                правилам вашего режима отправки — о нём третья строка.
+              </p>
+            </InfoPopover>
             {onRunNow && every !== "off" && (
               <button
                 type="button"
@@ -398,6 +390,40 @@ function FieldLabel({ title, help }: { title: string; help: ReactNode }) {
  * только новое. Глубина «Всё время» подсвечена цветом предупреждения: это самая
  * дорогая настройка, и видеть её надо не открывая окно.
  */
+/**
+ * Режим правила только для чтения — тот же вид, что у `RuleModeChip`, но без
+ * окна выбора: в списках, где правило не правят, а отбирают (экспорт, импорт).
+ */
+export function RuleModeBadge({ value }: { value: RuleModeValue }) {
+  const { mode, schedule } = value;
+  const meta = MODES.find((m) => m.value === mode)!;
+  return (
+    <Tooltip content={modeSentence(value)}>
+      <span
+        className={clsx(
+          "chip chip-sm pl-2 pr-2 max-w-full cursor-default",
+          mode === "manual" && "text-text",
+          mode === "auto" && "border-accent/40 bg-accent/10 text-accent"
+        )}
+      >
+        <meta.Icon className="w-3.5 h-3.5 shrink-0" aria-hidden />
+        <span className="font-medium shrink-0">{meta.label}</span>
+        {mode === "auto" && (
+          <span
+            className={clsx(
+              "inline-flex items-center gap-1 min-w-0",
+              schedule?.depth === "all" ? "text-warn" : "opacity-70"
+            )}
+          >
+            <CalendarClock className="w-3 h-3 shrink-0" aria-hidden />
+            <span className="truncate">{scheduleShort(schedule)}</span>
+          </span>
+        )}
+      </span>
+    </Tooltip>
+  );
+}
+
 export function RuleModeChip({
   value,
   onChange,
@@ -423,9 +449,8 @@ export function RuleModeChip({
           aria-haspopup="dialog"
           aria-expanded={open}
           className={clsx(
-            "inline-flex items-center gap-1.5 rounded-full border pl-2 pr-1.5 py-1 text-xs whitespace-nowrap transition-colors max-w-full",
-            mode === "off" && "border-border bg-panel2 text-muted hover:text-text",
-            mode === "manual" && "border-border bg-panel2 text-text hover:border-accent/40",
+            "chip chip-sm pl-2 pr-1.5 max-w-full",
+            mode === "manual" && "text-text hover:border-accent/40",
             mode === "auto" && "border-accent/40 bg-accent/10 text-accent hover:bg-accent/15"
           )}
         >

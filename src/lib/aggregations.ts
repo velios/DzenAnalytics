@@ -1,6 +1,7 @@
 import type { Transaction, CurrencyRates } from "../types";
 import { ymKey, ymdKey } from "./format";
 import { periodKey } from "./period";
+import { MONTHS } from "./months";
 import { affectsExpense, expenseDelta } from "./txKindStyle";
 import { counterpartyOf, debtKey } from "./debtFilter";
 
@@ -249,10 +250,10 @@ export function stackedBalanceByAccount(
       const layer = payee !== null && split!.has(payee) ? debtKey(acc, payee) : acc;
       // Слой считаем для КАЖДОГО счёта, а не только для отобранных: кто из них
       // крупный, а кто мелочь, видно лишь после того, как посчитаны линии.
-      // Отбор пользователя — единственное, что отсекает операцию сразу.
+      // Фильтр пользователя — единственное, что отсекает операцию сразу.
       const key = !only ? layer : only.has(layer) ? layer : only.has(acc) ? acc : null;
       // День остаётся на оси, даже если операция прошла по невыбранному счёту:
-      // иначе при отборе пары счетов ось теряла бы почти все точки, а линии
+      // иначе при фильтре пары счетов ось теряла бы почти все точки, а линии
       // рвались на длинные прямые между редкими днями.
       if (!tooOld && !days.has(d)) days.set(d, new Map());
       if (key === null) return;
@@ -302,7 +303,7 @@ export function stackedBalanceByAccount(
    *
    * До первой операции слоя показывать нечего: остаток мы знаем только с того
    * дня, когда счёт впервые появился в данных. Счёт с «эпоховым» потоком или
-   * вовсе без операций (выбран отбором, но движения не было) считается
+   * вовсе без операций (выбран фильтром, но движения не было) считается
    * существующим всегда — других сведений о нём у нас нет.
    */
   const alive = (a: string, date: string) => {
@@ -311,7 +312,7 @@ export function stackedBalanceByAccount(
     return start === undefined || date >= start;
   };
 
-  // Линия каждого слоя целиком — по всем кандидатам сразу. Отбор «кто крупный»
+  // Линия каждого слоя целиком — по всем кандидатам сразу. Фильтр «кто крупный»
   // идёт уже по готовым линиям (ниже): по одному только сегодняшнему остатку
   // его делать нельзя — счёт, на котором год назад лежал миллион, а сегодня
   // пусто, уходил в «Прочие» и делал их самым большим слоем на графике.
@@ -517,7 +518,8 @@ export interface StreamPoint {
 export function buildStreamData(
   txs: Transaction[],
   topCategories = 10,
-  kind: "expense" | "income" = "expense"
+  kind: "expense" | "income" = "expense",
+  monthStartDay: number = 1
 ): { data: StreamPoint[]; categories: string[] } {
   const monthsSet = new Set<string>();
   const totals = new Map<string, number>();
@@ -529,7 +531,9 @@ export function buildStreamData(
     // ribbon, matching how Zenmoney's own reports look.
     const include = kind === "expense" ? affectsExpense(t.kind) : t.kind === kind;
     if (!include) continue;
-    const ym = t.date.slice(0, 7);
+    // Тот же ключ, что у «столбцов» этого же графика: иначе переключение
+    // «столбцы ↔ поток» меняло суммы за один и тот же месяц.
+    const ym = periodKey(t.date, monthStartDay);
     if (!ym) continue;
     monthsSet.add(ym);
     const delta = kind === "expense" ? expenseDelta(t) : t.amountBase;
@@ -573,10 +577,6 @@ export interface SeasonalityPoint {
   expenseDeviationPct: number;
 }
 
-const SEASON_MONTH_NAMES = [
-  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-];
 
 export function detectSeasonality(txs: Transaction[]): SeasonalityPoint[] {
   const monthly = new Map<string, { income: number; expense: number }>();
@@ -625,7 +625,7 @@ export function detectSeasonality(txs: Transaction[]): SeasonalityPoint[] {
         : 0;
     return {
       monthIdx: i,
-      monthName: SEASON_MONTH_NAMES[i],
+      monthName: MONTHS[i],
       avgExpense,
       avgIncome,
       yearsSampled: b.expense.length,
@@ -1239,7 +1239,7 @@ export function buildSankey(txs: Transaction[]): SankeyData {
   // Узел без ленты раскладке некуда деть, и она сваливает его в ПОСЛЕДНИЙ
   // столбец: «Прочие доходы» на копейку оказывались справа, среди статей
   // расхода, без суммы и с пустой строкой в списке. Ленты рисуются по
-  // округлённым суммам, поэтому и отбор идёт по ним же — иначе бакет на
+  // округлённым суммам, поэтому и фильтр идёт по ним же — иначе бакет на
   // сорок копеек породил бы узел, к которому не придёт ни одной ленты.
   const shownIncome = finalIncome.filter(([, v]) => Math.round(v as number) > 0);
   const shownExpense = finalExpense.filter(([, v]) => Math.round(v as number) > 0);
@@ -1669,11 +1669,12 @@ export function netWorthSeries(
 export function accountMonthlyDeltas(
   txs: Transaction[],
   account: string,
-  months = 12
+  months = 12,
+  monthStartDay: number = 1
 ): number[] {
   const map = new Map<string, number>();
   for (const t of txs) {
-    const ym = t.date.slice(0, 7);
+    const ym = periodKey(t.date, monthStartDay);
     if (!ym) continue;
     let delta = 0;
     if (t.outcomeAccount === account && (t.kind === "expense" || t.kind === "transfer")) {
@@ -1821,11 +1822,19 @@ export function tagReturn(bucket: { expense: number; income: number }): {
   };
 }
 
-export function groupByHashtag(txs: Transaction[]): TagBucket[] {
+/**
+ * Откуда брать теги операции. По умолчанию — хэштеги из комментария; раздел
+ * «Теги» подставляет сюда выбранный режим (#69, см. `lib/operationTags`).
+ */
+export type TagGetter = (t: Transaction) => string[];
+
+const hashtagsOf: TagGetter = (t) => extractHashtags(t.comment);
+
+export function groupByHashtag(txs: Transaction[], tagsOf: TagGetter = hashtagsOf): TagBucket[] {
   const map = new Map<string, TagBucket>();
   for (const t of txs) {
     if (t.kind === "transfer") continue;
-    const tags = extractHashtags(t.comment);
+    const tags = tagsOf(t);
     for (const tag of tags) {
       let b = map.get(tag);
       if (!b) {
@@ -1867,7 +1876,8 @@ export interface TagCatNode {
  * income lands in its own bucket. Sorted by expense+income, descending.
  */
 export function hashtagCategoryTrees(
-  txs: Transaction[]
+  txs: Transaction[],
+  tagsOf: TagGetter = hashtagsOf
 ): Map<string, TagCatNode[]> {
   const add = (b: { expense: number; income: number }, t: Transaction) => {
     if (t.kind === "income") b.income += t.amountBase;
@@ -1877,7 +1887,7 @@ export function hashtagCategoryTrees(
   const byTag = new Map<string, Map<string, TagCatNode>>();
   for (const t of txs) {
     if (t.kind === "transfer") continue;
-    const tags = extractHashtags(t.comment);
+    const tags = tagsOf(t);
     if (tags.length === 0) continue;
     for (const tag of tags) {
       let cats = byTag.get(tag);
@@ -2126,7 +2136,7 @@ function humanDay(iso: string): string {
   return new Date(y, m - 1, d).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
 }
 
-export function buildInsights(txs: Transaction[]): Insight[] {
+export function buildInsights(txs: Transaction[], monthStartDay: number = 1): Insight[] {
   const insights: Insight[] = [];
   const expenses = txs.filter((t) => t.kind === "expense");
   if (expenses.length === 0) return insights;
@@ -2176,7 +2186,7 @@ export function buildInsights(txs: Transaction[]): Insight[] {
     });
   }
 
-  const months = groupByMonth(txs);
+  const months = groupByMonth(txs, { monthStartDay });
   if (months.length >= 2) {
     const last = months[months.length - 1];
     const prev = months[months.length - 2];
@@ -2197,8 +2207,8 @@ export function buildInsights(txs: Transaction[]): Insight[] {
 
     const cats = groupByCategory(txs, "top");
     if (cats.length > 0) {
-      const lastTxs = txs.filter((t) => t.date.slice(0, 7) === last.ym);
-      const prevTxs = txs.filter((t) => t.date.slice(0, 7) === prev.ym);
+      const lastTxs = txs.filter((t) => periodKey(t.date, monthStartDay) === last.ym);
+      const prevTxs = txs.filter((t) => periodKey(t.date, monthStartDay) === prev.ym);
       const lastByCat = groupByCategory(lastTxs, "top");
       const prevByCat = new Map(groupByCategory(prevTxs, "top").map((c) => [c.category, c.expense]));
       let bestCat = "";
@@ -2325,14 +2335,18 @@ export interface MonthSpike {
   ratio: number;
 }
 
-export function detectMonthSpikes(txs: Transaction[], minRatio = 1.5): MonthSpike[] {
+export function detectMonthSpikes(
+  txs: Transaction[],
+  minRatio = 1.5,
+  monthStartDay: number = 1
+): MonthSpike[] {
   const monthsCats = new Map<string, Map<string, number>>();
   for (const t of txs) {
     // Net refunds against the same-month/category total — otherwise
     // a "category jumped 2× this month" alert would fire even when
     // the user fully returned the purchases.
     if (!affectsExpense(t.kind)) continue;
-    const ym = t.date.slice(0, 7);
+    const ym = periodKey(t.date, monthStartDay);
     if (!ym) continue;
     let mc = monthsCats.get(ym);
     if (!mc) {
@@ -2385,7 +2399,8 @@ export function categoryMonthlySeries(
   txs: Transaction[],
   category: string,
   level: "top" | "full" = "top",
-  kind: "expense" | "income" = "expense"
+  kind: "expense" | "income" = "expense",
+  monthStartDay: number = 1
 ): CategoryMonthPoint[] {
   const map = new Map<string, CategoryMonthPoint>();
   for (const t of txs) {
@@ -2395,7 +2410,7 @@ export function categoryMonthlySeries(
     if (!include) continue;
     const matches = level === "top" ? t.category === category : t.categoryFull === category;
     if (!matches) continue;
-    const ym = t.date.slice(0, 7);
+    const ym = periodKey(t.date, monthStartDay);
     if (!ym) continue;
     let p = map.get(ym);
     if (!p) {
@@ -2407,7 +2422,8 @@ export function categoryMonthlySeries(
   }
   const allMonths = new Set<string>();
   for (const t of txs) {
-    if (t.date) allMonths.add(t.date.slice(0, 7));
+    // Ось ряда — теми же ключами, что и сами точки выше.
+    if (t.date) allMonths.add(periodKey(t.date, monthStartDay));
   }
   const sorted = Array.from(allMonths).sort();
   return sorted.map((ym) => map.get(ym) || { ym, total: 0, count: 0 });
@@ -2660,6 +2676,32 @@ export function scaleKPI(kpi: KPI, periods: number): KPI {
  * `savingsTitles` — названия счетов с признаком «накопительный», ВКЛЮЧАЯ
  * архивные: пара «архивный ↔ активный» иначе перестала бы схлопываться в ноль.
  */
+/**
+ * Суммы набора операций по видам — для шапки дня в ленте и для панели
+ * выделения. Возврат гасит расход, как везде в сервисе; `net` — доходы минус
+ * расходы, без переводов.
+ *
+ * Раньше один и тот же цикл жил в шапке дня, в панели выделения ленты и в
+ * шторке операций.
+ */
+export function kindTotals(txs: Transaction[]): {
+  inc: number;
+  exp: number;
+  xfer: number;
+  net: number;
+} {
+  let inc = 0;
+  let exp = 0;
+  let xfer = 0;
+  for (const t of txs) {
+    if (t.kind === "income") inc += t.amountBase;
+    else if (t.kind === "expense") exp += t.amountBase;
+    else if (t.kind === "refund") exp -= t.amountBase;
+    else if (t.kind === "transfer") xfer += t.amountBase;
+  }
+  return { inc, exp, xfer, net: inc - exp };
+}
+
 export function transferTotals(
   txs: Transaction[],
   savingsTitles: Set<string>

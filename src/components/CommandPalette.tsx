@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   Search as SearchIcon,
   ArrowRight,
@@ -30,14 +29,23 @@ import {
   Moon,
   Monitor,
   Trash2,
+  Palette,
+  PanelTop,
 } from "lucide-react";
 import { useDataStore } from "../store/useDataStore";
 import { useDrillStore } from "../store/useDrillStore";
 import { useThemeStore } from "../store/useThemeStore";
+import { useThemeModalStore } from "../store/useThemeModalStore";
+import { useHeaderNavStore } from "../store/useHeaderNavStore";
 import { useFiltersStore } from "../store/useFiltersStore";
 import { useSavedViewsStore } from "../store/useSavedViewsStore";
 import { groupByCategory, topPayees, NO_PAYEE_LABEL } from "../lib/aggregations";
-import { monthLabel, ymKey } from "../lib/format";
+import { monthLabel } from "../lib/format";
+import { periodKey } from "../lib/period";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { SectionEmpty } from "./SectionEmpty";
+import { useSmoothNavigate } from "../hooks/useSmoothNavigate";
+import { ALL_SCHEMES } from "../lib/themeSchemes";
 
 interface Item {
   id: string;
@@ -106,11 +114,16 @@ function score(query: string, text: string, aliases: string[] = []): number {
 }
 
 export function CommandPalette({ open, onClose }: Props) {
-  const nav = useNavigate();
+  // Переход в раздел — той же плавной сменой экрана, что из шапки и меню.
+  const nav = useSmoothNavigate();
   const transactions = useDataStore((s) => s.transactions);
   const showDrill = useDrillStore((s) => s.show);
   const setMode = useThemeStore((s) => s.setMode);
-  const setMonth = useFiltersStore((s) => s.setMonth);
+  const setScheme = useThemeStore((s) => s.setScheme);
+  const showThemeModal = useThemeModalStore((s) => s.show);
+  const openHeaderNavEditor = useHeaderNavStore((s) => s.openEditor);
+  const setPeriodMonth = useFiltersStore((s) => s.setPeriodMonth);
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
   const views = useSavedViewsStore((s) => s.views);
   const filtersStore = useFiltersStore;
 
@@ -136,6 +149,21 @@ export function CommandPalette({ open, onClose }: Props) {
       { id: "theme:light", group: "Действия", title: "Светлая тема", icon: Sun, action: () => setMode("light") },
       { id: "theme:dark", group: "Действия", title: "Тёмная тема", icon: Moon, action: () => setMode("dark") },
       { id: "theme:auto", group: "Действия", title: "Тема: авто", icon: Monitor, action: () => setMode("auto") },
+      { id: "theme:pick", group: "Действия", title: "Выбрать тему оформления", icon: Palette, action: showThemeModal },
+      { id: "header-nav:edit", group: "Действия", title: "Настроить основное меню", icon: PanelTop, action: openHeaderNavEditor },
+      // Все двенадцать тем: «тема лагуна» или «уголь» находит нужную сразу.
+      // Из палитры тему просят увидеть — поэтому включаем и её вид.
+      ...ALL_SCHEMES.map((sc) => ({
+        id: `scheme:${sc.id}`,
+        group: "Действия",
+        title: `Тема: ${sc.name}`,
+        hint: `${sc.kind === "dark" ? "Тёмная" : "Светлая"} · ${sc.hint}`,
+        icon: Palette,
+        action: () => {
+          setScheme(sc.id);
+          setMode(sc.kind);
+        },
+      })),
       {
         id: "filter:reset",
         group: "Действия",
@@ -152,9 +180,12 @@ export function CommandPalette({ open, onClose }: Props) {
     );
 
     if (transactions.length > 0) {
+      // Месяцы собираем ОТЧЁТНЫЕ: выбор пункта ставит фильтру отчётный период,
+      // и с календарным списком самый свежий пункт мог указывать на период, в
+      // котором операций ещё нет.
       const months = new Set<string>();
       for (const t of transactions) {
-        if (t.date) months.add(ymKey(t.date));
+        if (t.date) months.add(periodKey(t.date, monthStartDay));
       }
       const sortedMonths = Array.from(months).sort().reverse().slice(0, 24);
       for (const ym of sortedMonths) {
@@ -164,7 +195,8 @@ export function CommandPalette({ open, onClose }: Props) {
           title: monthLabel(ym),
           hint: ym,
           icon: CalendarDays,
-          action: () => setMonth(ym),
+          // Месяцы в списке собраны отчётными — открываем их же.
+          action: () => setPeriodMonth(ym),
         });
       }
 
@@ -233,7 +265,7 @@ export function CommandPalette({ open, onClose }: Props) {
     }
 
     return list;
-  }, [transactions, views, nav, setMode, setMonth, showDrill, filtersStore]);
+  }, [transactions, views, nav, setMode, setScheme, showThemeModal, openHeaderNavEditor, setPeriodMonth, monthStartDay, showDrill, filtersStore]);
 
   const filtered = useMemo(() => {
     if (!query) return items.slice(0, 80);
@@ -342,7 +374,9 @@ export function CommandPalette({ open, onClose }: Props) {
 
         <div ref={listRef} className="flex-1 overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <div className="text-center text-sm text-muted py-8">Ничего не найдено</div>
+            <SectionEmpty variant="compact">
+              Ничего не найдено
+            </SectionEmpty>
           ) : (
             filtered.map((item, idx) => {
               const Icon = item.icon;
@@ -352,7 +386,7 @@ export function CommandPalette({ open, onClose }: Props) {
               return (
                 <div key={item.id}>
                   {showGroup && (
-                    <div className="text-[10px] uppercase tracking-wider text-muted px-4 pt-3 pb-1">
+                    <div className="caps-label px-4 pt-3 pb-1">
                       {item.group}
                     </div>
                   )}

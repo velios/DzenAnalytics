@@ -26,6 +26,21 @@ import { SYNTHETIC_CATEGORY_COLORS } from "./categoryColor";
  */
 export const NO_CATEGORY = "Без категории";
 
+/**
+ * Ярлыки сервиса на месте категории: «Перевод» и «Долг».
+ *
+ * Их ставит разбор по виду операции (перевод между своими счетами, движение по
+ * долговому счёту), тега с таким смыслом в Дзен-мани нет. Поэтому искать по ним
+ * можно, а записать их категорией — нельзя: отправка такую правку не примет, и
+ * она навсегда останется неотправленной.
+ */
+export const SERVICE_CATEGORIES: ReadonlySet<string> = new Set(["Перевод", "Долг"]);
+
+/** Ярлык сервиса, а не категория Дзен-мани (см. `SERVICE_CATEGORIES`). */
+export function isServiceCategory(category: string | null | undefined): boolean {
+  return !!category && SERVICE_CATEGORIES.has(category);
+}
+
 export interface CategoryMeta {
   /** CSS rgb() string or null when the tag has no colour set. */
   color: string | null;
@@ -232,6 +247,15 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
         : null;
 
     const cat = buildCategory(zt.tag, tagsById);
+    // Вторые и следующие категории (#69). Основная уже в `cat`; повтор основной
+    // и неизвестные теги отбрасываем, порядок — как в Дзен-мани.
+    const extraCategories: string[] = [];
+    for (const tagId of (zt.tag ?? []).slice(1)) {
+      const extra = buildCategory([tagId], tagsById);
+      if (extra.category === NO_CATEGORY) continue;
+      if (extra.full === cat.full || extraCategories.includes(extra.full)) continue;
+      extraCategories.push(extra.full);
+    }
     // Display-only overrides. The transaction's tag/category from Zenmoney is
     // preserved in `*Original` fields below (for category rules to match
     // against), but the visible `category` / `categoryFull` are forced to our
@@ -305,6 +329,12 @@ export function mapZenmoneyDiff(diff: ZenDiffResponse): MappedDiff {
       // Храним инверсию: «новая» читается лучше, чем «не просмотренная», и
       // отсутствие поля (CSV) не превращается в «новая».
       unseen: zt.viewed === false,
+      // Чей счёт — участник общего аккаунта. Берём `role` СЧЁТА, а не
+      // `zt.user`: тот у всех записей одинаков (см. `Transaction.member`).
+      // У перевода предпочитаем личную ногу: перевод, коснувшийся личного
+      // счёта, принадлежит его хозяину, а не «общему котлу».
+      member: outAcc?.role ?? inAcc?.role ?? null,
+      ...(extraCategories.length > 0 ? { extraCategories } : {}),
     });
   }
 

@@ -8,6 +8,7 @@
 // Set semantics (shared with useFiltersStore): empty = everything selected,
 // {FILTER_NONE} = nothing selected, anything else = that exact subset.
 
+import { Checkbox } from "./Checkbox";
 import {
   Fragment,
   useEffect,
@@ -19,17 +20,19 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { SURFACE_ATTR } from "./Popover";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, type LucideIcon } from "lucide-react";
 import clsx from "clsx";
 import { FILTER_NONE } from "../store/useFiltersStore";
 import { pluralRu } from "../lib/plural";
 import { nestedBranches, visibleOptions } from "../lib/nestedOptions";
+import { SearchInput } from "./SearchInput";
 
 export function MultiSelect({
   label,
   options,
   selected,
   onChange,
+  icon: Icon,
   renderIcon,
   labelOf,
   nestedOf,
@@ -47,6 +50,12 @@ export function MultiSelect({
   options: string[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
+  /**
+   * Значок самой кнопки — что за сущность выбирается. Без него ряд фильтров
+   * читался как несколько одинаковых серых кнопок, и «Счета» от «Валюты»
+   * отличались только подписью.
+   */
+  icon?: LucideIcon;
   /** Optional leading icon per option (e.g. account logo / category dot). */
   renderIcon?: (opt: string) => ReactNode;
   /**
@@ -104,7 +113,7 @@ export function MultiSelect({
    * Раскрытые ветки — по умолчанию ни одной.
    *
    * Контрагентов у долгового счёта набирается больше, чем всех остальных
-   * счетов вместе: раскрытыми они топят список, и отбор счетов читается как
+   * счетов вместе: раскрытыми они топят список, и фильтр счетов читается как
    * список должников. Под свёрнутым счётом остаётся переключатель с их числом.
    */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -250,7 +259,7 @@ export function MultiSelect({
           className
         )}
       >
-        <span className="text-[11px] uppercase tracking-wide text-muted truncate">
+        <span className="caps-label truncate">
           {title}
         </span>
         <button
@@ -339,7 +348,7 @@ export function MultiSelect({
           };
     }
     setPos(next);
-  }, [open, visible.length, showSearch]);
+  }, [open, visible.length, showSearch, MENU_W]);
 
   useEffect(() => {
     if (!open) return;
@@ -371,22 +380,28 @@ export function MultiSelect({
           setQuery("");
         }}
         className={clsx(
-          "btn-ghost text-xs py-1.5 h-[30px] w-full justify-between",
-          selected.size > 0 && "border-accent text-accent"
+          "btn-ghost text-[12.5px] leading-4 w-full justify-between gap-2",
+          selected.size > 0 && "border-accent"
         )}
       >
-        <span className="truncate max-w-[180px]">
+        {Icon && <Icon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden="true" />}
+        {/* Ярлык тише значения: в ряду из четырёх кнопок глазу нужно значение
+            («Все (31)»), а «Счета» он и так знает по значку. */}
+        <span className="truncate max-w-[180px] flex-1 text-left font-normal text-muted">
           {label}:{" "}
           {/* Ширина под самое длинное состояние: иначе кнопка прыгает, когда
-              «Все» сменяется на «2 из 12», и вся строка отборов едет вбок. */}
+              «Все» сменяется на «2 из 12», и вся строка фильтров едет вбок. */}
           <span
-            className="inline-block text-left"
+            className={clsx(
+              "inline-block text-left font-medium",
+              selected.size > 0 ? "text-accent" : "text-text"
+            )}
             style={summaryMinWidth ? { minWidth: summaryMinWidth } : undefined}
           >
             {summary}
           </span>
         </span>
-        <ChevronDown className="w-4 h-4 shrink-0" />
+        <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
       </button>
       {open &&
         pos &&
@@ -418,16 +433,15 @@ export function MultiSelect({
                 </button>
               </div>
               {showSearch && (
-                <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-border/60">
-                  <Search className="w-3.5 h-3.5 text-muted shrink-0" />
-                  <input
-                    autoFocus
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={searchPlaceholder ?? `Поиск: ${label.toLowerCase()}`}
-                    className="bg-transparent text-xs w-full outline-none"
-                  />
-                </div>
+                <SearchInput
+                  variant="menu"
+                  size="sm"
+                  value={query}
+                  onChange={setQuery}
+                  placeholder={searchPlaceholder ?? `Поиск: ${label.toLowerCase()}`}
+                  autoFocus
+                  className="!px-2 mb-1"
+                />
               )}
               {visible.length === 0 ? (
                 <div className="px-2 py-2 text-xs text-muted">Ничего не найдено</div>
@@ -478,14 +492,12 @@ export function MultiSelect({
                         {/* Родитель, у которого отмечена только часть веток,
                             показывается «частично» — иначе на экране стоял бы
                             снятый счёт с отмеченным контрагентом внутри. */}
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={isChecked(opt)}
-                          ref={(el) => {
-                            if (el) el.indeterminate = isPartial(opt);
-                          }}
                           onChange={() => toggle(opt)}
-                          className="accent-accent shrink-0"
+                          indeterminate={isPartial(opt)}
+                          label="Выбрать вариант"
+                          className="shrink-0"
                         />
                         {renderIcon && (
                           <span className="shrink-0">{renderIcon(opt)}</span>

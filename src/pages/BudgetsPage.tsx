@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Plus,
   Trash2,
@@ -11,7 +11,6 @@ import {
   Check,
   X,
   ArrowUp,
-  HelpCircle,
   Wand2,
   Download,
   CalendarClock,
@@ -71,23 +70,20 @@ import {
   type BudgetLine,
 } from "../lib/budgets";
 import { formatMoney } from "../lib/format";
+import { StatCell, StatRow, type StatTone } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { DateField } from "../components/DateField";
+import { BudgetExportModal } from "../components/BudgetExportModal";
 import {
-  BudgetExportModal,
   budgetExportFileName,
   type BudgetExportFormat,
-} from "../components/BudgetExportModal";
-
-function currentMonth(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-function daysInMonth(ym: string): number {
-  const [y, m] = ym.split("-").map(Number);
-  return new Date(y, m, 0).getDate();
-}
+} from "../lib/budgetExportName";
+import { InfoPopover } from "../components/InfoPopover";
+import { Badge, type BadgeTone } from "../components/Badge";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
+import { currentPeriod, periodRange, spanDays } from "../lib/period";
+import { monthProgress as progressOf } from "../lib/dashboardModel";
 
 interface Row {
   line: BudgetLine;
@@ -123,6 +119,11 @@ export function BudgetsPage() {
   const base = useDataStore((s) => s.rates.base);
   const rates = useDataStore((s) => s.rates);
   const showDrill = useDrillStore((s) => s.show);
+  // Первый день отчётного месяца — тот же, что во всей аналитике и в Дзен-мани.
+  // Весь раздел считает по ОТЧЁТНОМУ периоду: ключ месяца («2026-09») приходит
+  // из Дзен-мани как есть, а факт под этот ключ собирается с 15.09 по 14.10.
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+  const periodLoaded = useReportPeriodStore((s) => s.loaded);
   const lines = useBudgetsStore((s) => s.lines);
   const addLine = useBudgetsStore((s) => s.addLine);
   const setOverride = useBudgetsStore((s) => s.setOverride);
@@ -190,17 +191,37 @@ export function BudgetsPage() {
     };
   }, [transactions, rates]);
 
-  const cur = currentMonth();
-  const [ym, setYm] = useState(cur);
+  const cur = currentPeriod(monthStartDay);
+  const [ym, setYm] = useState(() =>
+    currentPeriod(useReportPeriodStore.getState().monthStartDay)
+  );
+  // Первый день отчётного месяца читается из базы асинхронно, и до этого
+  // «текущий период» считается по календарю — в первые его дни это промах на
+  // целый месяц. Один раз, как настройка прочитана, переставляем период на
+  // настоящий; дальше он принадлежит пользователю.
+  const periodAnchored = useRef(false);
+  useEffect(() => {
+    if (!periodLoaded || periodAnchored.current) return;
+    periodAnchored.current = true;
+    setYm(currentPeriod(useReportPeriodStore.getState().monthStartDay));
+  }, [periodLoaded]);
   const isCurrent = ym === cur;
+  /** Границы выбранного отчётного месяца — по ним отбираются все его операции. */
+  const range = useMemo(() => periodRange(ym, monthStartDay), [ym, monthStartDay]);
+  const inMonth = useCallback(
+    (date: string | undefined) => {
+      const day = (date || "").slice(0, 10);
+      return day >= range.from && day <= range.to;
+    },
+    [range]
+  );
   // Past/future months are "complete" for projection purposes (no linear
-  // extrapolation); only the current month is partially elapsed.
-  const monthProgress = isCurrent
-    ? new Date().getDate() / daysInMonth(ym)
-    : 1;
+  // extrapolation); only the current month is partially elapsed. Доля считается
+  // по ОТЧЁТНОМУ периоду — тем же расчётом, что и на главной.
+  const monthProgress = isCurrent ? progressOf(ym, new Date(), monthStartDay).progress : 1;
 
   const plannedByDay = useMemo(() => {
-    const days = daysInMonth(ym);
+    const days = spanDays(range.from, range.to);
     const income = new Array(days + 1).fill(0);
     const expense = new Array(days + 1).fill(0);
     // Периметр счетов действует и на планы: если бюджет сужен до карты, чужой
@@ -209,15 +230,18 @@ export function BudgetsPage() {
     const inScope = (account: string) =>
       scope.accounts.size === 0 || scope.accounts.has(account);
     for (const p of zenPlanned) {
-      if (p.forecast || !p.date.startsWith(ym)) continue;
+      if (p.forecast) continue;
+      const day = p.date.slice(0, 10);
+      if (day < range.from || day > range.to) continue;
       if (!inScope(p.account)) continue;
-      const d = Number(p.date.slice(8, 10));
+      // Индекс — номер дня ВНУТРИ периода, как и ось графика.
+      const d = spanDays(range.from, day);
       if (!(d >= 1 && d <= days)) continue;
       if (p.kind === "income") income[d] += p.amountBase;
       else if (p.kind === "expense") expense[d] += p.amountBase;
     }
     return { income, expense };
-  }, [zenPlanned, ym, scope]);
+  }, [zenPlanned, range, scope]);
 
   /**
    * План из НАЗНАЧЕННЫХ операций Дзен-мани.
@@ -229,8 +253,8 @@ export function BudgetsPage() {
    * нет, никуда не сохраняется и в Дзен-мани не уходит.
    */
   const plannedAsPlan = useMemo(
-    () => plannedPlans(zenPlanned, scope),
-    [zenPlanned, scope]
+    () => plannedPlans(zenPlanned, scope, undefined, monthStartDay),
+    [zenPlanned, scope, monthStartDay]
   );
 
   /**
@@ -244,7 +268,7 @@ export function BudgetsPage() {
   const aheadByTag = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const m = new Map<string, { sum: number; ops: PlannedOp[] }>();
-    for (const p of plannedPlans(zenPlanned, scope, today)) {
+    for (const p of plannedPlans(zenPlanned, scope, today, monthStartDay)) {
       if (p.ym !== ym || p.ahead <= 0) continue;
       // Ключ тот же, что у `budgetKey` ниже; собираем его здесь, чтобы не
       // тянуть объявление функции выше по файлу.
@@ -254,7 +278,7 @@ export function BudgetsPage() {
       });
     }
     return m;
-  }, [zenPlanned, scope, ym]);
+  }, [zenPlanned, scope, ym, monthStartDay]);
 
   // ── Inline add: a draft row inside the «Расходы»/«Доходы» section ──
   const [draftKind, setDraftKind] = useState<BudgetKind | null>(null);
@@ -425,9 +449,10 @@ export function BudgetsPage() {
         scope,
         rowOrder,
         plannedAsPlan,
-        livePaths ?? undefined
+        livePaths ?? undefined,
+        monthStartDay
       ),
-    [lines, transactions, year, scope, rowOrder, plannedAsPlan, livePaths]
+    [lines, transactions, year, scope, rowOrder, plannedAsPlan, livePaths, monthStartDay]
   );
   /** Сдвиг года сохраняет месяц: вернувшись в месячный вид, попадаешь в тот же. */
   const shiftYear = (d: number) => setYm((m) => addMonths(m, d * 12));
@@ -435,8 +460,17 @@ export function BudgetsPage() {
   // ── Выгрузка годового отчёта в Excel ──
   const prevYearReport = useMemo(
     () =>
-      buildBudgetYear(lines, transactions, year - 1, scope, rowOrder, [], livePaths ?? undefined),
-    [lines, transactions, year, scope, rowOrder, livePaths]
+      buildBudgetYear(
+        lines,
+        transactions,
+        year - 1,
+        scope,
+        rowOrder,
+        [],
+        livePaths ?? undefined,
+        monthStartDay
+      ),
+    [lines, transactions, year, scope, rowOrder, livePaths, monthStartDay]
   );
   /**
    * Месяц, по которому считаются показатели «за месяц» и отрезок «с начала
@@ -548,13 +582,13 @@ export function BudgetsPage() {
         // doesn't forecast get no phantom «≈»); in CSV mode fall back to a local
         // median. Never pushed to Дзен.
         if (planned === 0 && line.kind === "income") {
-          let fc = 0;
+          let fc: number;
           if (!zenLoaded) fc = 0; // still reading cache — avoid a median flash
           else if (zenForecasts)
             fc = zenForecasts.get(
               zenPlanKey(line.kind, line.category, line.subcategory ?? null, ym)
             ) ?? 0; // API: trust Дзен (missing = no forecast)
-          else fc = forecastFor(line, transactions, ym, 6, scope); // CSV: median estimate
+          else fc = forecastFor(line, transactions, ym, 6, scope, monthStartDay); // CSV: median estimate
           if (fc > 0) return { line, planned: fc, forecast: true };
         }
         return { line, planned, forecast: false, locked: lockedFor(line, ym) };
@@ -603,12 +637,19 @@ export function BudgetsPage() {
       .map(
         (r): Row => ({
           ...r,
-          fact: factFor(r.line, transactions, ym, scope, ownSubsFor(ownSubs, r.line)),
+          fact: factFor(
+            r.line,
+            transactions,
+            ym,
+            scope,
+            ownSubsFor(ownSubs, r.line),
+            monthStartDay
+          ),
         })
       )
       // Призрак переименования: имени в справочнике больше нет, трат за месяц
       // нет и быть не может — весь факт уехал на новое имя (#77). Тот же
-      // отбор, что в годовом своде, только по факту месяца.
+      // фильтр, что в годовом своде, только по факту месяца.
       .filter(
         (r) =>
           !livePaths ||
@@ -636,7 +677,18 @@ export function BudgetsPage() {
       if (!as || !bs) return as ? 1 : bs ? -1 : 0;
       return compareBudgetRows({ name: as, amount: a.fact }, { name: bs, amount: b.fact }, rowOrder);
     });
-  }, [lines, ym, transactions, zenForecasts, zenLoaded, scope, rowOrder, plannedAsPlan, livePaths]);
+  }, [
+    lines,
+    ym,
+    transactions,
+    zenForecasts,
+    zenLoaded,
+    scope,
+    rowOrder,
+    plannedAsPlan,
+    livePaths,
+    monthStartDay,
+  ]);
   /**
    * Статьи, по которым в этом месяце были деньги, но плана нет.
    *
@@ -669,7 +721,7 @@ export function BudgetsPage() {
     const inScope = (account: string | undefined) =>
       scope.accounts.size === 0 || (!!account && scope.accounts.has(account));
     for (const t of transactions) {
-      if (!(t.date || "").startsWith(ym)) continue;
+      if (!inMonth(t.date)) continue;
       // «Без категории» `budgetHits` отсеивает — планировать неразобранное
       // нечего. Но деньги-то потрачены, и без них итог месяца не сойдётся с
       // операциями. Собираем их отдельной строкой, которую нельзя планировать.
@@ -719,7 +771,7 @@ export function BudgetsPage() {
           plannable: u.category !== NO_CATEGORY,
         })
       );
-  }, [transactions, ym, rows, scope]);
+  }, [transactions, ym, inMonth, rows, scope]);
 
   /** Всё вместе — и запланированное, и нет. Сводка считается по этому списку,
    *  поэтому итог месяца сходится с лентой операций за тот же месяц. */
@@ -760,7 +812,7 @@ export function BudgetsPage() {
   const transfers = useMemo(() => {
     const agg = new Map<string, { kind: BudgetKind; account: string; sum: number }>();
     for (const t of transactions) {
-      if (!(t.date || "").startsWith(ym)) continue;
+      if (!inMonth(t.date)) continue;
       for (const hit of budgetHits(t, scope)) {
         if (!hit.transfer) continue;
         const account = hit.subcategory ?? "—";
@@ -775,7 +827,7 @@ export function BudgetsPage() {
         .filter((x) => x.kind === kind && x.sum > 0)
         .sort((a, b) => b.sum - a.sum);
     return { out: side("expense"), in: side("income") };
-  }, [transactions, ym, scope]);
+  }, [transactions, inMonth, scope]);
 
   /** Операции статьи за месяц — по умолчанию за выбранный, но годовой свод
    *  открывает свою ячейку, поэтому месяц передаётся явно. */
@@ -789,19 +841,20 @@ export function BudgetsPage() {
       transactions,
       scope,
       { kind, category: cat, subcategory: sub },
-      month
+      month,
+      monthStartDay
     );
     const label = sub ? `${cat} › ${sub}` : cat;
     showDrill(`${label} · ${month}`, txs, "Бюджет");
   }
 
   // Click a day on the cash-flow chart → drill into that day's operations.
-  function openDay(day: number) {
-    const dd = String(day).padStart(2, "0");
-    const date = `${ym}-${dd}`;
+  // График отдаёт КАЛЕНДАРНУЮ дату: отчётный период может идти через стык
+  // месяцев, и собрать её из `ym` и номера дня нельзя.
+  function openDay(date: string) {
     const txs = scopedTx.filter((t) => t.date.startsWith(date));
     if (txs.length === 0) return;
-    showDrill(`${day} · ${ym}`, txs, "День");
+    showDrill(`${Number(date.slice(8, 10))} · ${date.slice(0, 7)}`, txs, "День");
   }
 
   if (transactions.length === 0) return <EmptyState />;
@@ -827,7 +880,7 @@ export function BudgetsPage() {
   let expTransfers = 0;
   let incTransfers = 0;
   for (const t of transactions) {
-    if (!(t.date || "").startsWith(ym)) continue;
+    if (!inMonth(t.date)) continue;
     for (const hit of budgetHits(t, scope)) {
       if (!hit.transfer) continue;
       if (hit.kind === "expense") expTransfers += hit.amount;
@@ -878,7 +931,7 @@ export function BudgetsPage() {
           </button>
         </Tooltip>
         <Tooltip content="Отмена">
-          <button onClick={resetForm} className="text-muted hover:text-text shrink-0 p-1">
+          <button onClick={resetForm} className="btn-icon shrink-0">
             <X className="w-5 h-5" />
           </button>
         </Tooltip>
@@ -895,7 +948,7 @@ export function BudgetsPage() {
     <Tooltip content={kind === "expense" ? "Добавить категорию расходов" : "Добавить категорию доходов"}>
       <button
         onClick={() => startDraft(kind)}
-        className="btn-primary !p-2"
+        className="btn-primary btn-square"
         aria-label="Добавить категорию"
       >
         <Plus className="w-4 h-4" />
@@ -908,14 +961,12 @@ export function BudgetsPage() {
       <PageHeader
         icon={Wallet}
         title="Бюджет"
-        hint="План и факт по статьям — за месяц и за год"
       />
 
       {/* Панель: вид и период (слева), действия (справа). */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
           <Segmented
-            size="sm"
             label="Вид бюджета"
             value={view}
             onChange={(v) => setView(v)}
@@ -935,10 +986,9 @@ export function BudgetsPage() {
           <Tooltip content={monthPeriod ? "Предыдущий месяц" : "Предыдущий год"}>
             <button
               onClick={() => (monthPeriod ? setYm((m) => addMonths(m, -1)) : shiftYear(-1))}
-              // Поле в 10 пикселей, а не 8: в одной строке шапки стоят
-              // переключатель вида, выбор месяца и «Заполнить по среднему» —
-              // все ростом 38, и кнопка в 34 читалась осевшей.
-              className="btn-ghost !p-2.5"
+              // Ряд переключателей раздела — крупная ступень 42: вид бюджета,
+              // стрелки, месяц и действия стоят вровень.
+              className="btn-ghost btn-square-lg"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -961,20 +1011,19 @@ export function BudgetsPage() {
               // 79 (самое длинное «Февр. 2026», замерено) + 16 (значок) +
               // 8 (просвет) + 24 (поля) + 2 (кант) = 129, берём 132. Поля стали
               // по 12: у пилюли восьмипиксельные прижимали подпись к канту.
-              // Пилюля, а не скруглённое поле: вокруг одни пилюли, и
-              // двенадцатипиксельный радиус посреди них был единственным на всю
-              // строку.
-              className="input text-sm font-medium w-[132px] !px-3 !rounded-full"
+              // Скругление — общее у поля: пилюлей оно было, пока пилюлями были
+              // и кнопки вокруг.
+              className="input text-sm font-medium w-[132px] !px-3 !py-2.5"
             />
           ) : (
-            <span className="text-sm font-medium tabular-nums px-4 py-2 rounded-full bg-panel2 border border-border">
+            <span className="input w-auto text-sm font-medium tabular-nums !px-4 !py-2.5">
               {year}
             </span>
           )}
           <Tooltip content={monthPeriod ? "Следующий месяц" : "Следующий год"}>
             <button
               onClick={() => (monthPeriod ? setYm((m) => addMonths(m, 1)) : shiftYear(1))}
-              className="btn-ghost !p-2.5"
+              className="btn-ghost btn-square-lg"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -993,35 +1042,25 @@ export function BudgetsPage() {
               экране: два из трёх фактов видно и так (заголовки плиток и сам
               период в шапке), а третий нужен раз в жизни. */}
           {view === "dashboard" && (
-            <Tooltip
-              content={
-                <TooltipFacts
-                  title="Показатели на этом экране"
-                  facts={[
-                    { label: "За месяц", value: `${monthOf(dashboardMonth, true)} ${year}` },
-                    {
-                      label: "С начала года",
-                      value: `Январь — ${monthOf(dashboardMonth)}`,
-                    },
-                  ]}
-                  note={<span className="italic">Прошлый год берётся тем же отрезком</span>}
-                />
-              }
-            >
-              <button
-                type="button"
-                aria-label="За какой период показатели на этом экране"
-                className="text-muted hover:text-text"
-              >
-                <HelpCircle className="w-4 h-4" />
-              </button>
-            </Tooltip>
+            <InfoPopover label="За какой период показатели на этом экране">
+              <TooltipFacts
+                title="Показатели на этом экране"
+                facts={[
+                  { label: "За месяц", value: `${monthOf(dashboardMonth, true)} ${year}` },
+                  {
+                    label: "С начала года",
+                    value: `Январь — ${monthOf(dashboardMonth)}`,
+                  },
+                ]}
+                note={<span className="italic">Прошлый год берётся тем же отрезком</span>}
+              />
+            </InfoPopover>
           )}
         </div>
         <div className="flex items-center gap-2">
           {yearView && (
             <Tooltip content="Годовой отчёт файлом: таблицами в Excel или сводкой в PDF">
-              <button onClick={() => setExportOpen(true)} className="btn-ghost text-sm">
+              <button onClick={() => setExportOpen(true)} className="btn-ghost btn-lg text-sm">
                 <Download className="w-4 h-4" />
                 Экспорт
               </button>
@@ -1034,7 +1073,7 @@ export function BudgetsPage() {
               отчёт, а не место, где правят планы. */}
           {view === "month" && (
             <Tooltip content="Подставить суммы по истории операций">
-              <button onClick={() => setFillOpen(true)} className="btn-ghost text-sm">
+              <button onClick={() => setFillOpen(true)} className="btn-ghost btn-lg text-sm">
                 <Wand2 className="w-4 h-4" />
                 Заполнить по среднему
               </button>
@@ -1099,12 +1138,12 @@ export function BudgetsPage() {
       {view === "month" && (
         <>
       {/* Summary: расходы / доходы / дельта — у каждого явные «Факт» и «План» */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <StatRow>
         <PlanFactCard
           title="Расходы за месяц"
           fact={expFact}
           plan={expPlan}
-          factClass="text-expense"
+          tone="expense"
           base={base}
           kind="expense"
           withTransfers={settings.perimeterTransfers ? expFact + expTransfers : undefined}
@@ -1113,7 +1152,7 @@ export function BudgetsPage() {
           title="Доходы за месяц"
           fact={incFact}
           plan={incPlan}
-          factClass="text-income"
+          tone="income"
           base={base}
           kind="income"
           withTransfers={settings.perimeterTransfers ? incFact + incTransfers : undefined}
@@ -1122,13 +1161,13 @@ export function BudgetsPage() {
           title="Разница (доходы − расходы)"
           fact={factDelta}
           plan={planDelta}
-          factClass={factDelta >= 0 ? "text-income" : "text-expense"}
+          tone={factDelta >= 0 ? "income" : "expense"}
           signed
           base={base}
           kind="delta"
           withTransfers={settings.perimeterTransfers ? factDelta : undefined}
         />
-      </div>
+      </StatRow>
 
       {/* Full-width cash-flow widget: cumulative income/expense over the month
           with a linear end-of-month forecast (Zen «Планы» style). */}
@@ -1136,6 +1175,7 @@ export function BudgetsPage() {
         transactions={scopedTx}
         ym={ym}
         base={base}
+        monthStartDay={monthStartDay}
         onDayClick={openDay}
         plannedIncome={incPlan}
         plannedExpense={expPlan}
@@ -1217,7 +1257,7 @@ function PlanFactCard({
   title,
   fact,
   plan,
-  factClass,
+  tone,
   base,
   signed = false,
   kind,
@@ -1226,70 +1266,57 @@ function PlanFactCard({
   title: string;
   fact: number;
   plan: number;
-  factClass: string;
+  tone: StatTone;
   base: string;
   signed?: boolean;
   kind: "expense" | "income" | "delta";
   /**
    * Тот же факт, но вместе с переводами. Задан — под суммой появляется вторая
-   * строка; ЗАДАВАТЬ ЕГО НАДО ВСЕМ ТРЁМ карточкам сразу, когда переводы
-   * учитываются. Иначе у одной карточки строка есть, у другой нет — и пилюли
-   * «План» и «%» встают на разной высоте, хотя карточки стоят в один ряд.
+   * строка; ЗАДАВАТЬ ЕГО НАДО ВСЕМ ТРЁМ ячейкам сразу, когда переводы
+   * учитываются. Иначе у одной ячейки строка есть, у другой нет — и пилюли
+   * «План» и «%» встают на разной высоте, хотя ячейки стоят в один ряд.
    */
   withTransfers?: number;
 }) {
   return (
-    <div className="tray">
-    <div className="tray-core card-pad">
-      <div className="label mb-1.5">{title}</div>
-      <div className={`stat-num ${factClass} mb-3`}>
-        {formatMoney(fact, base, { signed })}
-      </div>
-      {/* Оборот по счетам показываем ОТДЕЛЬНОЙ строкой, а не вместо факта:
-          перекладывание денег между своими счетами тратой не является. У
-          «Дельты» переводы внутри бюджета гасят друг друга, и вторая сумма
-          совпадает с первой — там строка держит место пустой, чтобы ряд
-          карточек не разъезжался. */}
-      {withTransfers !== undefined && (
-        <div
-          className="-mt-2 mb-3 text-[13px] text-muted tabular-nums"
-          aria-hidden={withTransfers === fact}
-        >
-          {withTransfers === fact ? (
-            <span className="invisible">—</span>
-          ) : (
-            <>
-              {formatMoney(withTransfers, base, { signed })} включая переводы
-            </>
-          )}
-        </div>
-      )}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-sm px-3 py-1 rounded-full bg-panel2 text-muted tabular-nums whitespace-nowrap">
-          План {formatMoney(plan, base, { signed })}
-        </span>
-        {kind === "delta" ? (
-          <span
-            className={`text-sm font-medium px-3 py-1 rounded-full whitespace-nowrap ${
-              fact >= 0 ? PILL_TONE.income : PILL_TONE.expense
-            }`}
-          >
-            {fact >= 0 ? "Профицит" : "Дефицит"}
+    <StatCell
+      label={title}
+      value={formatMoney(fact, base, { signed })}
+      tone={tone}
+      // Оборот по счетам показываем ОТДЕЛЬНОЙ строкой, а не вместо факта:
+      // перекладывание денег между своими счетами тратой не является. У
+      // «Разницы» переводы внутри бюджета гасят друг друга, и вторая сумма
+      // совпадает с первой — там строка держит место пустой, чтобы пилюли
+      // соседних ячеек стояли на одной высоте.
+      note={
+        withTransfers === undefined ? undefined : withTransfers === fact ? (
+          <span className="invisible" aria-hidden>
+            —
           </span>
         ) : (
+          <span className="tabular-nums">
+            {formatMoney(withTransfers, base, { signed })} включая переводы
+          </span>
+        )
+      }
+    >
+      <div className="flex items-center gap-2 flex-wrap mt-3">
+        <Badge size="md" className="tabular-nums font-normal">
+          План {formatMoney(plan, base, { signed })}
+        </Badge>
+        {kind === "delta" ? (
+          <Badge size="md" tone={fact >= 0 ? PILL_TONE.income : PILL_TONE.expense}>
+            {fact >= 0 ? "Профицит" : "Дефицит"}
+          </Badge>
+        ) : (
           plan > 0 && (
-            <span
-              className={`text-sm font-medium px-3 py-1 rounded-full tabular-nums ${
-                PILL_TONE[summaryTone(fact / plan, kind === "income")]
-              }`}
-            >
+            <Badge size="md" tone={PILL_TONE[summaryTone(fact / plan, kind === "income")]} className="tabular-nums">
               {Math.round((fact / plan) * 100)}%
-            </span>
+            </Badge>
           )
         )}
       </div>
-    </div>
-    </div>
+    </StatCell>
   );
 }
 
@@ -1634,49 +1661,38 @@ function BarLegend({ isIncome, showTick }: { isIncome: boolean; showTick: boolea
         { c: "bg-expense", t: "Лимит превышен — больше 100%" },
       ];
   return (
-    <Tooltip
-      placement="bottom"
-      content={
-        <div className="space-y-1.5 text-left leading-snug">
-          <div className="font-medium">Как читать полоску</div>
-          {swatches.map((s) => (
-            <div key={s.t} className="flex items-center gap-2">
-              <span className={`inline-block w-3.5 h-2 rounded-full ${s.c}`} />
-              <span>{s.t}</span>
-            </div>
-          ))}
-          <div className="space-y-1.5 pt-1.5 mt-1 border-t border-border/60">
-            <div className="flex items-center gap-2">
-              <span className="inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border" />
-              <span>Серый фон — сколько ещё осталось до плана</span>
-            </div>
-            {showTick && (
-              <div className="flex items-center gap-2">
-                <span className="relative inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border">
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-0 h-4 border-l-2 border-solid border-text/80" />
-                </span>
-                <span>Засечка — сегодняшний день месяца</span>
-              </div>
-            )}
+    <InfoPopover label="Как читать полоску бюджета">
+      <div className="space-y-1.5 text-left leading-snug">
+        <div className="font-medium">Как читать полоску</div>
+        {swatches.map((s) => (
+          <div key={s.t} className="flex items-center gap-2">
+            <span className={`inline-block w-3.5 h-2 rounded-full ${s.c}`} />
+            <span>{s.t}</span>
           </div>
+        ))}
+        <div className="space-y-1.5 pt-1.5 mt-1 border-t border-border/60">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border" />
+            <span>Серый фон — сколько ещё осталось до плана</span>
+          </div>
+          {showTick && (
+            <div className="flex items-center gap-2">
+              <span className="relative inline-block w-3.5 h-2 rounded-full bg-panel2 ring-1 ring-border">
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-0 h-4 border-l-2 border-solid border-text/80" />
+              </span>
+              <span>Засечка — сегодняшний день месяца</span>
+            </div>
+          )}
         </div>
-      }
-    >
-      <button
-        type="button"
-        aria-label="Как читать полоску бюджета"
-        className="text-muted hover:text-text shrink-0"
-      >
-        <HelpCircle className="w-4 h-4" />
-      </button>
-    </Tooltip>
+      </div>
+    </InfoPopover>
   );
 }
 
-const PILL_TONE: Record<string, string> = {
-  income: "text-income bg-income/15",
-  warn: "text-warn bg-warn/15",
-  expense: "text-expense bg-expense/15",
+const PILL_TONE: Record<string, BadgeTone> = {
+  income: "income",
+  warn: "warn",
+  expense: "expense",
 };
 
 /**
@@ -1752,11 +1768,9 @@ function PctPill({
   return (
     <span className="w-16 shrink-0 flex justify-center">
       {planned > 0 ? (
-        <span
-          className={`text-xs font-medium tabular-nums px-2 py-0.5 rounded-full ${PILL_TONE[summaryTone(ratio, isIncome)]}`}
-        >
+        <Badge tone={PILL_TONE[summaryTone(ratio, isIncome)]} className="tabular-nums">
           {(ratio * 100).toFixed(0)}%
-        </span>
+        </Badge>
       ) : (
         <span className="text-xs text-muted">—</span>
       )}
@@ -1934,7 +1948,7 @@ function BudgetRow({
       {hasSubs ? (
         <button
           onClick={onToggle}
-          className="shrink-0 text-muted hover:text-text"
+          className="btn-icon btn-icon-sm -m-1 shrink-0"
           aria-expanded={expanded}
           aria-label={expanded ? "Свернуть подкатегории" : "Показать подкатегории"}
         >
@@ -2050,7 +2064,7 @@ function BudgetRow({
               меню и фокус с клавиатуры тоже держат её видимой. */}
           <button
             onClick={() => setMenuOpen((o) => !o)}
-            className={`btn-ghost !p-1.5 text-muted hover:text-text transition-opacity sm:opacity-0 sm:group-hover/row:opacity-100 sm:focus-visible:opacity-100 ${
+            className={`btn-icon transition-[color,background-color,opacity] sm:opacity-0 sm:group-hover/row:opacity-100 sm:focus-visible:opacity-100 ${
               menuOpen ? "sm:opacity-100" : ""
             }`}
             aria-label="Действия с бюджетом"

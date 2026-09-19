@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { applyFilters, presetToRange, useFiltersStore, FILTER_NONE } from "./useFiltersStore";
-import { periodRange } from "../lib/period";
+import { MEMBER_SHARED } from "../lib/zenUsers";
+import { currentPeriod, periodRange } from "../lib/period";
 import { NO_CATEGORY } from "../lib/zenmoneyMap";
+import { useDisplayStore } from "./useDisplayStore";
 import { tx } from "../test/fixtures";
 
 // applyFilters wants a full FiltersState (with action methods). We only
@@ -19,6 +21,7 @@ function filt(p: Partial<FiltersState> = {}): FiltersState {
     accounts: new Set<string>(),
     categories: new Set<string>(),
     currencies: new Set<string>(),
+    users: new Set<string>(),
     search: "",
     excludeTransfers: false,
     ...p,
@@ -57,6 +60,37 @@ describe("applyFilters — category leaf matching (issue #9)", () => {
   it("FILTER_NONE excludes everything; empty set keeps everything", () => {
     expect(applyFilters(txs, filt({ categories: new Set([FILTER_NONE]) }))).toHaveLength(0);
     expect(applyFilters(txs, filt({ categories: new Set() }))).toHaveLength(4);
+  });
+});
+
+describe("applyFilters — вторые категории (#69)", () => {
+  const txs = [
+    tx({ id: "dinner", category: "Еда", subcategory: null, categoryFull: "Еда", extraCategories: ["Отпуск"] }),
+    tx({ id: "hotel", category: "Жильё", subcategory: null, categoryFull: "Жильё", extraCategories: ["Путешествия / Италия"] }),
+    tx({ id: "lunch", category: "Еда", subcategory: null, categoryFull: "Еда" }),
+  ];
+
+  it("операция находится фильтром по второй категории", () => {
+    // Пункт 1 задачи: «Отпуск» стоит всегда вторым, и отобрать по нему было нечем.
+    const out = applyFilters(txs, filt({ categories: new Set(["Отпуск"]) }));
+    expect(ids(out)).toEqual(["dinner"]);
+  });
+
+  it("по основной — как раньше, вторые не мешают", () => {
+    const out = applyFilters(txs, filt({ categories: new Set(["Еда"]) }));
+    expect(ids(out)).toEqual(["dinner", "lunch"]);
+  });
+
+  it("вторая подкатегория строго по полному названию — родителя не тянет", () => {
+    expect(ids(applyFilters(txs, filt({ categories: new Set(["Путешествия"]) })))).toEqual([]);
+    expect(
+      ids(applyFilters(txs, filt({ categories: new Set(["Путешествия / Италия"]) })))
+    ).toEqual(["hotel"]);
+  });
+
+  it("поиск находит по второй категории", () => {
+    // Пункт 2 задачи: строка поиска в категории не смотрела.
+    expect(ids(applyFilters(txs, filt({ search: "отпуск" })))).toEqual(["dinner"]);
   });
 });
 
@@ -104,7 +138,7 @@ describe("applyFilters — date window", () => {
     expect(ids(out)).toEqual(["mar1", "mar31"]);
   });
 
-  it("preset 'month' respects a custom reporting startDay (e.g. 11)", () => {
+  it("preset 'period' respects a custom reporting startDay (e.g. 11)", () => {
     // period 2026-03 with startDay 11 spans 2026-03-11 → 2026-04-10
     const txs = [
       tx({ id: "early-mar", date: "2026-03-05" }), // before the 11th → prev period
@@ -112,8 +146,20 @@ describe("applyFilters — date window", () => {
       tx({ id: "early-apr", date: "2026-04-05" }), // in (≤ 10 Apr)
       tx({ id: "mid-apr", date: "2026-04-15" }), // next period
     ];
-    const out = applyFilters(txs, filt({ preset: "month", monthYM: "2026-03" }), 11);
+    const out = applyFilters(txs, filt({ preset: "period", monthYM: "2026-03" }), 11);
     expect(ids(out)).toEqual(["early-apr", "mid-mar"]);
+  });
+
+  // «Месяц» — календарный, чей бы ни был отчётный день: отчётный отрезок живёт
+  // под своим пресетом «Период».
+  it("preset 'month' остаётся календарным при любом startDay", () => {
+    const txs = [
+      tx({ id: "early-mar", date: "2026-03-05" }),
+      tx({ id: "mid-mar", date: "2026-03-15" }),
+      tx({ id: "early-apr", date: "2026-04-05" }),
+    ];
+    const out = applyFilters(txs, filt({ preset: "month", monthYM: "2026-03" }), 11);
+    expect(ids(out)).toEqual(["early-mar", "mid-mar"]);
   });
 
   it("relative presets anchor to the latest transaction date, not wall-clock", () => {
@@ -225,10 +271,17 @@ describe("presetToRange", () => {
     expect(presetToRange("custom", "2026-06-15")).toEqual({ from: null, to: null });
   });
 
-  it("'month' delegates to periodRange for the given monthYM + startDay", () => {
-    expect(presetToRange("month", null, "2026-03", 11)).toEqual(
+  it("'period' delegates to periodRange for the given monthYM + startDay", () => {
+    expect(presetToRange("period", null, "2026-03", 11)).toEqual(
       periodRange("2026-03", 11)
     );
+  });
+
+  it("'month' — календарный месяц, startDay его не сдвигает", () => {
+    expect(presetToRange("month", null, "2026-03", 11)).toEqual({
+      from: "2026-03-01",
+      to: "2026-03-31",
+    });
   });
 
   it("'month' without a monthYM imposes no range", () => {
@@ -275,14 +328,14 @@ describe("useFiltersStore reducers", () => {
     expect(useFiltersStore.getState().accounts.size).toBe(0);
   });
 
-  it("reset restores the default 'month' preset and clears filters", () => {
+  it("reset restores the default 'period' preset and clears filters", () => {
     const s = useFiltersStore.getState();
     s.setRange("2026-01-01", "2026-02-01");
     s.toggleSet("categories", "Еда");
     s.setSearch("foo");
     s.reset();
     const after = useFiltersStore.getState();
-    expect(after.preset).toBe("month");
+    expect(after.preset).toBe("period");
     expect(after.categories.size).toBe(0);
     expect(after.search).toBe("");
   });
@@ -307,6 +360,33 @@ describe("applyFilters — «Дополнительно»", () => {
     expect(ids(applyFilters(txs, filt({ types: new Set(["expense", "transfer"]) })))).toEqual(["a", "b", "d"]);
     const withRefund = [...txs, tx({ id: "r", kind: "refund", amountBase: 50 })];
     expect(ids(applyFilters(withRefund, filt({ types: new Set(["expense"]) })))).toEqual(["a", "b", "r"]);
+  });
+
+  describe("«Возвраты» — отдельный тип", () => {
+    // Возврат было нечем отобрать: «Расходы» отдавали его вперемешку с
+    // тратами, «Доходы» не отдавали вовсе.
+    const withRefund = [...txs, tx({ id: "r", kind: "refund", amountBase: 50 })];
+
+    it("показывает возвраты и только их", () => {
+      expect(ids(applyFilters(withRefund, filt({ types: new Set(["refund"]) })))).toEqual(["r"]);
+    });
+
+    it("не подмешивается к доходам", () => {
+      // Возврат — приход денег, но не доход: выбрав «Доходы», его быть не должно.
+      expect(ids(applyFilters(withRefund, filt({ types: new Set(["income"]) })))).toEqual(["c"]);
+      expect(ids(applyFilters(withRefund, filt({ types: new Set(["income", "refund"]) })))).toEqual(["c", "r"]);
+    });
+
+    it("вместе с «Расходами» ничего не добавляет — одна кнопка уже другой", () => {
+      const both = ids(applyFilters(withRefund, filt({ types: new Set(["expense", "refund"]) })));
+      const onlyExpense = ids(applyFilters(withRefund, filt({ types: new Set(["expense"]) })));
+      expect(both).toEqual(onlyExpense);
+      expect(both).toEqual(["a", "b", "r"]);
+    });
+
+    it("«Переводы» возвратов не приносят", () => {
+      expect(ids(applyFilters(withRefund, filt({ types: new Set(["transfer"]) })))).toEqual(["d"]);
+    });
   });
 
   it("onlyUncategorized keeps «Без категории» / empty only", () => {
@@ -400,12 +480,12 @@ describe("applyFilters — поиск по контрагенту (brand + payee
 });
 
 describe("пресет «Год»", () => {
-  it("год — двенадцать отчётных месяцев подряд, а не «1 января — 31 декабря»", () => {
-    // При отчётном периоде с 11-го числа год идёт так же, как считается каждый
-    // его месяц, — иначе январь попал бы в отчёт дважды: началом и хвостом.
+  // Кнопки фильтра говорят о календаре: «Год» — это год, «Месяц» — месяц. Свой
+  // отсчёт от зарплаты живёт под кнопкой «Период» (решение 18.09.2026).
+  it("год — календарный, первый день отчётного месяца его не сдвигает", () => {
     expect(presetToRange("year", null, "2025-06", 11)).toEqual({
-      from: "2025-01-11",
-      to: "2026-01-10",
+      from: "2025-01-01",
+      to: "2025-12-31",
     });
   });
 
@@ -465,5 +545,145 @@ describe("stepPeriod", () => {
     useFiltersStore.getState().setYear(2022);
     // Месяц якоря сохранён: вернувшись в «Месяц», попадаешь в июль.
     expect(useFiltersStore.getState().monthYM).toBe("2022-07");
+  });
+});
+
+
+describe("applyFilters — фильтр по участникам общего аккаунта (#92)", () => {
+  // Привязка идёт по `role` СЧЁТА: в Дзен-мани у операции нет поля «кто
+  // завёл» — `user` там у всех записей одинаков. `member: null` — общий счёт.
+  const txs = [
+    tx({ id: "мой1", member: 1 }),
+    tx({ id: "мой2", member: 1 }),
+    tx({ id: "жена", member: 5 }),
+    tx({ id: "общий", member: null }),
+    tx({ id: "изCSV" }),
+  ];
+
+  it("пусто — показываем всё, как у остальных множественных фильтров", () => {
+    expect(ids(applyFilters(txs, filt()))).toEqual([
+      "жена",
+      "изCSV",
+      "мой1",
+      "мой2",
+      "общий",
+    ]);
+  });
+
+  it("выбран участник — только его личные счета", () => {
+    expect(ids(applyFilters(txs, filt({ users: new Set(["1"]) })))).toEqual([
+      "мой1",
+      "мой2",
+    ]);
+  });
+
+  it("общие счета — отдельный пункт, а не довесок к каждому", () => {
+    // Иначе сравнить двоих было бы нельзя: общий котёл попадал бы в оба.
+    expect(ids(applyFilters(txs, filt({ users: new Set([MEMBER_SHARED]) })))).toEqual([
+      "изCSV",
+      "общий",
+    ]);
+  });
+
+  it("участник вместе с общими", () => {
+    expect(
+      ids(applyFilters(txs, filt({ users: new Set(["5", MEMBER_SHARED]) })))
+    ).toEqual(["жена", "изCSV", "общий"]);
+  });
+
+  it("операции из CSV попадают в «Общие» — других сведений о них нет", () => {
+    expect(ids(applyFilters(txs, filt({ users: new Set(["1"]) })))).not.toContain("изCSV");
+  });
+
+  it("«снять все» не показывает ничего", () => {
+    expect(applyFilters(txs, filt({ users: new Set([FILTER_NONE]) }))).toEqual([]);
+  });
+});
+
+describe("applyFilters — опорная дата скользящего периода", () => {
+  // Удалённые операции старше живых: «30 дней» на их странице должны значить
+  // те же тридцать дней, что и в ленте, а не месяц до последней удалённой.
+  const deleted = [
+    tx({ id: "свежая", date: "2026-09-10" }),
+    tx({ id: "июльская", date: "2026-07-20" }),
+  ];
+
+  it("по умолчанию отсчёт — от последней операции в наборе", () => {
+    expect(ids(applyFilters(deleted, filt({ preset: "30d" })))).toEqual(["свежая"]);
+  });
+
+  it("maxDate переносит отсчёт на последнюю дату всех операций", () => {
+    expect(
+      ids(applyFilters(deleted, filt({ preset: "30d" }), 1, { maxDate: "2026-08-15" }))
+    ).toEqual(["июльская"]);
+  });
+});
+
+describe("текущий месяц идёт за первым днём отчётного месяца", () => {
+  beforeEach(() => {
+    // Вид месяца — общая настройка, и «текущий период» считается по нему:
+    // соседний тест мог оставить календарный.
+    useDisplayStore.setState({ monthKind: "period" });
+    vi.useFakeTimers();
+    // 17 сентября: при начале месяца с 20-го идёт ещё августовский период.
+    vi.setSystemTime(new Date(2026, 8, 17, 12));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("день из Дзен-мани пришёл после запуска — нетронутый «Сентябрь» становится «Августом»", () => {
+    useFiltersStore.getState().resetToCurrentPeriod(1);
+    expect(useFiltersStore.getState().monthYM).toBe("2026-09");
+    useFiltersStore.getState().followStartDay(1, 20);
+    expect(useFiltersStore.getState()).toMatchObject({ preset: "period", monthYM: "2026-08" });
+    // Отрезок — тот, в котором лежит сегодняшний день.
+    expect(periodRange("2026-08", 20)).toEqual({ from: "2026-08-20", to: "2026-09-19" });
+    expect(currentPeriod(20)).toBe("2026-08");
+  });
+
+  it("и обратно: свой день 20, в Дзен-мани — 1-е", () => {
+    useFiltersStore.getState().resetToCurrentPeriod(20);
+    useFiltersStore.getState().followStartDay(20, 1);
+    expect(useFiltersStore.getState().monthYM).toBe("2026-09");
+  });
+
+  it("пролистанный вручную месяц и другие периоды не трогаются", () => {
+    useFiltersStore.getState().setMonth("2026-05");
+    useFiltersStore.getState().followStartDay(1, 20);
+    expect(useFiltersStore.getState().monthYM).toBe("2026-05");
+
+    useFiltersStore.getState().resetToCurrentPeriod(1);
+    useFiltersStore.getState().setPreset("12m");
+    useFiltersStore.getState().followStartDay(1, 20);
+    expect(useFiltersStore.getState()).toMatchObject({ preset: "12m", monthYM: "2026-09" });
+  });
+});
+
+describe("вид месяца переживает перезагрузку", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 17, 12));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    useDisplayStore.setState({ monthKind: "period" });
+  });
+
+  it("выбран календарный — при запуске встаёт календарный месяц, а не отчётный", () => {
+    useDisplayStore.setState({ monthKind: "month" });
+    useFiltersStore.getState().resetToCurrentPeriod(20);
+    expect(useFiltersStore.getState()).toMatchObject({ preset: "month", monthYM: "2026-09" });
+  });
+
+  it("выбран отчётный — встаёт отчётный период по своему первому дню", () => {
+    useDisplayStore.setState({ monthKind: "period" });
+    useFiltersStore.getState().resetToCurrentPeriod(20);
+    expect(useFiltersStore.getState()).toMatchObject({ preset: "period", monthYM: "2026-08" });
+  });
+
+  it("выбор месяца запоминается в настройках", () => {
+    useFiltersStore.getState().setMonth("2026-05");
+    expect(useDisplayStore.getState().monthKind).toBe("month");
+    useFiltersStore.getState().setPeriodMonth("2026-05");
+    expect(useDisplayStore.getState().monthKind).toBe("period");
   });
 });

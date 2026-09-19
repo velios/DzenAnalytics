@@ -2,8 +2,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Table as TableIcon,
   Download,
-  ChevronRight,
-  ChevronDown,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { useDataStore } from "../store/useDataStore";
@@ -25,12 +23,16 @@ import {
   type XlsxNumberStyle,
 } from "../lib/categoryReportXlsx";
 import { ReportExportModal } from "../components/ReportExportModal";
+import { ExpandChevron, TreeElbow } from "../components/table/TableParts";
+import { treeIndent } from "../components/table/tableKit";
 import { InfoPopover } from "../components/InfoPopover";
 import { formatMoney } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
+import { Segmented } from "../components/Segmented";
 import type { Transaction } from "../types";
+import { SectionEmpty } from "../components/SectionEmpty";
 
 const SCALES: ReportScale[] = ["month", "quarter", "year", "total"];
 
@@ -85,6 +87,21 @@ export function ReportPage() {
   const [tableWidth, setTableWidth] = useState(0);
   const [cloneHeight, setCloneHeight] = useState(0);
 
+  // Горизонтальная прокрутка: двойник повторяет её за настоящей таблицей.
+  // Обёртка двойника — тоже контейнер прокрутки (`overflow-x: hidden`), и
+  // благодаря этому закреплённый первый столбец внутри неё работает сам,
+  // без ручных сдвигов.
+  //
+  // Синхронизация двусторонняя, но эха не будет: присваивание `scrollLeft` само
+  // поднимает `scroll` у получателя, а сравнение ДО записи обрывает цепочку —
+  // встречный обработчик увидит равные значения и ничего не сделает.
+  const copyScroll = (from: HTMLElement | null, to: HTMLElement | null) => {
+    if (from && to && to.scrollLeft !== from.scrollLeft) to.scrollLeft = from.scrollLeft;
+  };
+  const syncScroll = () => copyScroll(scrollerRef.current, cloneClipRef.current);
+  const syncBack = () => copyScroll(cloneClipRef.current, scrollerRef.current);
+  useLayoutEffect(syncScroll, [colWidths, tableWidth]);
+
   // Ширины столбцов и общая ширина таблицы. Меняются от всего: свернули
   // категорию, переключили разбивку, потянули окно, подгрузились данные —
   // поэтому следим за элементами, а не перечисляем поводы вручную.
@@ -104,7 +121,7 @@ export function ReportPage() {
       .forEach((th) => next.push(th.getBoundingClientRect().width));
     const w = table.getBoundingClientRect().width;
     // Высота двойника меряется ЗДЕСЬ ЖЕ, а не отдельным эффектом при монтаже:
-    // карточки может не быть на первом кадре (пустой отбор, данные ещё не
+    // карточки может не быть на первом кадре (пустой фильтр, данные ещё не
     // приехали), и тогда одноразовый замер не случится никогда — двойник
     // останется без отрицательного отступа, а шапка нарисуется дважды.
     const clone = cloneRef.current;
@@ -142,7 +159,7 @@ export function ReportPage() {
   // кадра не сообщал, из-за чего двойник навсегда оставался с шириной первого
   // замера и к правому краю набегало ~36px расхождения. Рендер же случается на
   // каждый повод, который вообще способен сдвинуть столбцы: свернули категорию,
-  // сменили разбивку, приехали данные, поменяли отбор.
+  // сменили разбивку, приехали данные, поменяли фильтр.
   useLayoutEffect(measure);
 
   // …а наблюдатель и `resize` остаются для того, что рендера не вызывает:
@@ -163,70 +180,11 @@ export function ReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Горизонтальная прокрутка: двойник повторяет её за настоящей таблицей.
-  // Обёртка двойника — тоже контейнер прокрутки (`overflow-x: hidden`), и
-  // благодаря этому закреплённый первый столбец внутри неё работает сам,
-  // без ручных сдвигов.
-  //
-  // Синхронизация двусторонняя, но эха не будет: присваивание `scrollLeft` само
-  // поднимает `scroll` у получателя, а сравнение ДО записи обрывает цепочку —
-  // встречный обработчик увидит равные значения и ничего не сделает.
-  const copyScroll = (from: HTMLElement | null, to: HTMLElement | null) => {
-    if (from && to && to.scrollLeft !== from.scrollLeft) to.scrollLeft = from.scrollLeft;
-  };
-  const syncScroll = () => copyScroll(scrollerRef.current, cloneClipRef.current);
-  const syncBack = () => copyScroll(cloneClipRef.current, scrollerRef.current);
-  useLayoutEffect(syncScroll, [colWidths, tableWidth]);
 
-  /**
-   * Ячейки строки заголовков. Рисуются и в таблице, и в двойнике — из одного
-   * места, иначе они однажды разъедутся.
-   *
-   * У двойника кнопка «Свернуть все» кликается мышью, но убрана из обхода с
-   * клавиатуры и от читалок (`aria-hidden` на всей обёртке): для них есть
-   * настоящая шапка, а два одинаковых заголовка подряд только запутали бы.
-   */
-  const headerCells = (forClone: boolean) => (
-    <>
-      <Th first>
-        {/* Свернуть/развернуть всё живёт в шапке своей колонки — там же, где
-            стоят шевроны отдельных категорий, и не занимает отдельную строку
-            над таблицей. */}
-        {hasSubcategories ? (
-          <button
-            onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(allParents))}
-            className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-text"
-            title={allCollapsed ? "Развернуть все" : "Свернуть все"}
-            aria-label={allCollapsed ? "Развернуть все" : "Свернуть все"}
-            aria-expanded={!allCollapsed}
-            tabIndex={forClone ? -1 : undefined}
-            // Мышь фокусирует кнопку даже с `tabIndex={-1}`, а фокус внутри
-            // `aria-hidden`-поддерева — это то, чего быть не должно.
-            onMouseDown={forClone ? (e) => e.preventDefault() : undefined}
-          >
-            {allCollapsed ? (
-              <ChevronRight className="w-3.5 h-3.5 shrink-0" aria-hidden />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5 shrink-0" aria-hidden />
-            )}
-            Категория
-          </button>
-        ) : (
-          "Категория"
-        )}
-      </Th>
-      {report.columns.map((c) => (
-        <Th key={c.key} align="right">
-          {c.label}
-        </Th>
-      ))}
-      {showTotal && <Th align="right">Итого</Th>}
-    </>
-  );
 
   // Отчёт — про всю историю ведения бюджета, поэтому у страницы свой период
   // (по умолчанию «Всё»), а не глобальный «текущий месяц»: иначе при первом
-  // заходе таблица схлопывалась бы в один столбец. Остальные отборы —
+  // заходе таблица схлопывалась бы в один столбец. Остальные фильтры —
   // счета/категории/валюты/поиск — работают как везде.
   //
   // Исключение — ссылка с указанным месяцем (`/report?month=2026-08`). По ней
@@ -249,7 +207,8 @@ export function ReportPage() {
   useEffect(() => {
     if (prevMonthParam.current === monthParam) return;
     prevMonthParam.current = monthParam;
-    if (monthParam) lp.setMonth(monthParam);
+    // Месяц из ссылки — отчётный: «Месячный отчёт» открывают с главной.
+    if (monthParam) lp.setPeriodMonth(monthParam);
   }, [monthParam, lp]);
   const effectiveFilters = useMemo(
     () => ({ ...filters, preset: lp.preset, monthYM: lp.monthYM, from: lp.from, to: lp.to }),
@@ -346,33 +305,76 @@ export function ReportPage() {
   // При одном столбце «Итого» дублирует его же — прячем.
   const showTotal = report.columns.length > 1;
 
+  // Объявлено ЗДЕСЬ, а не выше по файлу: функция читает `report`,
+  // `hasSubcategories`, `allParents` и `showTotal`. Пока она стояла над ними,
+  // это работало только потому, что вызывают её при отрисовке, — но
+  // компилятор React из-за такого порядка отказывался оптимизировать всю
+  // страницу целиком.
+  /**
+   * Ячейки строки заголовков. Рисуются и в таблице, и в двойнике — из одного
+   * места, иначе они однажды разъедутся.
+   *
+   * У двойника кнопка «Свернуть все» кликается мышью, но убрана из обхода с
+   * клавиатуры и от читалок (`aria-hidden` на всей обёртке): для них есть
+   * настоящая шапка, а два одинаковых заголовка подряд только запутали бы.
+   */
+  const headerCells = (forClone: boolean) => (
+    <>
+      <Th first>
+        {/* Свернуть/развернуть всё живёт в шапке своей колонки — там же, где
+            стоят шевроны отдельных категорий, и не занимает отдельную строку
+            над таблицей. */}
+        {hasSubcategories ? (
+          <span
+            className="flex items-center gap-1.5"
+            // Мышь фокусирует кнопку даже с `tabIndex={-1}`, а фокус внутри
+            // `aria-hidden`-поддерева двойника — это то, чего быть не должно.
+            onMouseDown={forClone ? (e) => e.preventDefault() : undefined}
+          >
+            <ExpandChevron
+              open={!allCollapsed}
+              onToggle={() => setCollapsed(allCollapsed ? new Set() : new Set(allParents))}
+              label={allCollapsed ? "Развернуть все" : "Свернуть все"}
+              tabIndex={forClone ? -1 : undefined}
+            />
+            Категория
+          </span>
+        ) : (
+          "Категория"
+        )}
+      </Th>
+      {report.columns.map((c) => (
+        <Th key={c.key} align="right">
+          {c.label}
+        </Th>
+      ))}
+      {showTotal && <Th align="right">Итого</Th>}
+    </>
+  );
+
   if (all.length === 0) return <EmptyState />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <PageHeader
         title="Доходы и расходы"
         icon={TableIcon}
-        hint="Все категории по периодам — одной таблицей, с выгрузкой в Excel"
       />
 
       <GlobalFilters period={lp} />
 
       <div className="flex items-center gap-2 flex-wrap">
         <span className="label">Разбивка</span>
-        <div className="flex bg-panel2 rounded-full p-1 border border-border shadow-tray">
-          {SCALES.map((s) => (
-            <button
-              key={s}
-              onClick={() => setScale(s)}
-              className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
-                scale === s ? "bg-accent text-accent-fg" : "text-muted hover:text-text"
-              }`}
-            >
-              {s === "total" ? "Всего" : SCALE_LABELS[s]}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          size="sm"
+          label="Разбивка"
+          value={scale}
+          onChange={setScale}
+          options={SCALES.map((sc) => ({
+            value: sc,
+            label: sc === "total" ? "Всего" : SCALE_LABELS[sc],
+          }))}
+        />
         {/* Переключателя «Вид» здесь больше нет: он существовал только потому,
             что закреплённая шапка и таблица во весь рост считались
             несовместимыми. Теперь работает и то и другое сразу, и выбирать
@@ -420,7 +422,7 @@ export function ReportPage() {
             тому, что ниже, а не к заголовку страницы. */}
         <span className="flex-1 min-w-2" />
         <button
-          className="btn-ghost text-sm shrink-0"
+          className="btn-ghost text-xs shrink-0"
           onClick={() => setExportOpen(true)}
           disabled={empty}
           title="Скачать отчёт в Excel"
@@ -440,9 +442,9 @@ export function ReportPage() {
       )}
 
       {empty ? (
-        <div className="card-tray card-pad text-sm text-muted text-center py-10">
-          За выбранный период нет доходов и расходов — измените отбор выше.
-        </div>
+        <SectionEmpty icon={TableIcon} title="За выбранный период нет доходов и расходов">
+          Измените фильтры — они открываются кнопкой в шапке.
+        </SectionEmpty>
       ) : (
         // `overflow-clip`, а НЕ `overflow-hidden`: скруглённые углы карточки
         // надо вернуть — непрозрачные ячейки шапки закрашивают их, — но
@@ -471,7 +473,7 @@ export function ReportPage() {
               onScroll={syncBack}
             >
               <table
-                className="text-sm border-separate border-spacing-0"
+                className="border-separate border-spacing-0"
                 style={{
                   tableLayout: "fixed",
                   width: tableWidth > 0 ? `${tableWidth}px` : undefined,
@@ -499,7 +501,7 @@ export function ReportPage() {
           >
           <table
             ref={tableRef}
-            className="w-full text-sm border-separate border-spacing-0"
+            className="w-full border-separate border-spacing-0"
           >
             <thead>
               <tr>{headerCells(false)}</tr>
@@ -513,8 +515,9 @@ export function ReportPage() {
                 tone="text-income"
                 showTotal={showTotal}
               />
-              {report.income.map((row) => (
+              {report.income.map((row, i, rows) => (
                 <BodyRow
+                  last={rows[i + 1]?.depth !== 1}
                   key={`i-${row.key}`}
                   row={row}
                   base={base}
@@ -538,8 +541,9 @@ export function ReportPage() {
                 tone="text-expense"
                 showTotal={showTotal}
               />
-              {report.expense.map((row) => (
+              {report.expense.map((row, i, rows) => (
                 <BodyRow
+                  last={rows[i + 1]?.depth !== 1}
                   key={`e-${row.key}`}
                   row={row}
                   base={base}
@@ -654,11 +658,14 @@ function BodyRow({
   hidden,
   collapsed,
   hasKids: kids,
+  last,
   showTotal,
   onToggle,
   onCell,
 }: {
   row: ReportRow;
+  /** Последняя подкатегория своего родителя — уголок обрывается на ней. */
+  last: boolean;
   base: string;
   columns: { key: string; label: string }[];
   hidden: boolean;
@@ -670,25 +677,32 @@ function BodyRow({
 }) {
   if (hidden) return null;
   return (
-    <tr className="group hover:bg-panel2/60">
+    <tr className="group hover:bg-panel2/50">
+      {/* Подкатегория — строкой под родителем с уголком и приглушённым именем,
+          как в дереве любой таблицы. Ячейка закреплена слева и непрозрачна:
+          под ней уезжают столбцы при прокрутке вбок. */}
       <td
         className={`table-td sticky left-0 bg-panel group-hover:bg-panel2 z-10 whitespace-nowrap ${
-          row.depth === 1 ? "pl-8 text-muted" : ""
+          row.depth === 1 ? "text-muted" : ""
         }`}
+        style={row.depth === 1 ? { paddingLeft: treeIndent(1) } : undefined}
       >
+        {row.depth === 1 && <TreeElbow depth={1} last={last} />}
         {kids ? (
-          <button
-            className="inline-flex items-center gap-1 hover:text-accent"
-            onClick={onToggle}
-            title={collapsed ? "Развернуть" : "Свернуть"}
-          >
-            {collapsed ? (
-              <ChevronRight className="w-3.5 h-3.5" aria-hidden />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5" aria-hidden />
-            )}
+          <span className="flex items-center gap-1.5">
+            <ExpandChevron
+              open={!collapsed}
+              onToggle={onToggle}
+              label={collapsed ? "Развернуть" : "Свернуть"}
+            />
             {row.label}
-          </button>
+          </span>
+        ) : row.depth === 0 ? (
+          // Место под шеврон — чтобы имена без подкатегорий стояли в одну линию.
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 shrink-0" aria-hidden />
+            {row.label}
+          </span>
         ) : (
           row.label
         )}

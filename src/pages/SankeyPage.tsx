@@ -8,21 +8,22 @@ import { colorForCategory } from "../lib/categoryColor";
 import { useFiltersStore, applyFilters } from "../store/useFiltersStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { buildSankey } from "../lib/aggregations";
-import { formatMoney, formatPct, chartTooltipProps } from "../lib/format";
+import { formatMoney, formatPct, chartTooltipProps, chartColor } from "../lib/format";
 import { affectsExpense, expenseDelta } from "../lib/txKindStyle";
 import { EmptyState } from "../components/EmptyState";
 import { GlobalFilters } from "../components/GlobalFilters";
 import { PageHeader } from "../components/PageHeader";
 import { ChartTooltipCard, TooltipFacts, type TooltipFact } from "../components/TooltipFacts";
 import { InfoPopover, InfoTerm } from "../components/InfoPopover";
-import { StatCell } from "../components/SectionCard";
+import { StatCell, StatRow } from "../components/SectionCard";
+import { SectionEmpty } from "../components/SectionEmpty";
 
 const COLORS = {
-  income: "#10B981",
-  account: "#22D3EE",
-  category: "#EF4444",
-  savings: "#A78BFA",
-  funding: "#F59E0B",
+  income: chartColor.income,
+  account: chartColor.accent,
+  category: chartColor.expense,
+  savings: chartColor.accent2,
+  funding: chartColor.warn,
 };
 
 export function SankeyPage() {
@@ -41,7 +42,7 @@ export function SankeyPage() {
   const filtered = useMemo(() => applyFilters(transactions, filters, monthStartDay), [transactions, filters, monthStartDay]);
   const data = useMemo(() => buildSankey(filtered), [filtered]);
 
-  /** Итоги того же отбора: диаграмма отвечает «куда», а не «сколько». */
+  /** Итоги того же фильтра: диаграмма отвечает «куда», а не «сколько». */
   const totals = useMemo(() => {
     let income = 0;
     let expense = 0;
@@ -67,8 +68,7 @@ export function SankeyPage() {
     <PageHeader
       icon={GitFork}
       title="Потоки денег"
-      hint="Откуда пришли деньги и куда ушли — одной картиной"
-      right={
+      info={
         <InfoPopover>
           <p>
             Слева — <InfoTerm>источники доходов</InfoTerm>, справа —{" "}
@@ -101,65 +101,58 @@ export function SankeyPage() {
 
   if (data.links.length === 0) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-6">
         {header}
         <GlobalFilters />
-        <div className="card-tray card-pad text-center py-12 text-muted">
-          Нет данных для построения потоков в текущем фильтре.
-        </div>
+        <SectionEmpty icon={GitFork} title="Нет данных для построения потоков">
+          В текущем фильтре нет доходов и расходов — измените фильтры кнопкой в шапке.
+        </SectionEmpty>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       {header}
       <GlobalFilters />
 
-      {/* Итоги отбора. Диаграмма показывает пропорции и ничего не говорит о
+      {/* Итоги фильтра. Диаграмма показывает пропорции и ничего не говорит о
           суммах: чтобы узнать, сколько всего пришло, приходилось уходить на
           другую страницу. */}
-      <div className="tray">
-        <div className="tray-core px-5 py-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-4 divide-border lg:divide-x">
-            <StatCell
-              label="Доход"
-              value={formatMoney(totals.income, base)}
-              icon={<TrendingUp className="w-4 h-4" />}
-              tone="income"
-              note={`${totals.count} ${totals.count % 10 === 1 && totals.count % 100 !== 11 ? "операция" : "операций"} в отборе`}
-            />
-            <StatCell
-              label="Расход"
-              value={formatMoney(totals.expense, base)}
-              icon={<TrendingDown className="w-4 h-4" />}
-              tone="expense"
-              note={
-                totals.income > 0
-                  ? `${formatPct(totals.expense / totals.income, 0)} от дохода`
-                  : undefined
-              }
-              pad
-            />
-            <StatCell
-              label="Чистый поток"
-              value={formatMoney(totals.net, base, { signed: true })}
-              icon={<Trophy className="w-4 h-4" />}
-              tone={totals.net >= 0 ? "income" : "expense"}
-              note={totals.net >= 0 ? "ушло в сбережения" : "покрыто со счетов"}
-              pad
-            />
-            <StatCell
-              label="Норма сбережений"
-              value={totals.income > 0 ? formatPct(totals.net / totals.income, 0) : "—"}
-              icon={<PiggyBank className="w-4 h-4" />}
-              tone={totals.net >= 0 ? "income" : "expense"}
-              note="доля дохода, которая осталась"
-              pad
-            />
-          </div>
-        </div>
-      </div>
+      <StatRow>
+        <StatCell
+          label="Доход"
+          value={formatMoney(totals.income, base)}
+          icon={<TrendingUp className="w-4 h-4" />}
+          tone="income"
+          note={`${totals.count} ${totals.count % 10 === 1 && totals.count % 100 !== 11 ? "операция" : "операций"} в фильтре`}
+        />
+        <StatCell
+          label="Расход"
+          value={formatMoney(totals.expense, base)}
+          icon={<TrendingDown className="w-4 h-4" />}
+          tone="expense"
+          note={
+            totals.income > 0
+              ? `${formatPct(totals.expense / totals.income, 0)} от дохода`
+              : undefined
+          }
+        />
+        <StatCell
+          label="Чистый поток"
+          value={formatMoney(totals.net, base, { signed: true })}
+          icon={<Trophy className="w-4 h-4" />}
+          tone={totals.net >= 0 ? "income" : "expense"}
+          note={totals.net >= 0 ? "ушло в сбережения" : "покрыто со счетов"}
+        />
+        <StatCell
+          label="Норма сбережений"
+          value={totals.income > 0 ? formatPct(totals.net / totals.income, 0) : "—"}
+          icon={<PiggyBank className="w-4 h-4" />}
+          tone={totals.net >= 0 ? "income" : "expense"}
+          note="доля дохода, которая осталась"
+        />
+      </StatRow>
 
       <div className="card-tray px-4 py-3">
         <div className="h-[600px]">
@@ -302,7 +295,7 @@ export function SankeyPage() {
           <LegendChip color={COLORS.account} label="Бюджет" />
           <LegendChip
             label="Категории расходов"
-            gradient="conic-gradient(#22D3EE 0 90deg, #A78BFA 90deg 180deg, #F59E0B 180deg 270deg, #10B981 270deg 360deg)"
+            gradient={`conic-gradient(${chartColor.accent} 0 90deg, ${chartColor.accent2} 90deg 180deg, ${chartColor.warn} 180deg 270deg, ${chartColor.income} 270deg 360deg)`}
           />
           {data.nodes.some((n) => n.kind === "savings") && (
             <LegendChip color={COLORS.savings} label="Сбережения" />
@@ -359,7 +352,7 @@ function FlowTooltip({
   active?: boolean;
   payload?: readonly unknown[];
   base: string;
-  /** Доход отбора — от него считается доля потока. */
+  /** Доход фильтра — от него считается доля потока. */
   total: number;
 }) {
   if (!active || !payload?.length) return null;

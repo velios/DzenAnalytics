@@ -10,6 +10,7 @@ import {
   moveWidget,
   moveWidgetBefore,
   normalizeLayout,
+  dropIntoGap,
   packLayout,
   removeWidget,
   isBareWidget,
@@ -26,6 +27,9 @@ const keys = (layout: readonly WidgetPlacement[]) => layout.map((p) => p.key);
 const kinds = (layout: readonly WidgetPlacement[]) => layout.map((p) => p.kind);
 const row = (layout: readonly WidgetPlacement[], key: string) =>
   layout.find((p) => p.key === key)!;
+/** Раскладка, где стандартно снятый виджет стоит на своём месте видимым. */
+const shown = (layout: readonly WidgetPlacement[], key: string) =>
+  layout.map((p) => (p.key === key ? { key: p.key, kind: p.kind } : p));
 
 describe("layoutFromStored", () => {
   it("когда ничего не сохранено — стандартная раскладка целиком", () => {
@@ -128,12 +132,14 @@ describe("normalizeLayout", () => {
     expect(row(out, "links").links).toEqual(["/goals", "/rules", null, null, null, null]);
   });
 
-  it("полоску без единой живой кнопки выбрасывает", () => {
+  it("полоска с несуществующим разделом остаётся пустой, а не пропадает", () => {
+    // Пустая полоска — законное состояние: человек расставит кнопки сам.
+    // Выбрасывать её значило бы решать за него, что она ему не нужна.
     const out = normalizeLayout([
       { key: "links", kind: "links", links: ["/раздела-больше-нет", null] },
       { key: "accounts", kind: "accounts" },
     ]);
-    expect(kinds(out)).not.toContain("links");
+    expect(row(out, "links").links).toEqual([null, null, null, null, null, null]);
   });
 
   it("снятую полоску обратно не подсовывает", () => {
@@ -153,6 +159,9 @@ describe("normalizeLayout", () => {
     expect([...out.filter((p) => p.hidden).map((p) => p.kind)].sort()).toEqual([
       "donutExpense",
       "donutIncome",
+      "freeMoney",
+      "freeMoneyCompact",
+      "monthOverMonth",
       "observations",
     ]);
   });
@@ -178,7 +187,9 @@ describe("normalizeLayout", () => {
       { key: "month", kind: "month" },
     ]);
     // Кольца стоят сразу за «наблюдениями» — там их место по стандартному
-    // порядку, а «наблюдения» в сохранённой раскладке первые.
+    // порядку, а «наблюдения» в сохранённой раскладке первые. «Активность» по
+    // стандартному порядку идёт ПЕРЕД «наблюдениями», и опереться ей не на
+    // что: такие уходят в конец.
     expect(kinds(out)).toEqual([
       "observations",
       "donutExpense",
@@ -186,7 +197,10 @@ describe("normalizeLayout", () => {
       "month",
       "accounts",
       "upcoming",
+      "freeMoney",
+      "freeMoneyCompact",
       "cashflow",
+      "monthOverMonth",
       "categories",
       "activity",
     ]);
@@ -244,12 +258,15 @@ describe("moveWidgetBefore", () => {
 describe("packLayout", () => {
   const cell = (kind: string, key = kind): WidgetPlacement => ({ key, kind: kind as never });
 
-  it("в стандартной раскладке дырок внутри нет", () => {
+  it("в стандартной раскладке дырок ВНУТРИ нет", () => {
     // Раскладывается только видимое — как на самой главной.
     const visible = DEFAULT_LAYOUT.filter((p) => !p.hidden);
-    // Стандартная главная собрана в ровные ряды: ни дырки перед виджетом,
-    // которая означала бы криво собранный ряд, ни хвостового остатка.
-    expect(packLayout(visible).filter((c) => c.type === "gap")).toEqual([]);
+    // Дырка ПЕРЕД виджетом означала бы криво собранный ряд — такой быть не
+    // должно. Хвостовой остаток допустим: после «Свободных денег» (две трети)
+    // ширины видимых виджетов складываются в 14 третей, а 14 на три не делится.
+    // Хвост стоит в самом низу страницы, где за ним всё равно ничего нет.
+    const gaps = packLayout(visible).filter((c) => c.type === "gap");
+    expect(gaps.filter((g) => g.type === "gap" && g.before !== null)).toEqual([]);
   });
 
   it("называет дырку перед тем, кто в ряд не влез", () => {
@@ -280,21 +297,165 @@ describe("packLayout", () => {
 });
 
 describe("shiftWidget", () => {
-  it("меняет местами с соседом", () => {
-    const out = shiftWidget(DEFAULT_LAYOUT, "accounts", -1);
-    expect(keys(out).slice(0, 2)).toEqual(["accounts", "month"]);
+  const offsetOf = (l: readonly WidgetPlacement[], key: string) =>
+    l.find((p) => p.key === key)?.offset ?? 0;
+
+  it("шаг вправо оставляет пустую клетку слева, а не меняет соседей", () => {
+    // Ради этого всё и затевалось: «поставить справа, слева пусто».
+    const out = shiftWidget(shown(DEFAULT_LAYOUT, "freeMoney"), "freeMoney", 1);
+    expect(offsetOf(out, "freeMoney")).toBe(1);
+    expect(keys(out)).toEqual(keys(DEFAULT_LAYOUT));
+  });
+
+  it("шаг влево возвращает клетку обратно", () => {
+    const right = shiftWidget(shown(DEFAULT_LAYOUT, "freeMoney"), "freeMoney", 1);
+    const back = shiftWidget(right, "freeMoney", -1);
+    expect(offsetOf(back, "freeMoney")).toBe(0);
+    expect(keys(back)).toEqual(keys(DEFAULT_LAYOUT));
+  });
+
+  it("виджет в две трети дальше одной клетки не уезжает — меняется с соседом", () => {
+    const right = shiftWidget(shown(DEFAULT_LAYOUT, "freeMoney"), "freeMoney", 1);
+    const out = shiftWidget(right, "freeMoney", 1);
+    // По видимому порядку: снятые виджеты стоят в раскладке, но шаг их
+    // пропускает, и сравнивать с ними место бессмысленно.
+    expect(keys(out.filter((p) => !p.hidden)).slice(3, 5)).toEqual([
+      "links",
+      "freeMoney",
+    ]);
+  });
+
+  it("при обмене отступ сбрасывается: ряд у виджета теперь другой", () => {
+    const right = shiftWidget(DEFAULT_LAYOUT, "freeMoney", 1);
+    const out = shiftWidget(right, "freeMoney", 1);
+    expect(offsetOf(out, "freeMoney")).toBe(0);
+  });
+
+  it("виджет во всю ширину клеток не набирает — сразу обмен", () => {
+    // У полоски `span: 3`, пустой клетке рядом с ней взяться неоткуда.
+    const out = shiftWidget(DEFAULT_LAYOUT, "links", -1);
+    expect(offsetOf(out, "links")).toBe(0);
+    expect(keys(out)).not.toEqual(keys(DEFAULT_LAYOUT));
   });
 
   it("на краю стоит на месте", () => {
     expect(keys(shiftWidget(DEFAULT_LAYOUT, "month", -1))).toEqual(keys(DEFAULT_LAYOUT));
-    const last = DEFAULT_LAYOUT[DEFAULT_LAYOUT.length - 1].key;
-    expect(keys(shiftWidget(DEFAULT_LAYOUT, last, 1))).toEqual(keys(DEFAULT_LAYOUT));
   });
 
   it("перешагивает убранные: шаг не должен уходить в пустоту", () => {
-    const layout = setWidgetHidden(DEFAULT_LAYOUT, "accounts", true);
+    // Клетки у «Итогов месяца» кончились — дальше шаг становится обменом, и
+    // перешагнуть он должен через снятый виджет, а не встать на его место.
+    let layout = setWidgetHidden(DEFAULT_LAYOUT, "accounts", true);
+    layout = shiftWidget(layout, "month", 1);
+    layout = shiftWidget(layout, "month", 1);
+    expect(offsetOf(layout, "month")).toBe(2);
     const out = shiftWidget(layout, "month", 1);
     expect(keys(out).slice(0, 3)).toEqual(["upcoming", "accounts", "month"]);
+  });
+});
+
+describe("dropIntoGap", () => {
+  const cols = (l: readonly WidgetPlacement[]) =>
+    packLayout(l).map((c) => (c.type === "widget" ? c.placement.key : `gap${c.span}`));
+
+  // Ряд из двух виджетов в треть и дырки: следом идёт виджет в две трети,
+  // который в остаток ряда не влез.
+  const row = [
+    { key: "upcoming", kind: "upcoming" as const },
+    { key: "accounts", kind: "accounts" as const },
+    { key: "freeMoney", kind: "freeMoney" as const },
+  ];
+
+  it("виджет из СВОЕГО ряда встаёт на место дырки", () => {
+    // Раньше он просто менялся местами с соседом, а дырка оставалась там же —
+    // со стороны это выглядело как «перетаскивание не работает».
+    const out = dropIntoGap(row, "upcoming", "freeMoney", 2);
+    expect(cols(out)).toEqual(["accounts", "gap1", "upcoming", "freeMoney", "gap1"]);
+  });
+
+  it("сосед по ряду тоже встаёт на место дырки, а первый остаётся слева", () => {
+    const out = dropIntoGap(row, "accounts", "freeMoney", 2);
+    expect(cols(out)).toEqual(["upcoming", "gap1", "accounts", "freeMoney", "gap1"]);
+  });
+
+  it("виджет из ДРУГОГО ряда просто заполняет дырку, без отступа", () => {
+    const layout = [...row, { key: "categories", kind: "categories" as const }];
+    const out = dropIntoGap(layout, "categories", "freeMoney", 2);
+    expect(cols(out)).toEqual(["upcoming", "accounts", "categories", "freeMoney", "gap1"]);
+    expect(out.find((p) => p.key === "categories")?.offset).toBeUndefined();
+  });
+
+  it("бросок в собственный отступ двигает виджет влево", () => {
+    // Дырка слева от виджета — его же отступ; бросок в неё её и убирает.
+    const layout = [
+      { key: "freeMoney", kind: "freeMoney" as const, offset: 1 },
+      { key: "categories", kind: "categories" as const },
+    ];
+    const out = dropIntoGap(layout, "freeMoney", "freeMoney", 0);
+    expect(cols(out)).toEqual(["freeMoney", "categories"]);
+  });
+
+  it("занятый чужой отступ соседу возвращается урезанным", () => {
+    // Дырка была отступом «Свободных денег»; её заняли — значит отступа больше
+    // нет, иначе виджет уехал бы ещё правее, а дырка выросла.
+    const layout = [
+      { key: "freeMoney", kind: "freeMoney" as const, offset: 1 },
+      { key: "categories", kind: "categories" as const },
+    ];
+    const out = dropIntoGap(layout, "categories", "freeMoney", 0);
+    expect(out.find((p) => p.key === "freeMoney")?.offset).toBeUndefined();
+    expect(cols(out)).toEqual(["categories", "freeMoney"]);
+  });
+
+  it("незнакомый ключ раскладку не трогает", () => {
+    expect(cols(dropIntoGap(row, "чужой", "freeMoney", 2))).toEqual(cols(row));
+  });
+});
+
+describe("packLayout и отступ", () => {
+  it("ставит пустую клетку слева от виджета", () => {
+    const out = packLayout([
+      { key: "freeMoney", kind: "freeMoney", offset: 1 },
+      { key: "categories", kind: "categories" },
+    ]);
+    expect(out.map((c) => (c.type === "widget" ? c.placement.key : `gap${c.span}`))).toEqual([
+      "gap1",
+      "freeMoney",
+      "categories",
+      "gap2",
+    ]);
+  });
+
+  it("отступ едет вместе с виджетом на новый ряд", () => {
+    // Иначе пустота повисла бы хвостом предыдущего ряда, а виджет всё равно
+    // встал бы слева — то есть отступ бы просто пропал.
+    const out = packLayout([
+      { key: "accounts", kind: "accounts" },
+      { key: "freeMoney", kind: "freeMoney", offset: 1 },
+    ]);
+    expect(out.map((c) => (c.type === "widget" ? c.placement.key : `gap${c.span}`))).toEqual([
+      "accounts",
+      "gap2",
+      "gap1",
+      "freeMoney",
+    ]);
+  });
+
+  it("отступ больше свободного места обрезается", () => {
+    // У виджета в две трети клетка бывает только одна: с двумя он не влез бы
+    // в ряд вовсе.
+    const out = packLayout([{ key: "freeMoney", kind: "freeMoney", offset: 9 }]);
+    expect(out.map((c) => (c.type === "widget" ? c.placement.key : `gap${c.span}`))).toEqual([
+      "gap1",
+      "freeMoney",
+    ]);
+  });
+
+  it("виджету во всю ширину отступ не полагается", () => {
+    const out = packLayout([{ key: "links", kind: "links", offset: 2 }]);
+    expect(out.map((c) => (c.type === "widget" ? c.placement.key : `gap${c.span}`))).toEqual([
+      "links",
+    ]);
   });
 });
 
@@ -329,20 +490,31 @@ describe("полоски с кнопками", () => {
     expect(keys(two)).toContain("links-3");
   });
 
-  it("новая полоска встаёт в конец с одной кнопкой на первом месте", () => {
+  it("новая полоска встаёт в конец пустой", () => {
+    // Пустой — чтобы человек расставил кнопки сам: подобранный за него раздел
+    // всё равно менялся на нужный первым же действием.
     const out = addLinksRow(DEFAULT_LAYOUT);
     const added = out[out.length - 1];
     expect(added.kind).toBe("links");
-    expect(added.links).toHaveLength(LINK_SLOTS);
-    expect(added.links!.filter(Boolean)).toHaveLength(1);
-    // Первый раздел «Ещё», которого ещё нет ни на одной полоске.
-    expect(DEFAULT_LINKS).not.toContain(added.links![0]);
+    expect(added.links).toEqual(new Array(LINK_SLOTS).fill(null));
+  });
+
+  it("полосок можно завести сколько угодно", () => {
+    let out = DEFAULT_LAYOUT.slice();
+    for (let i = 0; i < 4; i++) out = addLinksRow(out);
+    expect(out.filter((p) => p.kind === "links").map((p) => p.key)).toEqual([
+      "links",
+      "links-2",
+      "links-3",
+      "links-4",
+      "links-5",
+    ]);
   });
 
   it("на пустой главной полоска всё равно заводится", () => {
     const out = addLinksRow([]);
     expect(out).toHaveLength(1);
-    expect(out[0].links!.filter(Boolean)).toHaveLength(1);
+    expect(out[0].links).toEqual(new Array(LINK_SLOTS).fill(null));
   });
 
   it("кнопки можно расставить по местам как угодно", () => {
@@ -357,11 +529,13 @@ describe("полоски с кнопками", () => {
     expect(row(out, "links").links).toEqual(["/goals", null, null, "/rules", null, "/trash"]);
   });
 
-  it("полоску без единой кнопки не принимает", () => {
+  it("полоску можно опустошить целиком", () => {
+    // Пустым местом на экране она не станет: в настройке все шесть мест зовут
+    // плюсом, а вне её пустая полоска не рисуется.
     const one = setRowLinks(DEFAULT_LAYOUT, "links", ["/goals"]);
     expect(row(one, "links").links).toEqual(["/goals", null, null, null, null, null]);
-    const still = setRowLinks(one, "links", [null, null, null, null, null, null]);
-    expect(row(still, "links").links).toEqual(["/goals", null, null, null, null, null]);
+    const empty = setRowLinks(one, "links", [null, null, null, null, null, null]);
+    expect(row(empty, "links").links).toEqual([null, null, null, null, null, null]);
   });
 
   it("полоску можно стереть насовсем", () => {
@@ -427,6 +601,22 @@ describe("варианты оформления", () => {
     expect(row(back, "month").view).toBeUndefined();
     // И раскладка снова считается стандартной.
     expect(isDefaultLayout(back)).toBe(true);
+  });
+
+  it("возврат к варианту по умолчанию не трогает остальное место виджета", () => {
+    const links = ["/transactions", null, null, null, null, null];
+    const placed = DEFAULT_LAYOUT.map((p) =>
+      p.key === "month" ? { ...p, offset: 2, hidden: true, links } : p
+    );
+    const split = setWidgetView(placed, "month", "split");
+    expect(row(split, "month")).toMatchObject({ view: "split", offset: 2, hidden: true, links });
+
+    const back = row(setWidgetView(split, "month", "open"), "month");
+    expect(back.offset).toBe(2);
+    expect(back.hidden).toBe(true);
+    expect(back.links).toEqual(links);
+    // Вариант по умолчанию не хранится вовсе — даже пустым полем.
+    expect("view" in back).toBe(false);
   });
 
   it("сохранённый вариант переживает разбор, выдуманный — нет", () => {

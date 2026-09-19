@@ -16,7 +16,23 @@
  * `DashboardView`, где раскладка живёт — дело `useDashboardLayoutStore`.
  */
 
-import { SECONDARY, navSection } from "./navSections";
+import {
+  ArrowLeftRight,
+  BarChart3,
+  CalendarClock,
+  CalendarDays,
+  Coins,
+  Gauge,
+  Landmark,
+  LayoutGrid,
+  Lightbulb,
+  PieChart,
+  Scale,
+  TrendingDown,
+  TrendingUp,
+  type LucideIcon,
+} from "lucide-react";
+import { navSection } from "./navSections";
 
 export type WidgetSpan = 1 | 2 | 3;
 
@@ -24,8 +40,11 @@ export const WIDGET_KINDS = [
   "month",
   "accounts",
   "upcoming",
+  "freeMoney",
+  "freeMoneyCompact",
   "links",
   "cashflow",
+  "monthOverMonth",
   "categories",
   "activity",
   "observations",
@@ -54,6 +73,13 @@ export interface WidgetView {
 }
 
 export interface WidgetMeta {
+  /**
+   * Значок для списка «поставить виджет».
+   *
+   * Список из одних названий читался как оглавление: одинаковые строки, глазу
+   * не за что зацепиться. Значок делает плитку узнаваемой ещё до чтения.
+   */
+  icon: LucideIcon;
   kind: WidgetKind;
   /** Как виджет называется в настройке раскладки. */
   title: string;
@@ -71,7 +97,7 @@ export interface WidgetMeta {
   views?: readonly WidgetView[];
   /**
    * Стандартно снят: место в раскладке за виджетом закреплено, но открывается
-   * главная без него — он ждёт на полке, пока его не вернут.
+   * главная без него — он ждёт в списке «поставить сюда», пока его не вернут.
    */
   offByDefault?: boolean;
   /** Высота по содержимому, а не общая высота ряда. */
@@ -113,8 +139,13 @@ export const DEFAULT_LINKS: LinkSlots = [
 export const WIDGETS: readonly WidgetMeta[] = [
   {
     kind: "month",
+    icon: Scale,
     title: "Итоги месяца",
-    hint: "Свободные деньги, темп трат, доход и расход",
+    // Раньше здесь стояло «Свободные деньги, темп трат, доход и расход». После
+    // появления виджета «Свободные деньги» (#96) это вводило в заблуждение: у
+    // «Итогов» крупное число — факт периода, доход минус расход, а свободные
+    // считаются от остатков на счетах. Разные вопросы, разные ответы.
+    hint: "Сальдо месяца, темп трат, доход и расход",
     span: 1,
     views: [
       {
@@ -138,12 +169,14 @@ export const WIDGETS: readonly WidgetMeta[] = [
   },
   {
     kind: "accounts",
+    icon: Landmark,
     title: "Балансы счетов",
     hint: "Совокупный баланс и остаток на каждом счёте",
     span: 1,
   },
   {
     kind: "upcoming",
+    icon: CalendarClock,
     title: "Запланированные операции",
     hint: "Что спишется и что придёт до конца месяца",
     span: 1,
@@ -161,7 +194,34 @@ export const WIDGETS: readonly WidgetMeta[] = [
     ],
   },
   {
+    kind: "freeMoney",
+    icon: Coins,
+    title: "Свободные деньги",
+    hint: "Сколько можно потратить до конца периода и сколько из этого — сегодня",
+    // Две трети: кольцо с числом и разбивка «из чего сложилось» встают двумя
+    // колонками, а план на месяц листается в третьей. В одну колонку это не
+    // помещалось, во всю ширину — оставляло пустоту справа.
+    span: 2,
+    // Стандартно снят, как и узкий вариант: раскладка главной по умолчанию
+    // остаётся прежней, а место под виджет в две трети человек находит сам —
+    // ряд под него надо перебрать, и решать это за него неправильно.
+    offByDefault: true,
+  },
+  {
+    kind: "freeMoneyCompact",
+    icon: Gauge,
+    title: "Свободные деньги · кратко",
+    hint: "То же самое в треть ширины, но без списка статей плана",
+    // Треть: без списка статей остаётся кольцо дня, свободные до конца периода
+    // и разбивка — всё это читается в узкой колонке.
+    span: 1,
+    // Стандартно снят: два расчёта свободных денег на одной главной никому не
+    // нужны, узкий — замена широкому, а не добавка к нему.
+    offByDefault: true,
+  },
+  {
     kind: "links",
+    icon: LayoutGrid,
     title: "Полоска с кнопками",
     hint: "Быстрые переходы в разделы, до шести кнопок в ряд",
     // Всегда во всю строку: даже одна кнопка стоит в полноширинной полоске, а
@@ -174,30 +234,45 @@ export const WIDGETS: readonly WidgetMeta[] = [
   },
   {
     kind: "cashflow",
+    icon: BarChart3,
     title: "Доходы и расходы",
     hint: "Столбцы за последние двенадцать месяцев и прогноз",
     span: 2,
   },
   {
+    kind: "monthOverMonth",
+    icon: ArrowLeftRight,
+    title: "Месяц к месяцу",
+    hint: "Доходы, расходы и чистый поток рядом с прошлым месяцем",
+    span: 1,
+    // Стандартная главная собрана в ровные ряды по три, и лишний виджет
+    // оставил бы в них дырку у ВСЕХ. Кто захочет — поставит его сам.
+    offByDefault: true,
+  },
+  {
     kind: "categories",
+    icon: PieChart,
     title: "Расходы по категориям",
     hint: "На что ушли деньги в этом месяце",
     span: 1,
   },
   {
     kind: "activity",
+    icon: CalendarDays,
     title: "Активность в этом месяце",
     hint: "Календарь трат по дням",
     span: 2,
   },
   {
     kind: "observations",
+    icon: Lightbulb,
     title: "Авто-наблюдения",
     hint: "Что выбилось из обычного: перерасход, подписки, пропуски",
     span: 1,
   },
   {
     kind: "donutExpense",
+    icon: TrendingDown,
     title: "Кольцо расходов",
     hint: "Доли статей друг относительно друга, как на «Категориях»",
     span: 1,
@@ -205,6 +280,7 @@ export const WIDGETS: readonly WidgetMeta[] = [
   },
   {
     kind: "donutIncome",
+    icon: TrendingUp,
     title: "Кольцо доходов",
     hint: "Откуда приходят деньги, теми же кольцами",
     span: 1,
@@ -244,6 +320,18 @@ export interface WidgetPlacement {
   view?: string;
   /** Только у полоски: что стоит на каждом из шести мест. */
   links?: LinkSlots;
+  /**
+   * Сколько пустых клеток оставить слева от виджета в его ряду.
+   *
+   * Без этого виджет всегда прижат к левому краю своего ряда: раскладка —
+   * поток, и «поставить справа, а слева пусто» в ней было невыразимо. Отдельной
+   * распорки-виджета для этого заводить не стали — пустота не сущность, а
+   * свойство места, и живёт она у того, кого сдвигает.
+   *
+   * Считается от начала ряда и ограничен так, чтобы виджет в него влезал:
+   * у виджета в две трети отступ бывает только 0 или 1.
+   */
+  offset?: number;
 }
 
 export const DEFAULT_LAYOUT: readonly WidgetPlacement[] = WIDGETS.map((w) => {
@@ -271,15 +359,16 @@ function cleanLinks(raw: unknown): LinkSlots | null {
   if (!Array.isArray(raw)) return null;
   const out: LinkSlots = new Array(LINK_SLOTS).fill(null);
   const seen = new Set<string>();
-  let filled = 0;
   for (let i = 0; i < Math.min(raw.length, LINK_SLOTS); i++) {
     const item = raw[i];
     if (typeof item !== "string" || !navSection(item) || seen.has(item)) continue;
     seen.add(item);
     out[i] = item;
-    filled++;
   }
-  return filled > 0 ? out : null;
+  // Пустая полоска — законное состояние: новую заводят именно такой, чтобы
+  // человек сам расставил кнопки, а не разбирал чужую подборку. Раньше пустой
+  // набор считался мусором и полоска молча теряла все места.
+  return out;
 }
 
 /**
@@ -306,6 +395,7 @@ export function normalizeLayout(raw: unknown): WidgetPlacement[] {
       hidden?: unknown;
       view?: unknown;
       links?: unknown;
+      offset?: unknown;
     };
     const kind = typeof rec.kind === "string" ? BY_KIND.get(rec.kind) : undefined;
     if (!kind) continue;
@@ -326,6 +416,8 @@ export function normalizeLayout(raw: unknown): WidgetPlacement[] {
       placement.links = links;
     }
     if (rec.hidden === true) placement.hidden = true;
+    const offset = clampOffset(rec.offset, kind);
+    if (offset > 0) placement.offset = offset;
 
     keys.add(key);
     kinds.add(kind.kind);
@@ -423,6 +515,73 @@ export function moveWidgetBefore(
   return next;
 }
 
+/**
+ * Бросок в пустую клетку: виджет встаёт РОВНО В НЕЁ.
+ *
+ * Одного переноса «перед соседом» для этого мало. Дырка в ряду стоит в его
+ * конце, а перенос ставит виджет сразу за последним занятым местом — то есть
+ * левее дырки, если в ряду что-то освободилось. Заметнее всего это на своём же
+ * ряду: виджет оттуда просто менялся местами с соседом, дырка оставалась на
+ * месте, и перетаскивание выглядело сломанным.
+ *
+ * Поэтому после переноса смотрим, в какую колонку виджет встал сам, и добираем
+ * разницу отступом. Если он и так попал куда надо (бросок из другого ряда),
+ * отступ выходит нулевым и ничего не меняется.
+ *
+ * `gapCol` — колонка, с которой дырка начинается, считая от начала ряда.
+ */
+export function dropIntoGap(
+  layout: readonly WidgetPlacement[],
+  dragKey: string,
+  /** Виджет, перед которым стоит дырка; `null` — дырка в конце раскладки. */
+  beforeKey: string | null,
+  gapCol: number,
+  columns = 3
+): WidgetPlacement[] {
+  const moved = moveWidgetBefore(layout, dragKey, beforeKey);
+  const at = moved.findIndex((p) => p.key === dragKey);
+  if (at === -1) return moved;
+
+  const meta = widgetMeta(moved[at].kind);
+  const actual = columnOf(moved, dragKey, columns);
+  if (actual === null) return moved;
+
+  const offset = clampOffset(moved[at].offset, meta, columns);
+  const next = moved.slice();
+  next[at] = withOffset(next[at], clampOffset(offset + gapCol - actual, meta, columns));
+
+  // Если дырка была ОТСТУПОМ соседа, часть её теперь занята — отдаём соседу
+  // ровно то, что осталось. Иначе он уехал бы ещё правее, а дырка выросла.
+  if (beforeKey !== null && beforeKey !== dragKey) {
+    const bi = next.findIndex((p) => p.key === beforeKey);
+    if (bi !== -1) {
+      const bMeta = widgetMeta(next[bi].kind);
+      const bOffset = clampOffset(next[bi].offset, bMeta, columns);
+      if (bOffset > 0) {
+        const span = Math.min(meta.span, columns);
+        next[bi] = withOffset(next[bi], Math.max(0, bOffset - span));
+      }
+    }
+  }
+  return next;
+}
+
+/** В какой колонке своего ряда стоит виджет. `null` — его на экране нет. */
+function columnOf(
+  layout: readonly WidgetPlacement[],
+  key: string,
+  columns = 3
+): number | null {
+  let col = 0;
+  for (const cell of packLayout(layout.filter((p) => !p.hidden), columns)) {
+    if (cell.type === "widget" && cell.placement.key === key) return col;
+    const span =
+      cell.type === "gap" ? cell.span : Math.min(widgetMeta(cell.placement.kind).span, columns);
+    col = (col + span) % columns;
+  }
+  return null;
+}
+
 /* ─────────────────────────────  раскладка по рядам  ───────────────────────────── */
 
 /** Ячейка сетки: виджет или пустое место, оставшееся до конца ряда. */
@@ -455,9 +614,17 @@ export function packLayout(
   let col = 0;
   for (const placement of visible) {
     const span = Math.min(widgetMeta(placement.kind).span, columns);
-    if (col > 0 && col + span > columns) {
+    const offset = clampOffset(placement.offset, widgetMeta(placement.kind), columns);
+    // Отступ едет вместе с виджетом: если вдвоём они в остаток ряда не влезают,
+    // на новый ряд переходят оба, и пустота остаётся слева от виджета, а не
+    // повисает хвостом предыдущего.
+    if (col > 0 && col + offset + span > columns) {
       cells.push({ type: "gap", span: columns - col, before: placement.key });
       col = 0;
+    }
+    if (offset > 0) {
+      cells.push({ type: "gap", span: offset, before: placement.key });
+      col += offset;
     }
     cells.push({ type: "widget", placement });
     col = (col + span) % columns;
@@ -466,8 +633,31 @@ export function packLayout(
   return cells;
 }
 
+/** Отступ, который виджет может себе позволить: дальше он в ряд не влезет. */
+export function maxOffset(meta: WidgetMeta, columns = 3): number {
+  return Math.max(0, columns - Math.min(meta.span, columns));
+}
+
+function clampOffset(
+  value: unknown,
+  meta: WidgetMeta,
+  columns = 3
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(Math.round(value), maxOffset(meta, columns)));
+}
+
 /**
  * Сдвинуть виджет на шаг вперёд или назад — это делают стрелки.
+ *
+ * ШАГ — ЭТО КЛЕТКА, А НЕ СОСЕД. Сначала виджет двигается внутри ряда: вправо —
+ * набирая пустую клетку слева, влево — отдавая её обратно. Только когда клеток
+ * больше нет (виджет во всю ширину или уже у края), шаг становится обменом с
+ * соседом. Так «поставить справа, слева пусто» получается теми же стрелками, а
+ * не требует отдельной распорки в раскладке.
+ *
+ * При обмене отступ сбрасывается: он про место В РЯДУ, а ряд у виджета теперь
+ * другой, и тащить за собой прежнюю пустоту незачем.
  *
  * Убранные виджеты пропускаем: их на экране нет, и шаг «через невидимое»
  * выглядел бы как нажатие вхолостую.
@@ -483,12 +673,31 @@ export function shiftWidget(
   });
   const at = visible.findIndex((i) => layout[i].key === key);
   if (at === -1) return layout.slice();
+
+  const idx = visible[at];
+  const meta = widgetMeta(layout[idx].kind);
+  const offset = clampOffset(layout[idx].offset, meta);
+  const room = maxOffset(meta);
+  if (dir === 1 ? offset < room : offset > 0) {
+    const next = layout.slice();
+    next[idx] = withOffset(layout[idx], offset + dir);
+    return next;
+  }
+
   const to = at + dir;
   if (to < 0 || to >= visible.length) return layout.slice();
   const next = layout.slice();
   const a = visible[at];
   const b = visible[to];
-  [next[a], next[b]] = [next[b], next[a]];
+  [next[a], next[b]] = [withOffset(next[b], 0), withOffset(next[a], 0)];
+  return next;
+}
+
+/** Тот же виджет с другим отступом; ноль поле убирает. */
+function withOffset(p: WidgetPlacement, offset: number): WidgetPlacement {
+  const next = { ...p };
+  if (offset > 0) next.offset = offset;
+  else delete next.offset;
   return next;
 }
 
@@ -505,7 +714,14 @@ export function shiftWidget(
 export function setWidgetHidden(
   layout: readonly WidgetPlacement[],
   key: string,
-  hidden: boolean
+  hidden: boolean,
+  /**
+   * Куда поставить возвращаемый виджет: перед этим соседом. `null` — в конец.
+   *
+   * Возвращают его теперь из той самой пустой клетки, куда и хотят поставить,
+   * так что «в конец, а дальше тащите сами» больше не годится.
+   */
+  beforeKey: string | null = null
 ): WidgetPlacement[] {
   const at = layout.findIndex((p) => p.key === key);
   if (at === -1) return layout.slice();
@@ -516,23 +732,36 @@ export function setWidgetHidden(
   if (hidden) next.hidden = true;
 
   const rest = layout.filter((x) => x.key !== key);
-  // Убираем — оставляем на месте: пока виджет на полке, его порядок никому не
+  // Убираем — оставляем на месте: пока виджет снят, его порядок никому не
   // мешает, зато сравнивать раскладку со стандартной становится нечестно.
   if (hidden) {
     const out = rest.slice();
     out.splice(at, 0, next);
     return out;
   }
-  return [...rest, next];
+  return insertBefore(rest, next, beforeKey);
+}
+
+/** Вставить перед названным соседом; `null` или незнакомый ключ — в конец. */
+function insertBefore(
+  layout: readonly WidgetPlacement[],
+  item: WidgetPlacement,
+  beforeKey: string | null
+): WidgetPlacement[] {
+  const out = layout.slice();
+  const to = beforeKey === null ? -1 : out.findIndex((p) => p.key === beforeKey);
+  if (to === -1) out.push(item);
+  else out.splice(to, 0, item);
+  return out;
 }
 
 /**
  * Убрать виджет из раскладки насовсем.
  *
  * Только то, что человек сам и завёл: одиночный виджет так удалить нельзя —
- * его неоткуда взять обратно, для него есть «убрать» с полкой. Полоску же
- * собирают из разделов за полминуты, и держать снятую вечно на полке, без
- * возможности от неё избавиться, — тупик.
+ * его неоткуда взять обратно, для него есть «убрать», и он ждёт в списке.
+ * Полоску же собирают из разделов за полминуты, и держать снятую вечно в
+ * списке, без возможности от неё избавиться, — тупик.
  */
 export function removeWidget(
   layout: readonly WidgetPlacement[],
@@ -553,35 +782,31 @@ function nextLinksKey(layout: readonly WidgetPlacement[]): string {
   }
 }
 
-/**
- * Кнопка для новой полоски — первый раздел, которого ещё нет ни на одной.
- *
- * Заводить полоску с той же кнопкой, что уже стоит рядом, бессмысленно; а если
- * на главной собраны уже все разделы, берём первый по порядку «Ещё».
- */
-function firstUnusedLink(layout: readonly WidgetPlacement[]): string {
-  const used = new Set(layout.flatMap((p) => p.links ?? []).filter(Boolean));
-  return (SECONDARY.find((s) => !used.has(s.to)) ?? SECONDARY[0]).to;
-}
-
 /** Завести новую полоску с кнопками — она встаёт в конец раскладки. */
-export function addLinksRow(layout: readonly WidgetPlacement[]): WidgetPlacement[] {
-  return [
-    ...layout,
+export function addLinksRow(
+  layout: readonly WidgetPlacement[],
+  /** Перед каким соседом встать; `null` — в конец. */
+  beforeKey: string | null = null
+): WidgetPlacement[] {
+  return insertBefore(
+    layout,
     {
       key: nextLinksKey(layout),
       kind: "links",
-      links: [firstUnusedLink(layout), null, null, null, null, null],
+      // Пустой: подбирать кнопку за человека не наше дело, а «первый неиспользо-
+      // ванный раздел» всё равно попадал мимо — его тут же меняли на нужный.
+      links: new Array(LINK_SLOTS).fill(null),
     },
-  ];
+    beforeKey
+  );
 }
 
 /**
  * Задать места полоски.
  *
- * Последнюю кнопку убрать нельзя: без единой кнопки полоска превращается в
- * пустое место, которое человеку пришлось бы искать глазами, чтобы снять.
- * Убирают саму полоску.
+ * Пустая полоска разрешена: она и заводится пустой, и опустеть может по ходу.
+ * Пустым местом на экране она не станет — в режиме настройки все шесть мест
+ * зовут плюсом, а вне его пустая полоска просто не рисуется.
  */
 export function setRowLinks(
   layout: readonly WidgetPlacement[],
@@ -604,11 +829,13 @@ export function setWidgetView(
     const meta = widgetMeta(p.kind);
     if (!meta.views?.some((v) => v.id === view)) return p;
     // Вариант по умолчанию не храним: раскладка тогда остаётся стандартной.
+    // Убираем ровно `view`, остальное место виджета не трогаем. Прежде запись
+    // собиралась заново из перечисленных полей и теряла `offset`: виджет,
+    // отодвинутый пустыми клетками вправо, после возврата вида прыгал к
+    // левому краю ряда.
     if (view === meta.views[0].id) {
-      const next: WidgetPlacement = { key: p.key, kind: p.kind };
-      if (p.links) next.links = p.links;
-      if (p.hidden) next.hidden = true;
-      return next;
+      const { view: _dropped, ...rest } = p;
+      return rest;
     }
     return { ...p, view };
   });
@@ -620,7 +847,7 @@ export function isDefaultLayout(layout: readonly WidgetPlacement[]): boolean {
   return layout.every((p, i) => {
     const d = DEFAULT_LAYOUT[i];
     if (p.key !== d.key || p.kind !== d.kind || p.view) return false;
-    // Снятость сверяем со стандартной: часть виджетов стандартно на полке.
+    // Снятость сверяем со стандартной: часть виджетов стандартно снята.
     if (Boolean(p.hidden) !== Boolean(d.hidden)) return false;
     return String(p.links ?? []) === String(d.links ?? []);
   });

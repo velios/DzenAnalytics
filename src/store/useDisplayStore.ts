@@ -19,6 +19,15 @@ const KEY = "displaySettings";
 
 type FractionDigits = 0 | 2;
 
+/**
+ * Где живут общие фильтры: `button` — панелью из-под шапки по кнопке (не
+ * занимают места, вызываются с любой прокрутки), `page` — первым блоком
+ * страницы, как было раньше; кнопки в шапке тогда нет вовсе.
+ */
+export type FiltersMode = "button" | "page";
+/** Отчётный месяц (со своего первого дня) или календарный. */
+export type MonthKind = "period" | "month";
+
 /** 1 (smallest) … 5 (largest); 3 is the default 14px baseline. */
 export type TableFontLevel = 1 | 2 | 3 | 4 | 5;
 
@@ -34,9 +43,19 @@ const TABLE_FONT_REM: Record<TableFontLevel, string> = {
 
 export const DEFAULT_TABLE_FONT_LEVEL: TableFontLevel = 3;
 
+/** Во сколько раз текст таблиц крупнее обычных 14 px — множитель ширин колонок. */
+const TABLE_FONT_SCALE: Record<TableFontLevel, string> = {
+  1: String(12 / 14),
+  2: String(13 / 14),
+  3: "1",
+  4: String(15 / 14),
+  5: String(16 / 14),
+};
+
 function applyTableFont(level: TableFontLevel): void {
   if (typeof document === "undefined") return;
   document.documentElement.style.setProperty("--tbl-font", TABLE_FONT_REM[level]);
+  document.documentElement.style.setProperty("--tbl-scale", TABLE_FONT_SCALE[level]);
 }
 
 function normalizeLevel(n: unknown): TableFontLevel {
@@ -56,17 +75,50 @@ interface DisplayState {
    * посредников: контрагент говорит «AliExpress», а деньги ушли «Сергей Г.».
    */
   statementLine: boolean;
+  /**
+   * Раскрыт ли журнал синхронизаций.
+   *
+   * По умолчанию свёрнут: это отладочная история, её открывают, когда что-то
+   * пошло не так, а место она занимала на пол-экрана постоянно.
+   *
+   * Живёт здесь, а не в состоянии компонента, по трём причинам сразу: вид
+   * должен пережить перезагрузку, вернуться при следующем заходе и попасть в
+   * копию данных сервиса. `displaySettings` уже умеет всё три — он один
+   * объект под одним ключом и входит в бэкап.
+   */
+  syncLogOpen: boolean;
+  /**
+   * Спрятать значок-сердечко «Отблагодарить автора» в шапке и строку в меню
+   * телефона. По умолчанию значок есть: раньше ссылка стояла в подвале.
+   */
+  hideThanks: boolean;
+  filtersMode: FiltersMode;
+  /**
+   * Какой месяц подставляет кнопка месяца в фильтре: отчётный (со своего
+   * первого дня) или календарный. Живёт здесь, а не в самом фильтре: это
+   * привычка человека, а не часть периода, — иначе она терялась при каждой
+   * перезагрузке и на каждом новом устройстве.
+   */
+  monthKind: MonthKind;
   loaded: boolean;
   hydrate: () => Promise<void>;
   setFractionDigits: (n: FractionDigits) => Promise<void>;
   setTableFontLevel: (level: TableFontLevel) => Promise<void>;
   setStatementLine: (on: boolean) => Promise<void>;
+  setSyncLogOpen: (on: boolean) => Promise<void>;
+  setHideThanks: (on: boolean) => Promise<void>;
+  setFiltersMode: (mode: FiltersMode) => Promise<void>;
+  setMonthKind: (kind: MonthKind) => Promise<void>;
 }
 
 export const useDisplayStore = create<DisplayState>((set, get) => ({
   fractionDigits: 0,
   tableFontLevel: DEFAULT_TABLE_FONT_LEVEL,
   statementLine: false,
+  syncLogOpen: false,
+  hideThanks: false,
+  filtersMode: "page",
+  monthKind: "period",
   loaded: false,
 
   hydrate: async () => {
@@ -74,6 +126,10 @@ export const useDisplayStore = create<DisplayState>((set, get) => ({
       fractionDigits?: number;
       tableFontLevel?: number;
       statementLine?: boolean;
+      syncLogOpen?: boolean;
+      hideThanks?: boolean;
+      filtersMode?: string;
+      monthKind?: string;
     }>(KEY);
     const fd: FractionDigits = stored?.fractionDigits === 2 ? 2 : 0;
     const level = normalizeLevel(stored?.tableFontLevel);
@@ -83,6 +139,11 @@ export const useDisplayStore = create<DisplayState>((set, get) => ({
       fractionDigits: fd,
       tableFontLevel: level,
       statementLine: stored?.statementLine === true,
+      syncLogOpen: stored?.syncLogOpen === true,
+      hideThanks: stored?.hideThanks === true,
+      // По умолчанию фильтры стоят на странице; панель по кнопке — выбор человека.
+      filtersMode: stored?.filtersMode === "button" ? "button" : "page",
+      monthKind: stored?.monthKind === "month" ? "month" : "period",
       loaded: true,
     });
   },
@@ -104,6 +165,27 @@ export const useDisplayStore = create<DisplayState>((set, get) => ({
     set({ statementLine: on });
     await db.saveJSON(KEY, { ...persisted(get()), statementLine: on });
   },
+
+  setSyncLogOpen: async (on) => {
+    set({ syncLogOpen: on });
+    await db.saveJSON(KEY, { ...persisted(get()), syncLogOpen: on });
+  },
+
+  setHideThanks: async (on) => {
+    set({ hideThanks: on });
+    await db.saveJSON(KEY, { ...persisted(get()), hideThanks: on });
+  },
+
+  setFiltersMode: async (filtersMode) => {
+    set({ filtersMode });
+    await db.saveJSON(KEY, { ...persisted(get()), filtersMode });
+  },
+
+  setMonthKind: async (monthKind) => {
+    if (get().monthKind === monthKind) return;
+    set({ monthKind });
+    await db.saveJSON(KEY, { ...persisted(get()), monthKind });
+  },
 }));
 
 /** Всё, что кладём в IDB, — одним местом, чтобы сеттеры не забывали поля. */
@@ -112,5 +194,9 @@ function persisted(s: DisplayState) {
     fractionDigits: s.fractionDigits,
     tableFontLevel: s.tableFontLevel,
     statementLine: s.statementLine,
+    syncLogOpen: s.syncLogOpen,
+    hideThanks: s.hideThanks,
+    filtersMode: s.filtersMode,
+    monthKind: s.monthKind,
   };
 }

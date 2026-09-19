@@ -1,9 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import clsx from "clsx";
 import {
   CloudOff,
-  X,
   Pencil,
   Plus,
   Trash2,
@@ -48,6 +46,9 @@ import { accountKindLabel } from "../lib/accountType";
 import { pluralRu } from "../lib/plural";
 import { kindLabel, kindColorClass } from "../lib/txKindStyle";
 import type { Transaction } from "../types";
+import { Modal, ModalBody, ModalHeader } from "./Modal";
+import { SectionEmpty } from "./SectionEmpty";
+import { Badge } from "./Badge";
 
 // Which patch fields map to which human-readable «changed aspect».
 /** Одна «грань» операции: какие ключи патча её задевают, как она называется и
@@ -87,6 +88,13 @@ const ASPECTS: Aspect[] = [
     // хотя в облако уедет именно смена категории. Тот же расчёт, что в
     // `buildRulePlan`.
     getBefore: (t) => dash(t.categoryFullOriginal || t.categoryFull),
+  },
+  {
+    keys: ["extraCategories"],
+    label: "Теги",
+    // Вторые категории операции (#69): без этой грани правка тегов уезжала бы
+    // в облако, а в списке на отправку не показывалась вовсе.
+    get: (t) => dash((t.extraCategories ?? []).join(", ")),
   },
   { keys: ["payee", "brand"], label: "Получатель", get: (t) => dash(displayPayee(t)) },
   { keys: ["comment"], label: "Комментарий", get: (t) => dash(t.comment) },
@@ -202,19 +210,6 @@ export function PendingChangesModal({ onClose }: { onClose: () => void }) {
 
   const [openKey, setOpenKey] = useState<string | null>(null);
   const toggle = (key: string) => setOpenKey((cur) => (cur === key ? null : key));
-
-  const backdropDown = useRef(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // Пока поверх открыт редактор операции — Escape принадлежит ему. Оба окна
-      // слушают клавишу на window, и без этой проверки одно нажатие закрывало
-      // сразу оба, выкидывая из списка вместо возврата к нему.
-      if (editing) return;
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, editing]);
 
   const byId = useMemo(
     () => new Map(transactions.map((t) => [t.id, t])),
@@ -536,67 +531,43 @@ export function PendingChangesModal({ onClose }: { onClose: () => void }) {
   const label = (t: Transaction) =>
     t.brand?.trim() || t.payee?.trim() || t.categoryFull || "—";
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
-      onMouseDown={(e) => {
-        backdropDown.current = e.target === e.currentTarget;
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && backdropDown.current) onClose();
-        backdropDown.current = false;
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="card w-full max-w-3xl max-h-[85vh] flex flex-col"
-        style={{ scrollbarGutter: "stable" }}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="p-1.5 rounded-lg bg-accent/10 text-accent shrink-0">
-              <CloudOff className="w-4 h-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="font-semibold truncate">
-                Изменения ждут отправки в Дзен-мани
-              </div>
-              <div className="text-xs text-muted">
-                {total > 0 ? `Всего изменений: ${total}` : "Всё отправлено"}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {total > 0 && (
-              <button
-                onClick={revertAll}
-                className="btn-ghost text-xs text-expense whitespace-nowrap"
-              >
-                <Undo2 className="w-3.5 h-3.5" />
-                Откатить все
-              </button>
-            )}
-            {total > 0 && token && (
-              <button
-                onClick={pushAll}
-                disabled={pushing}
-                className="btn-primary text-xs whitespace-nowrap"
-              >
-                <UploadCloud className="w-3.5 h-3.5" />
-                {pushing ? "Отправка…" : "Отправить все"}
-              </button>
-            )}
-            <button onClick={onClose} className="text-muted hover:text-text" aria-label="Закрыть">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+  return (
+    <>
+      <Modal onClose={onClose} width="3xl">
+        <ModalHeader
+          icon={CloudOff}
+          title="Изменения ждут отправки в Дзен-мани"
+          subtitle={total > 0 ? `Всего изменений: ${total}` : "Всё отправлено"}
+          actions={
+            total > 0 ? (
+              <>
+                <button
+                  onClick={revertAll}
+                  className="btn-ghost text-xs text-expense whitespace-nowrap"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  Откатить все
+                </button>
+                {token && (
+                  <button
+                    onClick={pushAll}
+                    disabled={pushing}
+                    className="btn-primary text-xs whitespace-nowrap"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    {pushing ? "Отправка…" : "Отправить все"}
+                  </button>
+                )}
+              </>
+            ) : undefined
+          }
+        />
 
-        <div className="overflow-y-auto px-5 py-3 flex-1">
+        <ModalBody scroll>
           {total === 0 ? (
-            <div className="text-center text-muted text-sm py-10">
+            <SectionEmpty variant="inline">
               Нет несинхронизированных изменений — всё отправлено в Дзен-мани.
-            </div>
+            </SectionEmpty>
           ) : (
             <div className="space-y-6">
               <EntityGroup
@@ -682,8 +653,8 @@ export function PendingChangesModal({ onClose }: { onClose: () => void }) {
               />
             </div>
           )}
-        </div>
-      </div>
+        </ModalBody>
+      </Modal>
       {editing && (
         <EditTransactionModal
           key={editing.id}
@@ -691,8 +662,7 @@ export function PendingChangesModal({ onClose }: { onClose: () => void }) {
           onClose={() => setEditing(null)}
         />
       )}
-    </div>,
-    document.body
+    </>
   );
 }
 
@@ -868,12 +838,9 @@ function Row({
           <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
             <span className="text-xs text-muted truncate">{t.categoryFull}</span>
             {fields?.map((f) => (
-              <span
-                key={f}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-warn/10 text-warn whitespace-nowrap"
-              >
+              <Badge key={f} tone="warn">
                 {f}
-              </span>
+              </Badge>
             ))}
           </div>
         </div>
@@ -900,7 +867,7 @@ function Row({
           {onEdit && (
             <button
               onClick={onEdit}
-              className="p-1.5 rounded-md shrink-0 text-muted opacity-70 hover:opacity-100 hover:text-accent hover:bg-panel2 group-hover:opacity-100 transition-colors"
+              className="btn-icon shrink-0 opacity-70 hover:opacity-100 group-hover:opacity-100"
               title="Открыть в редакторе операции"
               aria-label="Открыть в редакторе операции"
             >
@@ -964,7 +931,7 @@ function RevertButton({
   return (
     <button
       onClick={() => void onAction()}
-      className="p-1.5 rounded-md shrink-0 text-muted opacity-70 hover:opacity-100 hover:text-accent hover:bg-panel2 group-hover:opacity-100 transition-colors"
+      className="btn-icon shrink-0 opacity-70 hover:opacity-100 group-hover:opacity-100"
       title={`${action} (локально, без облака)`}
       aria-label={action}
     >

@@ -1,13 +1,33 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useFiltersDockStore } from "../store/useFiltersDockStore";
 
 /**
  * Global keyboard shortcuts: ⌘/Ctrl+K and `/` open the palette; `g` followed
- * by a single key (within 1.5s) navigates to a known route.
+ * by a single key (within 1.5s) navigates to a known route; `F` shows or hides
+ * the filters panel.
  *
  * Lives in its own file (not in CommandPalette.tsx) so the component file
  * exports only React components — required for Vite/React fast-refresh.
  */
+/** Куда ведёт `g` + клавиша. Снаружи обработчика — таблица неизменна, и
+ *  пересобирать её на каждое нажатие незачем. */
+const GOTO: Record<string, string> = {
+  d: "/",
+  o: "/transactions",
+  a: "/accounts",
+  k: "/categories",
+  c: "/cashflow",
+  t: "/trends",
+  b: "/budgets",
+  g: "/goals",
+  l: "/calendar",
+  r: "/recurring",
+  s: "/search",
+  i: "/settings",
+  h: "/help",
+};
+
 export function useGlobalShortcuts(onOpenPalette: () => void) {
   const nav = useNavigate();
 
@@ -37,33 +57,54 @@ export function useGlobalShortcuts(onOpenPalette: () => void) {
       }
 
       const now = Date.now();
+      const armed = lastG !== 0 && now - lastG < 1500;
+
+      // F — показать или спрятать панель общих фильтров (режим «По кнопке»;
+      // в режиме «На странице» панели в шапке нет, и `toggle` ничего не
+      // делает). По физической клавише (`code`), а не по букве: в русской
+      // раскладке на ней «А», и держать ради фильтра английскую незачем.
+      //
+      // Молчит с модификаторами — Ctrl/⌘+F это поиск браузера, — посреди
+      // `g`-комбинации и когда открыто окно: переключать фильтр под ним
+      // бессмысленно.
+      if (
+        e.code === "KeyF" &&
+        !armed &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !document.querySelector('[role="dialog"]')
+      ) {
+        e.preventDefault();
+        useFiltersDockStore.getState().toggle();
+        lastG = 0;
+        return;
+      }
+
+      // Ждущую приставку проверяем ДО ветки «нажали g».
+      //
+      // Раньше порядок был обратный, и `g g` («Цели») не работало вовсе: второе
+      // `g` попадало в ветку «начать комбинацию» и просто перезаводило таймер,
+      // так что до таблицы дело не доходило. Пункт `g: "/goals"` в ней лежал
+      // недостижимым.
+      if (armed) {
+        const dest = GOTO[e.key.toLowerCase()];
+        if (dest) {
+          e.preventDefault();
+          nav(dest);
+          lastG = 0;
+          return;
+        }
+      }
+
       if (e.key === "g") {
         lastG = now;
         return;
       }
-      if (lastG && now - lastG < 1500) {
-        const k = e.key.toLowerCase();
-        const map: Record<string, string> = {
-          d: "/",
-          c: "/cashflow",
-          k: "/categories",
-          a: "/accounts",
-          t: "/trends",
-          b: "/budgets",
-          g: "/goals",
-          l: "/calendar",
-          r: "/recurring",
-          s: "/search",
-          h: "/help",
-          i: "/settings",
-          o: "/transactions",
-        };
-        if (map[k]) {
-          e.preventDefault();
-          nav(map[k]);
-          lastG = 0;
-        }
-      }
+      // Любая другая клавиша снимает приставку: иначе `g`, потом что-то
+      // постороннее — и следующая клавиша в пределах полутора секунд всё ещё
+      // считалась бы второй половиной комбинации.
+      lastG = 0;
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

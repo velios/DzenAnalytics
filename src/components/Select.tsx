@@ -16,6 +16,8 @@ export function Select<T extends string>({
   portal = false,
   ariaLabel,
   size = "md",
+  disabled = false,
+  title,
 }: {
   value: T;
   options: { value: T; label: string }[];
@@ -31,11 +33,14 @@ export function Select<T extends string>({
   portal?: boolean;
   ariaLabel?: string;
   /**
-   * `sm` — плотный вариант для строк-настроек, где поле стоит в ряд с числом и
-   * подписью: у обычного размера высота 40 px, и рядом с полем ввода на 32 px
-   * они выглядят собранными из разных наборов.
+   * Ступени высоты — как у всех контролов: `md` 38 (формы, окна), `sm` 34
+   * (ряды фильтров, строки настроек, шапки карточек). В одном ряду — одна
+   * ступень.
    */
   size?: "sm" | "md";
+  disabled?: boolean;
+  /** Подсказка к полю. */
+  title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -67,10 +72,11 @@ export function Select<T extends string>({
   }, [open]);
 
   useLayoutEffect(() => {
-    if (!open || !portal) {
-      setPos(null);
-      return;
-    }
+    // Сбрасывать `pos` не нужно: список живёт только при `open`, а при
+    // следующем открытии `useLayoutEffect` пересчитает координаты ДО того,
+    // как браузер нарисует кадр, — старое значение показать некому. Лишний
+    // сброс стоил перерисовки на каждом закрытии.
+    if (!open || !portal) return;
     const place = () => {
       const r = boxRef.current?.getBoundingClientRect();
       if (!r) return;
@@ -171,9 +177,11 @@ export function Select<T extends string>({
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={ariaLabel}
+        disabled={disabled}
+        title={title}
         className={clsx(
-          "input flex items-center justify-between gap-2 w-full text-left",
-          size === "sm" ? "h-8 !px-2 !py-1" : "h-10"
+          "input flex items-center justify-between gap-2 w-full text-left disabled:opacity-60 disabled:cursor-not-allowed",
+          size === "sm" ? "h-[34px] !px-2.5 !py-1" : "h-[38px]"
         )}
       >
         <span className={clsx("truncate", size === "sm" ? "text-xs" : "text-sm")}>

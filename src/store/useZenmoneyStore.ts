@@ -16,7 +16,10 @@ import {
   applyDiff,
   cacheToDiffResponse,
   forceFetchFor,
+  diffChangesPlanSet,
 } from "../lib/zenmoneyCache";
+import { zenUsers, type ZenUserOption } from "../lib/zenUsers";
+import { useMembersStore } from "./useMembersStore";
 import {
   buildPushItems,
   buildBudgetPush,
@@ -71,6 +74,7 @@ import { useDeletedStore } from "./useDeletedStore";
 import {
   useDeletedPayloadsStore,
   loadDeletedPayloads,
+  hasPendingRestores,
 } from "./useDeletedPayloadsStore";
 import { useSyncLogStore } from "./useSyncLogStore";
 import { useBudgetsStore } from "./useBudgetsStore";
@@ -82,7 +86,12 @@ import {
 } from "../lib/zenBudgets";
 import { formatNum } from "../lib/format";
 import { budgetCellKey } from "../lib/budgets";
-import { invalidateZenCache } from "../lib/zenCacheMemo";
+import { getZenCache, invalidateZenCache } from "../lib/zenCacheMemo";
+import { useReportPeriodStore } from "./useReportPeriodStore";
+import { useCategoryRulesStore } from "./useCategoryRulesStore";
+import { useCloudSettingsStore } from "./useCloudSettingsStore";
+import { findCloudDocs, isServiceAccountTitle } from "../lib/cloudSettings";
+import { refDictionaryFromCache } from "../lib/ruleRefs";
 import type { ImportMeta } from "../types";
 import { wipeLocalDb, shouldWipeForUser } from "../lib/oauth";
 
@@ -231,6 +240,15 @@ export interface LiveAccount {
   bank: string | null;
   /** «Личный счёт» — hidden from a shared/family view in Zenmoney. */
   private: boolean;
+  /**
+   * Чей это личный счёт — участник общего аккаунта (#92, #95).
+   *
+   * `null` — общий счёт, он виден всем. Номер — личный счёт этого участника.
+   * Это `ZenAccount.role`, а НЕ `private`: на живом общем аккаунте `private`
+   * оказался `false` у ВСЕХ счетов, включая помеченные личными, — различает
+   * участников только `role`.
+   */
+  member: number | null;
   /** Credit limit (native currency); 0 for accounts without one. */
   creditLimit: number;
   /** Заполнен ли полный набор параметров вклада/кредита (дата открытия, срок,
@@ -332,7 +350,20 @@ async function readLiveAccounts(): Promise<LiveAccount[] | null> {
   if (!cache) return null;
   const instrumentsById = new Map(cache.instruments.map((i) => [i.id, i]));
   const companiesById = new Map((cache.companies || []).map((c) => [c.id, c]));
-  return cache.accounts.map((a) => ({
+  // Чужие личные счета не показываем НИГДЕ, где показываются счета: иначе из
+  // списков и фильтров видны их названия и балансы, даже когда операции по ним
+  // уже скрыты (#95). Условия те же, что у операций: знаем, кто мы, и режим
+  // включён. Общие счета (`role: null`) остаются всегда.
+  const { ownerId, hideForeignPrivate } = useMembersStore.getState();
+  // Служебные счета — наш для переноса настроек и Zerro — не деньги
+  // пользователя: ни в списках, ни в фильтрах их быть не должно.
+  const serviceId = findCloudDocs(cache).accountId;
+  const own = cache.accounts.filter((a) => a.id !== serviceId && !isServiceAccountTitle(a.title));
+  const visible =
+    ownerId != null && hideForeignPrivate
+      ? own.filter((a) => a.role == null || a.role === ownerId)
+      : own;
+  return visible.map((a) => ({
     id: a.id,
     title: a.title,
     balance: a.balance || 0,
@@ -354,6 +385,7 @@ async function readLiveAccounts(): Promise<LiveAccount[] | null> {
       (f) => (a as unknown as Record<string, unknown>)[f] != null
     ),
     private: a.private ?? false,
+    member: a.role ?? null,
     creditLimit: a.creditLimit || 0,
   }));
 }
@@ -425,6 +457,19 @@ export interface CategoryTag {
   icon: string | null;
   /** Raw Zenmoney packed-RGB colour int, or null. */
   color: number | null;
+}
+
+/**
+ * Люди на аккаунте из кэша Дзен-мани (#92).
+ *
+ * Нужен только для подписей: сам список тех, кого показывать, собирается по
+ * операциям — на общем аккаунте человек мог не завести ни одной, и пустая
+ * строка в фильтре только мешала бы. `null` в режиме CSV.
+ */
+export async function getZenUsersFromCache(): Promise<ZenUserOption[] | null> {
+  const cache = await loadZenCache();
+  if (!cache) return null;
+  return zenUsers(cache.user);
 }
 
 /**
@@ -664,6 +709,13 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     // сразу, без второго кадра «сначала по операциям, потом по кэшу».
     //
     void getLiveAccountsFromCache().catch(() => {});
+    // День начала месяца при подключённом Дзен-мани — его собственный: берём
+    // из кэша сразу, не дожидаясь синхронизации.
+    if (token) {
+      void getZenCache()
+        .then((c) => useReportPeriodStore.getState().adoptZenDay(c?.user?.[0]?.monthStartDay))
+        .catch(() => {});
+    }
 
     } finally {
       hydrating = false;
@@ -711,6 +763,8 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
 
   removeToken: async () => {
     await db.saveJSON(TOKEN_KEY, null);
+    // Без Дзен-мани снова действует свой день начала месяца.
+    useReportPeriodStore.getState().adoptZenDay(null);
     await db.saveJSON(TIMESTAMP_KEY, 0);
     await db.saveJSON(LAST_SYNC_KEY, null);
     await clearZenCache();
@@ -770,12 +824,35 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       // Перезабор планов — полный список, а не добавка: только так из кэша
       // уходят операции удалённых планов, о которых Дзен-мани сообщил
       // удалением самого плана, а не каждой операции (issue #71).
-      const nextCache = applyDiff(prevCache, diff, {
+      let nextCache = applyDiff(prevCache, diff, {
         replaceMarkers: backfill.includes("reminderMarker"),
+      });
+      // Состав планов поменялся — список их операций берём целиком и заменяем
+      // им наш: только так уходит старая дата перенесённой операции, о которой
+      // сервер в diff не сообщает (issue #99). Второй запрос идёт от новой
+      // метки времени, поэтому остального почти не несёт. Упадёт — упадёт вся
+      // синхронизация, и следующая повторит оба шага с прежней метки.
+      if (!backfill.includes("reminderMarker") && diffChangesPlanSet(prevCache, diff)) {
+        const plans = await fetchDiff(token, nextCache.serverTimestamp, undefined, [
+          "reminderMarker",
+        ]);
+        nextCache = applyDiff(nextCache, plans, { replaceMarkers: true });
+      }
+      // Настройки и правила, перенесённые с других устройств, — и отправка
+      // своих, если облако отстало. Выключено — шаг ничего не делает; упал —
+      // синхронизация операций от этого не страдает.
+      nextCache = await useCloudSettingsStore.getState().step({
+        token,
+        cache: nextCache,
+        deletions: diff.deletion ?? [],
       });
       await saveZenCache(nextCache);
       invalidateLiveAccounts();
       invalidateZenCache();
+      useReportPeriodStore.getState().adoptZenDay(nextCache.user?.[0]?.monthStartDay);
+      // Правила — вслед за справочниками: переименованная категория, счёт или
+      // контрагент подтягивается в правила по id.
+      await useCategoryRulesStore.getState().reconcileRefs(refDictionaryFromCache(nextCache));
       const mapped = mapZenmoneyDiff(cacheToDiffResponse(nextCache));
       const isFull = fromTs === 0;
 
@@ -922,6 +999,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         get().pushMode === "on-sync" &&
         (Object.keys(useEditsStore.getState().edits).length > 0 ||
           useDeletedStore.getState().deletedIds.length > 0 ||
+          hasPendingRestores() ||
           Object.keys(useDraftsStore.getState().drafts).length > 0 ||
           Object.keys(useTagEditsStore.getState().edits).length > 0 ||
           Object.keys(useBudgetEditsStore.getState().edits).length > 0)
@@ -988,6 +1066,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
       const hasPending =
         Object.keys(useEditsStore.getState().edits).length > 0 ||
         useDeletedStore.getState().deletedIds.length > 0 ||
+        hasPendingRestores() ||
         Object.keys(useDraftsStore.getState().drafts).length > 0 ||
         Object.keys(useTagEditsStore.getState().edits).length > 0 ||
         Object.keys(useBudgetEditsStore.getState().edits).length > 0;

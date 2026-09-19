@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import * as db from "../lib/db";
+import { getZenCache } from "../lib/zenCacheMemo";
+import { reconcileRulesRefs, refDictionaryFromCache, type RefDictionary } from "../lib/ruleRefs";
 import type { Transaction } from "../types";
 import {
   allConditions,
@@ -92,10 +94,45 @@ interface RulesState {
    * Возвращает число изменённых правил.
    */
   renamePayee: (from: string, to: string) => Promise<number>;
+  /**
+   * Свести ссылки правил со справочниками Дзен-мани: подтянуть переименованные
+   * названия и проставить id там, где их ещё нет (`lib/ruleRefs`). Возвращает,
+   * было ли что переписать.
+   */
+  reconcileRefs: (dict: RefDictionary) => Promise<boolean>;
+  /**
+   * Заменить правила целиком — итог слияния с облаком. Каждое проходит ту же
+   * нормализацию, что и при чтении с диска: правило любого поколения и чужой
+   * мусор разбираются мягко, без правила без id.
+   */
+  replaceAll: (raw: readonly unknown[]) => Promise<void>;
+  /** То же по кэшу синхронизации; без кэша (CSV) ничего не делает. */
+  reconcileRefsFromCache: () => Promise<boolean>;
   remove: (id: string) => Promise<void>;
   move: (id: string, dir: -1 | 1) => Promise<void>;
   /** Переставить правило на место с индексом `to` (перетаскиванием). */
   reorder: (id: string, to: number) => Promise<void>;
+  /**
+   * Правила из файла (`lib/rulesTransfer`): добавить к своим или заменить ими
+   * все. Возвращает итог — сколько записано и сколько отсеяно как дубли.
+   */
+  importRules: (
+    incoming: readonly CategoryRuleV2[],
+    mode: RulesImportMode
+  ) => Promise<RulesImportPlan>;
+}
+
+export type RulesImportMode = "add" | "replace";
+
+export interface RulesImportPlan {
+  /** Список правил после импорта — ровно то, что ляжет на диск. */
+  rules: StoredCategoryRule[];
+  /** Сколько правил из файла вошло в список. */
+  added: number;
+  /** Сколько отсеяно: такое правило уже есть или повторяется в самом файле. */
+  duplicates: number;
+  /** Сколько из вошедших применяются сами — об этом стоит сказать до записи. */
+  auto: number;
 }
 
 /** Что угодно похожее на правило: своё, из чужого бэкапа, любого поколения. */
@@ -193,6 +230,82 @@ function makeRule(r: NewRule | NewRuleV2, salt: number): StoredCategoryRule {
   });
 }
 
+/**
+ * Что получится из импорта — без записи; этим же окно импорта считает сводку
+ * до подтверждения.
+ *
+ * При добавлении свои правила не трогаются вовсе: новые встают в конец, а
+ * совпадающие по смыслу (тот же ключ, что у `add`) пропускаются — повторный
+ * импорт того же файла ничего не удваивает. id из файла берётся, только если
+ * он свободен: правило, перенесённое файлом на второе устройство, при переносе
+ * настроек через Дзен-мани сходится с оригиналом, а не заводит копию.
+ */
+export function planRulesImport(
+  existing: readonly StoredCategoryRule[],
+  incoming: readonly CategoryRuleV2[],
+  mode: RulesImportMode,
+  now: Date = new Date()
+): RulesImportPlan {
+  const base = mode === "add" ? existing : [];
+  const keys = new Set(base.map(ruleKey));
+  const ids = new Set(base.map((r) => r.id));
+  const fresh: StoredCategoryRule[] = [];
+  let duplicates = 0;
+  let salt = 0;
+  for (const raw of incoming) {
+    const rule = normalizeRule({
+      ...raw,
+      id:
+        raw.id && !ids.has(raw.id)
+          ? raw.id
+          : `${now.getTime()}-${salt++}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: raw.createdAt || now.toISOString(),
+    });
+    const key = ruleKey(rule);
+    if (keys.has(key)) {
+      duplicates++;
+      continue;
+    }
+    keys.add(key);
+    ids.add(rule.id);
+    fresh.push(rule);
+  }
+  return {
+    rules: [...base, ...fresh],
+    added: fresh.length,
+    duplicates,
+    auto: fresh.filter((r) => r.autoApply).length,
+  };
+}
+
+/**
+ * Пометка каждого правила из файла — для списка в мастере импорта, по порядку
+ * файла:
+ *   • `new` — такого правила нет;
+ *   • `exists` — такое же по смыслу уже есть (только при добавлении: при замене
+ *     текущие правила уходят и совпадать не с чем);
+ *   • `repeat` — повторяет правило выше в том же файле.
+ * Ключ сравнения тот же, что у импорта и `add`, — пометка не разойдётся с
+ * тем, что импорт на деле пропустит.
+ */
+export type RuleImportStatus = "new" | "exists" | "repeat";
+
+export function ruleImportStatuses(
+  existing: readonly StoredCategoryRule[],
+  incoming: readonly CategoryRuleV2[],
+  mode: RulesImportMode
+): RuleImportStatus[] {
+  const current = new Set(mode === "add" ? existing.map(ruleKey) : []);
+  const seen = new Set<string>();
+  return incoming.map((raw) => {
+    const key = ruleKey(normalizeRule({ ...raw, createdAt: raw.createdAt || "" }));
+    if (current.has(key)) return "exists";
+    if (seen.has(key)) return "repeat";
+    seen.add(key);
+    return "new";
+  });
+}
+
 export const useCategoryRulesStore = create<RulesState>((set, get) => ({
   rules: [],
   loaded: false,
@@ -204,6 +317,33 @@ export const useCategoryRulesStore = create<RulesState>((set, get) => ({
     // диск не пишем: пересчёт идемпотентен, а лишняя запись при каждом старте
     // приложения ничего не даёт.
     set({ rules: (data || []).map((r) => normalizeRule(r)), loaded: true });
+    await get().reconcileRefsFromCache();
+  },
+
+  replaceAll: async (raw) => {
+    const list = raw
+      .filter(
+        (r): r is RuleLike =>
+          !!r && typeof r === "object" && typeof (r as RuleLike).id === "string"
+      )
+      .map((r) => normalizeRule({ ...r, createdAt: r.createdAt ?? "" }));
+    await db.saveJSON("categoryRules", list);
+    set({ rules: list });
+    await get().reconcileRefsFromCache();
+  },
+
+  reconcileRefs: async (dict) => {
+    if (!get().loaded) return false;
+    const { rules, changed } = reconcileRulesRefs(get().rules, dict);
+    if (!changed) return false;
+    await db.saveJSON("categoryRules", rules);
+    set({ rules });
+    return true;
+  },
+
+  reconcileRefsFromCache: async () => {
+    const cache = await getZenCache().catch(() => null);
+    return cache ? get().reconcileRefs(refDictionaryFromCache(cache)) : false;
   },
 
   add: async (r) => {
@@ -214,6 +354,7 @@ export const useCategoryRulesStore = create<RulesState>((set, get) => ({
     const list = [...existing, fresh];
     await db.saveJSON("categoryRules", list);
     set({ rules: list });
+    await get().reconcileRefsFromCache();
   },
 
   addMany: async (rs) => {
@@ -233,6 +374,7 @@ export const useCategoryRulesStore = create<RulesState>((set, get) => ({
     const list = [...existing, ...fresh];
     await db.saveJSON("categoryRules", list);
     set({ rules: list });
+    await get().reconcileRefsFromCache();
     return fresh.length;
   },
 
@@ -296,6 +438,7 @@ export const useCategoryRulesStore = create<RulesState>((set, get) => ({
     const list = get().rules.map((r) => (r.id === id ? normalizeRule({ ...r, ...next }) : r));
     await db.saveJSON("categoryRules", list);
     set({ rules: list });
+    await get().reconcileRefsFromCache();
   },
 
   remove: async (id) => {
@@ -313,6 +456,18 @@ export const useCategoryRulesStore = create<RulesState>((set, get) => ({
     [list[idx], list[j]] = [list[j], list[idx]];
     await db.saveJSON("categoryRules", list);
     set({ rules: list });
+  },
+
+  importRules: async (incoming, mode) => {
+    if (!get().loaded) await get().hydrate();
+    const plan = planRulesImport(get().rules, incoming, mode);
+    // Добавлять нечего — диск не трогаем. Замена пишется всегда: «заменить на
+    // пустой список» тоже осмысленный итог, но до него окно не допустит.
+    if (mode === "add" && plan.added === 0) return plan;
+    await db.saveJSON("categoryRules", plan.rules);
+    set({ rules: plan.rules });
+    await get().reconcileRefsFromCache();
+    return plan;
   },
 
   // Перетаскивание вынимает правило и вставляет на новое место, а не меняет

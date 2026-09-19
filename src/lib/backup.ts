@@ -7,6 +7,7 @@
 // the device unencrypted.
 
 import * as db from "./db";
+import { compressText } from "./snapshotFile";
 
 // Версия 2 добавила настройки и правки, которых в списке не было: правки
 // счетов, контрагентов и категорий, планы бюджета, разрезы данных, оформление.
@@ -31,21 +32,21 @@ export const BACKUP_EXCLUDED_KEYS: Record<string, string> = {
   // Секреты — не должны покидать устройство в открытом JSON.
   zenmoneyToken: "токен доступа",
   zenmoneyCache: "сырой кэш сущностей Дзен-мани, тянет за собой весь объём",
-  // Привязка к подключению. Без токена бесполезны, а восстановленный режим
-  // «Авто» ещё и начал бы пушить в облако, когда токен появится.
-  zenmoneyPushMode: "режим отправки — восстанавливать опасно",
-  zenmoneyPushEnabled: "настройка подключения",
-  zenmoneyAutoSyncEnabled: "настройка подключения",
-  zenmoneyAutoSyncUnit: "настройка подключения",
-  zenmoneyAutoSyncValue: "настройка подключения",
-  zenmoneySnapshotPolicy: "настройка подключения",
+  // Метки времени и точки синхронизации: привязаны к токену и к конкретной
+  // машине, восстанавливать в них нечего.
   zenmoneyLastSyncAt: "метка времени, восстанавливать нечего",
   zenmoneyLastPushAt: "метка времени, восстанавливать нечего",
   zenmoneyServerTimestamp: "точка синхронизации, привязана к токену",
   // Производное: восстановится само.
   cloudSnapshotIndex: "снимки облака, их объём в бэкапе неуместен",
   syncLog: "журнал синхронизаций",
-  backupLastAt: "метка времени последнего бэкапа",
+  // Согласие на перенос и точка слияния — про ЭТО устройство и этот аккаунт.
+  // Восстановленное на другом устройстве, оно само включило бы запись в
+  // Дзен-мани и спутало бы слияние чужими временами правок.
+  cloudSettings: "перенос настроек через Дзен-мани: согласие и точка слияния этого устройства",
+  // Отказ от входа через zen-platform — выбор на этом устройстве: восстановив
+  // его из чужого бэкапа, можно молча отключить себе SSO.
+  zenmoneyProviderOptOut: "отказ от входа через zen-platform на этом устройстве",
 };
 
 /**
@@ -80,17 +81,45 @@ export const BACKUP_META_KEYS = [
   "inflation", // legacy — feature removed; kept so old backups round-trip
   "payeeGrouping",
   "payeeAliases",
+  "userAliases", // как звать людей на общем аккаунте Дзен-мани (#92)
+  "userOwner", // кого из них считать собой (#92)
+  "membersShowForeign", // показывать ли чужие личные счета — хранится обратным, см. useMembersStore (#95)
   "reportPeriod",
   "categoryRules",
   "duplicateExclusions",
   "budgetSettings", // периметр счетов, переводы, вид и прогноз бюджета
   "dataSlices", // разрезы данных
   "displaySettings", // оформление: размер текста в таблицах, копейки и т.п.
-  "accountsView", // как настроена страница «Счета»: вкладка, отборы, порядок
+  "freeMoneySettings", // виджет «Свободные деньги»: метод деления по дням и резерв (#96)
+  "tagMode", // что считать тегами: хэштеги из комментария или вторые категории (#69)
+  "accountsView", // как настроена страница «Счета»: вкладка, фильтры, порядок
   "dashboardLayout", // как разложены виджеты на главной
+  "headerNav", // какие разделы стоят в меню шапки, а какие — в «Ещё»
+  "headerNavIconsOnly", // меню шапки одними значками
+  "headerNavIconWidth", // ширина кнопок меню одними значками
   "analyticsExcludedCategories", // категории, убранные из аналитики
   "categoryMeta", // иконки и цвета категорий
   "backupInterval", // как часто напоминать о бэкапе
+  // Когда сделали бэкап в прошлый раз. Едет вместе с остальным: восстановились
+  // из файла — значит бэкап у вас есть, и напоминать о нём сию секунду незачем.
+  "backupLastAt",
+  // Фильтр, если человек включил его запоминание (issue #79). Период внутрь
+  // снимка не входит — см. `useFilterMemoryStore`.
+  "filterMemory",
+  // Связи разделённых операций: какая часть из какой операции выросла
+  // (issue #69). Сами части — обычные операции и приезжают из Дзен-мани, а
+  // вот связь между ними живёт только здесь.
+  "splitGroups",
+  // ── Настройки подключения к Дзен-мани ──────────────────────────────────
+  // Едут в бэкап, но восстанавливаются НЕ как есть: `safePushModeOnRestore`
+  // снимает автоматику. Токена в бэкапе нет, так что сами по себе они ничего
+  // не делают, — опасен именно момент, когда токен появится снова.
+  "zenmoneyPushMode",
+  "zenmoneyPushEnabled",
+  "zenmoneySnapshotPolicy",
+  "zenmoneyAutoSyncEnabled",
+  "zenmoneyAutoSyncValue",
+  "zenmoneyAutoSyncUnit",
   // un-pushed local changes
   "transactionEdits",
   // Кто записал правку — правило или человек. Едет вместе с самими правками:
@@ -106,6 +135,7 @@ export const BACKUP_META_KEYS = [
   // файла нечем было бы узнать.
   "importBatches",
   "deletedTransactions",
+  "deletedTransactionsAt", // когда спрятаны — порядок в разделе «Удалённые»
   "deletedPayloads",
   "tagEdits",
   "tagDeletions",
@@ -121,9 +151,10 @@ export const BACKUP_META_KEYS = [
  *
  * Всё остальное приложение хранит в IndexedDB, но тема выбирается до того,
  * как база успевает открыться (иначе страница мигала бы светлым), и живёт
- * отдельно. В бэкапе она едет своим разделом.
+ * отдельно. В бэкапе она едет своим разделом — вместе с выбранными светлой и
+ * тёмной темой.
  */
-export const BACKUP_LOCAL_KEYS = ["dzen.theme"] as const;
+export const BACKUP_LOCAL_KEYS = ["dzen.theme", "dzen.lightScheme", "dzen.darkScheme"] as const;
 
 export interface BackupPayload {
   version: number;
@@ -171,6 +202,23 @@ function readLocal(): Record<string, string> {
   return out;
 }
 
+/**
+ * Режим отправки, с которым безопасно восстановиться.
+ *
+ * «Авто» и «При синхронизации» отправляют изменения в облако САМИ. После
+ * восстановления это опаснее всего: локальные правки из файла — не обязательно
+ * то, что должно уехать в Дзен-мани. Восстановились не из того файла или на
+ * чужой машине — и облако молча переписано.
+ *
+ * Поэтому автоматику снимаем, а сам факт «отправка включена» сохраняем:
+ * «Авто» и «При синхронизации» становятся «Ручным», а «Выключено» остаётся
+ * выключенным. Человек видит режим, понимает, что его понизили, и включает
+ * обратно сам — уже посмотрев, что восстановилось.
+ */
+export function safePushModeOnRestore(mode: unknown): "off" | "manual" {
+  return mode === "off" || mode == null ? "off" : "manual";
+}
+
 /** Write a (validated) backup payload back into IndexedDB, restoring every
  *  section. Stores still need re-hydrating afterwards (caller's job) so the
  *  in-memory state matches the freshly-written disk state. */
@@ -182,6 +230,12 @@ export async function restoreBackupPayload(
   if (dump.importMeta) await db.saveImportMeta(dump.importMeta as never);
   for (const k of BACKUP_META_KEYS) {
     if (dump[k] !== undefined) await db.saveJSON(k, dump[k]);
+  }
+  // Отправку в Дзен-мани восстанавливаем ПОНИЖЕННОЙ — см. `safePushModeOnRestore`.
+  if (dump.zenmoneyPushMode !== undefined) {
+    const mode = safePushModeOnRestore(dump.zenmoneyPushMode);
+    await db.saveJSON("zenmoneyPushMode", mode);
+    await db.saveJSON("zenmoneyPushEnabled", mode !== "off");
   }
   // Раздела `local` нет у бэкапов версии 2 и старше — тогда просто нечего
   // восстанавливать, тема останется текущей.
@@ -242,22 +296,41 @@ export function parseAndValidateBackup(text: string): BackupPayload {
   try {
     parsed = JSON.parse(text);
   } catch (e) {
-    throw new Error("Файл не является корректным JSON", { cause: e });
+    throw new Error("Файл не похож на JSON", { cause: e });
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Бэкап должен быть JSON-объектом");
+    throw new Error("Это не копия данных сервиса: внутри не тот вид файла");
   }
   const obj = parsed as Record<string, unknown>;
   if (!obj.version) {
-    throw new Error("Не похоже на бэкап DzenAnalytics (нет поля version)");
+    // Похоже на облачный снимок? Их легко перепутать: оба файла — JSON, оба
+    // лежат во вкладке «Бэкапы» и оба скачиваются кнопкой, только на соседних
+    // подвкладках. Скажем, куда нести, вместо «не похоже на бэкап
+    // DzenAnalytics» — про файл, внутри которого написано ровно обратное
+    // (issue #93).
+    //
+    // Проверяем ТОЛЬКО когда `version` нет: `diff` — обычное слово, и бэкап,
+    // у которого такое поле просто есть, обязан пройти.
+    const meta = obj._meta as Record<string, unknown> | null | undefined;
+    const looksLikeSnapshot =
+      (!!meta && typeof meta === "object" && meta.schema === "cloud-snapshot/v1") ||
+      (obj.diff != null && typeof obj.diff === "object" && !Array.isArray(obj.diff));
+    if (looksLikeSnapshot) {
+      throw new Error(
+        "Это снимок аккаунта Дзен-мани, а не копия данных сервиса. " +
+          "Его загружают в «Снимках аккаунта Дзен-мани»: «Восстановить» → " +
+          "«Загрузить файл»."
+      );
+    }
+    throw new Error("Не похоже на копию данных DzenAnalytics");
   }
   // transactions, if present, must be an array of bounded length.
   if (obj.transactions !== undefined) {
     if (!Array.isArray(obj.transactions)) {
-      throw new Error("Поле «transactions» повреждено (ожидался массив)");
+      throw new Error("Копия повреждена: список операций внутри неё испорчен");
     }
     if (obj.transactions.length > MAX_TRANSACTIONS) {
-      throw new Error("Слишком много операций в бэкапе");
+      throw new Error("В копии слишком много операций — файл повреждён");
     }
   }
   // rates, if present, must be an object (base + rates map).
@@ -266,33 +339,53 @@ export function parseAndValidateBackup(text: string): BackupPayload {
     obj.rates !== null &&
     (typeof obj.rates !== "object" || Array.isArray(obj.rates))
   ) {
-    throw new Error("Поле «rates» повреждено");
+    throw new Error("Копия повреждена: испорчены курсы валют");
   }
   return deepSanitize(obj) as BackupPayload;
 }
 
-export function backupFileName(now: Date = new Date(), tag?: string): string {
+export function backupFileName(
+  now: Date = new Date(),
+  tag?: string,
+  compressed = false
+): string {
   const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
   const stamp =
     `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
     `_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
   const suffix = tag ? `-${tag}` : "";
-  return `dzenanalytics-backup-${stamp}${suffix}.json`;
+  // `.json.gz`, а не `.gz`: имя должно говорить, что внутри именно json —
+  // иначе в папке загрузок это просто «архив непонятно чего».
+  const ext = compressed ? ".json.gz" : ".json";
+  return `dzenanalytics-backup-${stamp}${suffix}${ext}`;
 }
 
 /**
- * Build the backup payload and trigger a browser download.
- * Returns the byte size of the downloaded JSON.
+ * Собрать копию и отдать её браузеру на скачивание.
+ *
+ * Копия уезжает сжатой: это тот же JSON, только в разы меньше, а папка
+ * загрузок у человека копится месяцами — при расписании «каждый час» тем
+ * более. Восстановление распаковывает обратно само (`readSnapshotFile`), так
+ * что руками с архивом делать ничего не нужно.
+ *
+ * Если браузер сжимать не умеет, кладём как раньше: копия важнее экономии.
+ *
+ * Возвращает размер того, что реально ушло в файл, и его имя.
  */
 export async function downloadBackup(tag?: string): Promise<{
   size: number;
   fileName: string;
 }> {
   const payload = await buildBackupPayload();
-  const json = JSON.stringify(payload, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
+  // Без отступов: файл читает наш же импорт, а «красивый» JSON — это лишняя
+  // треть объёма ещё до сжатия.
+  const json = JSON.stringify(payload);
+  const gz = await compressText(json);
+  const blob = gz
+    ? new Blob([gz as BlobPart], { type: "application/gzip" })
+    : new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  const fileName = backupFileName(new Date(), tag);
+  const fileName = backupFileName(new Date(), tag, gz != null);
   const a = document.createElement("a");
   a.href = url;
   a.download = fileName;
@@ -301,5 +394,5 @@ export async function downloadBackup(tag?: string): Promise<{
   document.body.removeChild(a);
   // Release the blob URL after the click had a chance to take effect.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return { size: json.length, fileName };
+  return { size: gz ? gz.byteLength : new Blob([json]).size, fileName };
 }

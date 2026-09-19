@@ -16,6 +16,7 @@ import {
   defaultLayout,
   layoutFromStored,
   moveWidget,
+  dropIntoGap,
   moveWidgetBefore,
   removeWidget,
   setRowLinks,
@@ -35,12 +36,14 @@ interface State {
   hydrate: () => Promise<void>;
   setEditing: (on: boolean) => void;
   move: (dragKey: string, overKey: string) => Promise<void>;
-  /** Поставить виджет перед другим; `null` — в конец. Так работает бросок в дырку. */
+  /** Поставить виджет перед другим; `null` — в конец. */
   moveBefore: (dragKey: string, beforeKey: string | null) => Promise<void>;
+  /** Бросок в пустую клетку: виджет встаёт ровно в неё. */
+  dropInGap: (dragKey: string, beforeKey: string | null, gapCol: number) => Promise<void>;
   shift: (key: string, dir: -1 | 1) => Promise<void>;
-  setHidden: (key: string, hidden: boolean) => Promise<void>;
+  setHidden: (key: string, hidden: boolean, beforeKey?: string | null) => Promise<void>;
   /** Завести новую дорожку кнопок. */
-  addLinks: () => Promise<void>;
+  addLinks: (beforeKey?: string | null) => Promise<void>;
   /** Убрать из раскладки насовсем — только то, что человек сам завёл. */
   remove: (key: string) => Promise<void>;
   /** Выбрать вариант оформления виджета. */
@@ -48,6 +51,9 @@ interface State {
   /** Задать набор кнопок дорожки. */
   setLinks: (key: string, links: readonly (string | null)[]) => Promise<void>;
   reset: () => Promise<void>;
+  /** Заменить раскладку целиком — пришедшую с другого устройства. Чужое и
+   *  незнакомое отсекает та же нормализация, что и при чтении с диска. */
+  replaceLayout: (raw: unknown) => Promise<void>;
 }
 
 export const useDashboardLayoutStore = create<State>((set, get) => {
@@ -71,12 +77,16 @@ export const useDashboardLayoutStore = create<State>((set, get) => {
     move: (dragKey, overKey) => apply(moveWidget(get().layout, dragKey, overKey)),
     moveBefore: (dragKey, beforeKey) =>
       apply(moveWidgetBefore(get().layout, dragKey, beforeKey)),
+    dropInGap: (dragKey, beforeKey, gapCol) =>
+      apply(dropIntoGap(get().layout, dragKey, beforeKey, gapCol)),
     shift: (key, dir) => apply(shiftWidget(get().layout, key, dir)),
-    setHidden: (key, hidden) => apply(setWidgetHidden(get().layout, key, hidden)),
-    addLinks: () => apply(addLinksRow(get().layout)),
+    setHidden: (key, hidden, beforeKey = null) =>
+      apply(setWidgetHidden(get().layout, key, hidden, beforeKey)),
+    addLinks: (beforeKey = null) => apply(addLinksRow(get().layout, beforeKey)),
     remove: (key) => apply(removeWidget(get().layout, key)),
     setView: (key, view) => apply(setWidgetView(get().layout, key, view)),
     setLinks: (key, links) => apply(setRowLinks(get().layout, key, links)),
     reset: () => apply(defaultLayout()),
+    replaceLayout: (raw) => apply(layoutFromStored(raw)),
   };
 });

@@ -2,17 +2,28 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { HelpCircle } from "lucide-react";
 import clsx from "clsx";
+import { SURFACE_ATTR } from "./Popover";
 
 /** ПРЕДЕЛ ширины панели, а не сама ширина: короткое пояснение в одну строку
  *  растягивалось на весь предел и выглядело нелепо рядом со своим значком.
  *  Панель считается по содержимому и упирается в этот предел.
  *
- *  Было 40rem — и на таком пределе строка при 12px набирала под сто двадцать
- *  знаков. Это вдвое больше удобной длины: глаз, дойдя до конца строки, не
- *  находит начало следующей, и абзац читается через силу. 26rem дают около
- *  семидесяти знаков — та самая длина, на которой набирают книги. */
-const WIDTH = 416; // 26rem
+ *  40rem были явно много: строка при 12px набирала под сто двадцать знаков —
+ *  вдвое больше удобной длины, глаз не находил начало следующей строки. Но и
+ *  26rem оказались тесноваты: длинное пояснение вытягивалось в узкий столбец
+ *  во весь экран и накрывало собой то, к чему относится. 30rem — около
+ *  восьмидесяти знаков в строке: ещё комфортно читать, но панель заметно ниже. */
+const WIDTH = 480; // 30rem
 const MARGIN = 8;
+
+/** Сколько места снизу считаем достаточным, чтобы раскрыться вниз.
+ *
+ *  Без порога решение принималось перевесом в считанные пиксели: снизу 315,
+ *  сверху 325 — и панель уезжала вверх, накрывая пол-страницы, хотя вниз она
+ *  помещалась почти целиком. Панель прокручивается внутри себя, так что «вниз»
+ *  работает всегда; вверх идём, только когда снизу и правда негде — кнопка у
+ *  самого низа экрана. */
+const MIN_BELOW = 240;
 
 /**
  * Знак вопроса, раскрывающий объяснение «как это считается».
@@ -28,22 +39,34 @@ const MARGIN = 8;
  */
 export function InfoPopover({
   label = "Как это считается",
+  tone = "default",
+  focusable = true,
   children,
 }: {
   /** Подпись кнопки — она же в подсказке при наведении. */
   label?: string;
+  /** `expense` — знак красный: с тем, что он поясняет, сейчас что-то не так. */
+  tone?: "default" | "expense";
+  /**
+   * `false` — копия в двойнике липкой шапки: до неё не дотягивается Tab, а
+   * щелчок не оставляет фокус внутри `aria-hidden`-поддерева.
+   */
+  focusable?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxH: number } | null>(
+    null
+  );
 
   useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
+    // Сбрасывать `pos` не нужно: список живёт только при `open`, а при
+    // следующем открытии `useLayoutEffect` пересчитает координаты ДО того,
+    // как браузер нарисует кадр, — старое значение показать некому. Лишний
+    // сброс стоил перерисовки на каждом закрытии.
+    if (!open) return;
     const place = () => {
       const a = btnRef.current?.getBoundingClientRect();
       if (!a) return;
@@ -56,10 +79,19 @@ export function InfoPopover({
       const width = Math.min(box?.width || WIDTH, vw - MARGIN * 2);
       // По умолчанию — правым краем к кнопке; если не влезает, прижимаем к краю.
       const left = Math.min(Math.max(a.right - width, MARGIN), vw - width - MARGIN);
-      // Ниже кнопки, а если снизу не хватает места — выше неё.
+      // ВНИЗ по умолчанию — так панель не накрывает собой то, к чему относится,
+      // и знак вопроса остаётся на виду. Раньше правило было «не помещается
+      // снизу — открываем вверх», и длинное пояснение уезжало под потолок,
+      // закрывая заголовок и кнопки страницы.
       const below = a.bottom + 6;
-      const top = vh > 0 && below + h > vh - MARGIN ? Math.max(MARGIN, a.top - h - 6) : below;
-      setPos({ left, top });
+      const spaceBelow = vh > 0 ? vh - below - MARGIN : h;
+      const spaceAbove = a.top - 6 - MARGIN;
+      // Наверх уходим, только когда снизу СОВСЕМ негде (кнопка у нижнего края)
+      // и сверху места больше. Во всех остальных случаях — вниз, а слишком
+      // длинное содержимое прокручивается внутри панели.
+      const flip = vh > 0 && spaceBelow < MIN_BELOW && spaceAbove > spaceBelow;
+      const top = flip ? Math.max(MARGIN, a.top - Math.min(h, spaceAbove) - 6) : below;
+      setPos({ left, top, maxH: Math.max(120, flip ? spaceAbove : spaceBelow) });
     };
     place();
     window.addEventListener("scroll", place, true);
@@ -94,14 +126,21 @@ export function InfoPopover({
         aria-expanded={open}
         aria-label={label}
         title={label}
+        tabIndex={focusable ? undefined : -1}
+        onMouseDown={focusable ? undefined : (e) => e.preventDefault()}
         className={clsx(
-          "p-1.5 rounded-full shrink-0",
+          "btn-icon btn-icon-sm shrink-0",
           open
             ? "text-accent bg-accent/10"
-            : "text-muted hover:text-accent hover:bg-panel2"
+            : tone === "expense" && "text-expense hover:text-expense hover:bg-expense/10"
         )}
       >
-        <HelpCircle className="w-5 h-5" />
+        {/* 16px, а не 20: рядом со строкой в 14px значок в 20px оказывался выше
+            самой строки, а вместе с отступами кнопка выходила 32×32 — заметно
+            крупнее того, что ею поясняется. По всему сервису значки в строке
+            набраны в 16px, знак вопроса выбивался один. Отступ ужат до 4px,
+            область нажатия остаётся 24×24. */}
+        <HelpCircle className="w-4 h-4" />
       </button>
       {open &&
         createPortal(
@@ -109,12 +148,19 @@ export function InfoPopover({
             <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
             <div
               ref={panelRef}
+              // Своя прокрутка панели не должна закрывать окно, из которого
+              // её открыли (настройки режима правила — это `Popover`).
+              {...{ [SURFACE_ATTR]: "" }}
               role="dialog"
               aria-label={label}
-              className="fixed z-[91] w-max max-w-[min(26rem,calc(100vw-1rem))] border border-border rounded-xl bg-panel p-4 shadow-xl space-y-2.5 text-xs text-muted leading-relaxed"
+              className="fixed z-[91] w-max max-w-[min(30rem,calc(100vw-1rem))] overflow-y-auto border border-border rounded-xl bg-panel p-4 shadow-xl space-y-2.5 text-xs text-muted leading-relaxed"
               style={{
                 left: pos?.left ?? -9999,
                 top: pos?.top ?? -9999,
+                // Предел высоты ставим ТОЛЬКО после замера: до него панель
+                // должна вырасти во всю свою высоту, иначе мерить нечего и
+                // она сама себя обрежет по стартовому пределу.
+                maxHeight: pos ? pos.maxH : undefined,
                 visibility: pos ? "visible" : "hidden",
               }}
             >

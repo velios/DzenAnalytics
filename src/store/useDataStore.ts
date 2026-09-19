@@ -4,6 +4,8 @@ import * as db from "../lib/db";
 import {
   baseWithHistory,
   fetchHistoricalRubRates,
+  purgeLegacyDayCache,
+  seedDayRates,
   type HistDayRates,
 } from "../lib/historicalRates";
 import { buildPayeeAliasMap } from "../lib/payeeNormalize";
@@ -24,12 +26,13 @@ import { makeCategoryChecker } from "../lib/zenmoneyPush";
 import { applyEdits } from "../lib/applyEdits";
 import { useEditsStore } from "./useEditsStore";
 import { useDeletedStore, loadDeletedSet } from "./useDeletedStore";
-import { useDeletedPayloadsStore } from "./useDeletedPayloadsStore";
+import { useDeletedPayloadsStore, loadDeletedPayloads } from "./useDeletedPayloadsStore";
 import { loadZenCache } from "../lib/zenmoneyCache";
 import type { ZenTransaction } from "../lib/zenmoney";
 import { loadDrafts, useDraftsStore } from "./useDraftsStore";
 import { draftsToTransactions } from "../lib/draftsMap";
 import { aliasesToMap, type PayeeAlias } from "./usePayeeAliasStore";
+import { useMembersStore } from "./useMembersStore";
 
 // Rough cross-rates relative to RUB — purely a starting point so the rates UI
 // is populated out of the box. Users adjust to their own actual rates.
@@ -151,6 +154,16 @@ interface DataState {
   restoreTransaction: (id: string) => Promise<void>;
   /** Un-hide many at once (one recompute). */
   restoreTransactionMany: (ids: string[]) => Promise<void>;
+  /**
+   * Вернуть операции из раздела «Удалённые» — и спрятанные у нас, и удалённые
+   * прямо в Дзен-мани. Удалённую в Дзен-мани снять с удаления нельзя, поэтому
+   * её строка из кэша становится снимком и уходит в облако копией с новым
+   * номером (`buildResurrections`) — сразу, в любом режиме двусторонней
+   * синхронизации.
+   */
+  restoreDeleted: (ids: string[]) => Promise<void>;
+  /** Передумать, пока возврат не отправлен: операция снова удалена. */
+  cancelRestore: (ids: string[]) => Promise<void>;
   /** Permanently empty the local trash: drop hidden rows from storage,
    *  clear the hidden-id set and the cloud-restore snapshots. No cloud
    *  writes — irreversible locally. */
@@ -170,6 +183,24 @@ function recalcBase(
     ...t,
     amountBase: baseWithHistory(t.amount, t.currency, t.date, rates, hist),
   }));
+}
+
+/**
+ * Убрать операции по ЧУЖИМ личным счетам (issue #95).
+ *
+ * Дзен-мани прячет их в своём приложении и на сайте, а по API отдаёт всё:
+ * токен участника получает и личные счета остальных, и операции по ним.
+ * Пометка «личный» — обещание, данное тем, кто её поставил, поэтому здесь
+ * единственное место, через которое проходит весь видимый список.
+ *
+ * НЕ прячем, пока человек не сказал, кто он: угадать по ответу API нельзя, а
+ * ошибка означала бы спрятать своё и показать чужое. Общие счета остаются
+ * всегда — они на то и общие.
+ */
+function hideForeignMembers(txs: Transaction[]): Transaction[] {
+  const { ownerId, hideForeignPrivate } = useMembersStore.getState();
+  if (ownerId == null || !hideForeignPrivate) return txs;
+  return txs.filter((t) => t.member == null || t.member === ownerId);
 }
 
 /**
@@ -197,7 +228,8 @@ async function finalize(
   // visible set: once a draft is pushed and echoed back into the cache, its
   // cloud row wins (and we then drop the draft from the store).
   const drafts = await loadDraftRows(rates, visible);
-  return drafts.length === 0 ? visible : [...visible, ...drafts];
+  const withDrafts = drafts.length === 0 ? visible : [...visible, ...drafts];
+  return hideForeignMembers(withDrafts);
 }
 
 /**
@@ -567,6 +599,11 @@ export const useDataStore = create<DataState>((set, get) => ({
     const hist = savedHist || {};
     // Seed histDayRates BEFORE finalize() (which reads it from the store).
     set({ histDayRates: hist });
+    // Индекс — единственное постоянное хранилище курсов: отдаём его загрузчику
+    // вместо прежнего дневного кэша и выбрасываем сам кэш, оставшийся от
+    // старых версий (он дублировал индекс и место занимал вдвое).
+    seedDayRates(hist);
+    void purgeLegacyDayCache();
     let raw = recalcBase(txs, rates, hist);
     raw = applyPayeeGrouping(raw, grouping || false, manualAliases);
     raw = restoreRuleCategories(raw);
@@ -624,6 +661,9 @@ export const useDataStore = create<DataState>((set, get) => ({
         // и будут перезапрошены позже — но пользователю об этом надо сказать.
         unresolved += chunk.length - Object.keys(fetched).length;
         const merged = { ...get().histDayRates, ...fetched };
+        // Новые даты сразу идут и в память загрузчика: тултип курса на дату
+        // откроется без похода в сеть.
+        seedDayRates(fetched);
         await db.saveJSON(HIST_RATES_KEY, merged);
         set({ histDayRates: merged });
         done += chunk.length;
@@ -845,6 +885,39 @@ export const useDataStore = create<DataState>((set, get) => ({
     const final = await finalize(raw, rates);
     set({ transactions: final });
     void pushAfterRestore();
+  },
+
+  restoreDeleted: async (ids) => {
+    if (ids.length === 0) return;
+    const cache = await loadZenCache();
+    if (cache) {
+      // Снимок нужен только тем, у кого его нет: наши удаления сняли его сами
+      // в момент удаления, и он точнее — с правками, внесёнными до него.
+      const have = await loadDeletedPayloads();
+      const wanted = new Set(ids);
+      const snaps = cache.transactions.filter(
+        (t) => t.deleted && wanted.has(String(t.id)) && !have[String(t.id)]
+      );
+      await useDeletedPayloadsStore.getState().saveMany(snaps);
+    }
+    const hidden = useDeletedStore.getState().deletedSet;
+    const local = ids.filter((id) => hidden.has(id));
+    if (local.length > 0) {
+      await useDeletedStore.getState().restoreMany(local);
+      const { transactionsRaw: raw, rates } = get();
+      set({ transactions: await finalize(raw, rates) });
+    }
+    void pushAfterRestore();
+  },
+
+  cancelRestore: async (ids) => {
+    if (ids.length === 0) return;
+    // Спрятать снова: `buildResurrections` пропускает спрятанные, а снимок
+    // остаётся — вернуть можно будет и потом. Время удаления прежнее: человек
+    // передумал возвращать, а не удалил операцию заново.
+    await useDeletedStore.getState().removeMany(ids, { keepTime: true });
+    const { transactionsRaw: raw, rates } = get();
+    set({ transactions: await finalize(raw, rates) });
   },
 
   purgeDeleted: async () => {

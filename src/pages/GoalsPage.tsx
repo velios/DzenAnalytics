@@ -15,16 +15,20 @@ import {
 import { useDataStore } from "../store/useDataStore";
 import { useAnalyticsTransactions } from "../hooks/useAnalyticsTransactions";
 import { useGoalsStore, type Goal } from "../store/useGoalsStore";
+import { useReportPeriodStore } from "../store/useReportPeriodStore";
 import { getLiveAccountsFromCache } from "../store/useZenmoneyStore";
 import { confirm } from "../store/useConfirmStore";
 import { groupByMonth } from "../lib/aggregations";
-import { formatMoney, formatDate } from "../lib/format";
+import { formatMoney, formatDate, formatNum } from "../lib/format";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-import { Stat } from "../components/Stat";
+import { StatCell, StatRow } from "../components/SectionCard";
 import { Combobox } from "../components/Combobox";
 import { Tooltip } from "../components/Tooltip";
 import { DateField } from "../components/DateField";
+import { CardHeader } from "../components/CardHeader";
+import { SectionEmpty } from "../components/SectionEmpty";
+import { ProgressBar } from "../components/ProgressBar";
 
 function monthsBetween(fromIso: string, toIso: string): number {
   const a = new Date(fromIso);
@@ -137,8 +141,14 @@ export function GoalsPage() {
     if (!loaded) hydrate();
   }, [loaded, hydrate]);
 
-  // Household savings pace drives the default (fallback) forecast.
-  const months = useMemo(() => groupByMonth(transactions), [transactions]);
+  // Household savings pace drives the default (fallback) forecast. Месяц здесь
+  // отчётный: прогноз «когда накопится» опирается на тот же месяц, что и
+  // остальная аналитика.
+  const monthStartDay = useReportPeriodStore((s) => s.monthStartDay);
+  const months = useMemo(
+    () => groupByMonth(transactions, { monthStartDay }),
+    [transactions, monthStartDay]
+  );
   const recent = months.slice(-6);
   const avgIncome = recent.length
     ? recent.reduce((s, m) => s + m.income, 0) / recent.length
@@ -236,13 +246,12 @@ export function GoalsPage() {
       <PageHeader
         title="Цели"
         icon={Target}
-        hint="Копите на конкретные цели и следите за прогрессом и расчётным сроком достижения"
         right={
           // Hidden while the add form is open — the form has its own «Отмена»,
           // so a second one in the header would just be redundant.
           !adding && (
-            <button onClick={() => setAdding(true)} className="btn-primary text-sm">
-              <Plus className="w-4 h-4" />
+            <button onClick={() => setAdding(true)} className="btn-primary text-xs">
+              <Plus className="w-3.5 h-3.5" />
               Новая цель
             </button>
           )
@@ -250,11 +259,10 @@ export function GoalsPage() {
       />
 
       {goals.length > 0 && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Stat
-            dense
+        <StatRow>
+          <StatCell
             label="Целей"
-            value={goals.length}
+            value={formatNum(goals.length)}
             icon={<Target className="w-4 h-4" />}
             tooltip={
               summary.done > 0
@@ -262,38 +270,32 @@ export function GoalsPage() {
                 : "Все цели в работе"
             }
           />
-          <Stat
-            dense
+          <StatCell
             label="Накоплено"
             value={formatMoney(summary.saved, base)}
             tone="income"
             icon={<Landmark className="w-4 h-4" />}
             tooltip="Сумма прогресса по всем целям: для привязанных к счёту — их текущий баланс, для остальных — введённое вручную."
           />
-          <Stat
-            dense
+          <StatCell
             label="Осталось"
             value={formatMoney(summary.remaining, base)}
             icon={<Target className="w-4 h-4" />}
             tooltip="Сколько ещё нужно накопить суммарно по всем недостигнутым целям."
           />
-          <Stat
-            dense
+          <StatCell
             label="Темп"
             value={`${avgSavings >= 0 ? "+" : ""}${formatMoney(avgSavings, base)}`}
             tone={avgSavings > 0 ? "income" : avgSavings < 0 ? "expense" : "default"}
             icon={<TrendingUp className="w-4 h-4" />}
             tooltip="Средние сбережения в месяц (доходы минус расходы за последние 6 месяцев). На их основе строится общий прогноз достижения целей."
           />
-        </div>
+        </StatRow>
       )}
 
       {adding && (
-        <div className="card card-pad border-accent/40 bg-accent/[0.03]">
-          <div className="font-semibold mb-4 flex items-center gap-2">
-            <Plus className="w-4 h-4 text-accent" />
-            Новая цель
-          </div>
+        <div className="card card-pad bg-accent/5 border-accent/40">
+          <CardHeader icon={Plus} title="Новая цель" />
           <GoalForm
             name={name}
             setName={setName}
@@ -331,20 +333,19 @@ export function GoalsPage() {
 
       {goals.length === 0 ? (
         !adding && (
-          <div className="card-tray card-pad text-center py-14">
-            <div className="w-14 h-14 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
-              <Target className="w-7 h-7 text-accent" />
-            </div>
-            <div className="font-semibold mb-1">Пока нет целей</div>
-            <div className="text-sm text-muted mb-5 max-w-sm mx-auto">
-              Создайте цель — и увидите прогресс, расчётный срок достижения и статус по
-              дедлайну.
-            </div>
-            <button onClick={() => setAdding(true)} className="btn-primary text-sm mx-auto">
-              <Plus className="w-4 h-4" />
-              Создать первую цель
-            </button>
-          </div>
+          <SectionEmpty
+            icon={Target}
+            title="Пока нет целей"
+            action={
+              <button onClick={() => setAdding(true)} className="btn-primary text-sm">
+                <Plus className="w-4 h-4" />
+                Создать первую цель
+              </button>
+            }
+          >
+            Создайте цель — и увидите прогресс, расчётный срок достижения и статус по
+            дедлайну.
+          </SectionEmpty>
         )
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
@@ -384,7 +385,7 @@ function Field({
       {/* Smaller, single-line label (`whitespace-nowrap`) so even a long one like
           «Ежемесячные отчисления» stays on ONE row — every input in a row then
           starts at the same y, with a tight, uniform gap to its label. */}
-      <div className="mb-1.5 flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted font-medium whitespace-nowrap">
+      <div className="label mb-1.5 flex items-center gap-1 whitespace-nowrap">
         <span>{label}</span>
         {hint && (
           <Tooltip content={hint}>
@@ -642,11 +643,7 @@ function GoalCard({
             <Tooltip content="Редактировать цель">
               <button
                 onClick={() => (editing && !closing ? closeEdit() : openEdit())}
-                className={`p-1.5 rounded-full transition-colors duration-200 ${
-                  editing && !closing
-                    ? "text-accent bg-accent/10"
-                    : "text-muted hover:text-text hover:bg-panel2"
-                }`}
+                className={`btn-icon ${editing && !closing ? "text-accent bg-accent/10" : ""}`}
                 aria-label="Редактировать цель"
               >
                 <Pencil className="w-4 h-4" />
@@ -674,14 +671,7 @@ function GoalCard({
       </div>
 
       {/* Progress bar */}
-      <div className="h-2.5 bg-panel2 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-[width] duration-500 ${
-            m.done ? "bg-income" : "bg-accent"
-          }`}
-          style={{ width: `${m.ratio * 100}%` }}
-        />
-      </div>
+      <ProgressBar value={m.ratio} tone={m.done ? "income" : "accent"} label="Прогресс цели" />
 
       {/* Body: the view content ALWAYS stays in flow (only its opacity changes),
           so the card keeps the exact same size when the edit overlay opens on

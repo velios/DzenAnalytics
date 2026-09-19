@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { Select } from "./Select";
+import { Segmented } from "./Segmented";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -9,7 +11,7 @@ import {
   Tooltip as RTooltip,
   ReferenceLine,
 } from "recharts";
-import { Flame, ChevronDown, Check, HelpCircle } from "lucide-react";
+import { Flame } from "lucide-react";
 import type { FirePoint } from "../lib/aggregations";
 import {
   formatMoney,
@@ -18,9 +20,12 @@ import {
   chartTooltipProps,
   chartGridStroke,
   chartAxisStroke,
+  chartColor,
+  formatFixed,
 } from "../lib/format";
 import { Tooltip } from "./Tooltip";
 import { TooltipFacts } from "./TooltipFacts";
+import { CardHeader } from "./CardHeader";
 
 /** FIRE goal on the 4%-rule: 25 годовых расходов = 300 месяцев. */
 const FIRE_TARGET = 300;
@@ -33,9 +38,9 @@ type Scale = "month" | "quarter" | "year";
 type Range = "1y" | "3y" | "5y" | "all";
 
 const MODES: { id: Mode; label: string; color: string }[] = [
-  { id: "months", label: "Месяцы жизни", color: "#10B981" },
-  { id: "expense", label: "Расходы", color: "#EF4444" },
-  { id: "income", label: "Доходы", color: "#22D3EE" },
+  { id: "months", label: "Месяцы жизни", color: chartColor.income },
+  { id: "expense", label: "Расходы", color: chartColor.expense },
+  { id: "income", label: "Доходы", color: chartColor.accent },
 ];
 
 const SCALES: { id: Scale; label: string }[] = [
@@ -87,31 +92,8 @@ export function FireChart({
 }) {
   const [mode, setMode] = useState<Mode>("months");
   const [expKind, setExpKind] = useState<ExpKind>("obligatory");
-  const [expMenuOpen, setExpMenuOpen] = useState(false);
   const [scale, setScale] = useState<Scale>("month");
   const [range, setRange] = useState<Range>("all");
-  const expRef = useRef<HTMLDivElement>(null);
-
-  // Close the «Обязательные/Все» dropdown on outside click.
-  useEffect(() => {
-    if (!expMenuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (expRef.current && !expRef.current.contains(e.target as Node))
-        setExpMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [expMenuOpen]);
-
-  // Пилюли, как все переключатели продукта: прежде это были прямоугольники со
-  // скруглением в шесть пикселей — последний такой ряд на «Финансовом
-  // здоровье».
-  const pillCls = (active: boolean) =>
-    `text-xs px-2.5 py-1 rounded-full border transition-colors duration-200 ${
-      active
-        ? "bg-accent text-accent-fg border-accent"
-        : "bg-panel2 border-border text-muted hover:text-text"
-    }`;
 
   const chart = useMemo(() => {
     // 1) Period — trailing window over the monthly points.
@@ -233,144 +215,78 @@ export function FireChart({
 
   return (
     <div className={bare ? "" : "card card-pad"}>
-      <div className="flex items-start justify-between flex-wrap gap-3 mb-3">
-        <div className="min-w-0">
-          <div className="font-semibold flex items-center gap-2">
-            <Flame className="w-4 h-4 text-accent" />
-            Путь к FIRE
-            <Tooltip content={howItWorks} placement="bottom">
-              <button
-                type="button"
-                className="text-muted hover:text-accent shrink-0"
-                aria-label="Как считается «Путь к FIRE»"
-              >
-                <HelpCircle className="w-4 h-4" />
-              </button>
-            </Tooltip>
+      <CardHeader
+        icon={Flame}
+        title="Путь к FIRE"
+        infoLabel="Как считается «Путь к FIRE»"
+        info={howItWorks}
+        subtitle={description}
+        right={
+          <div className="text-right">
+            <div className="text-2xl font-bold tabular-nums text-income leading-none">
+              {headline}
+            </div>
+            <div className="text-xs text-muted mt-1 tabular-nums">{subline}</div>
           </div>
-          <div className="text-xs text-muted mt-1 truncate">{description}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-2xl font-bold tabular-nums text-income leading-none">
-            {headline}
-          </div>
-          <div className="text-xs text-muted mt-1 tabular-nums">{subline}</div>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="flex items-center gap-1 mb-3 flex-wrap">
-        <button
-          onClick={() => {
-            setMode("months");
-            setExpMenuOpen(false);
-          }}
-          className={pillCls(mode === "months")}
-        >
-          Месяцы жизни
-        </button>
-
-        <button
-          onClick={() => {
-            setMode("income");
-            setExpMenuOpen(false);
-          }}
-          className={pillCls(mode === "income")}
-        >
-          Доходы
-        </button>
-
-        {/* «Расходы» is a dropdown: pick obligatory vs all without a second row */}
-        <div className="relative" ref={expRef}>
-          <button
-            onClick={() => {
-              if (mode !== "expense") {
-                setMode("expense");
-                setExpMenuOpen(true);
-              } else {
-                setExpMenuOpen((o) => !o);
-              }
-            }}
-            className={`${pillCls(mode === "expense")} inline-flex items-center gap-1`}
-            aria-haspopup="menu"
-            aria-expanded={mode === "expense" && expMenuOpen}
-          >
-            Расходы
-            {mode === "expense" && (
-              <span className="opacity-70">
-                · {expKind === "obligatory" ? "обязательные" : "все"}
-              </span>
-            )}
-            <ChevronDown
-              className={`w-3 h-3 transition-transform ${
-                mode === "expense" && expMenuOpen ? "rotate-180" : ""
-              }`}
-            />
-          </button>
-          <div
-            role="menu"
-            className={`absolute left-0 top-full mt-1 z-20 min-w-[160px] rounded-xl border border-border bg-panel shadow-lg overflow-hidden origin-top transition duration-150 ${
-              mode === "expense" && expMenuOpen
-                ? "opacity-100 scale-100"
-                : "opacity-0 scale-95 pointer-events-none"
-            }`}
-          >
-            {(
-              [
-                { id: "obligatory", label: "Обязательные" },
-                { id: "all", label: "Все" },
-              ] as { id: ExpKind; label: string }[]
-            ).map((k) => (
-              <button
-                key={k.id}
-                role="menuitemradio"
-                aria-checked={expKind === k.id}
-                onClick={() => {
-                  setExpKind(k.id);
-                  setExpMenuOpen(false);
-                }}
-                className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-xs hover:bg-panel2 ${
-                  expKind === k.id ? "text-accent" : "text-text"
-                }`}
-              >
-                {k.label}
-                {expKind === k.id && <Check className="w-3 h-3" />}
-              </button>
-            ))}
-          </div>
-        </div>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        {/* Что откладываем по оси — общим `Segmented`. Вид расходов прежде
+            прятался в выпадающее меню внутри пилюли «Расходы» — своя
+            разметка, которой больше нигде нет; теперь это поле рядом,
+            и появляется оно, только когда выбраны расходы. */}
+        <Segmented
+          size="sm"
+          label="Что показать на графике"
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "months", label: "Месяцы жизни" },
+            { value: "income", label: "Доходы" },
+            { value: "expense", label: "Расходы" },
+          ]}
+        />
+        {mode === "expense" && (
+          <Select
+            size="sm"
+            className="w-36"
+            value={expKind}
+            onChange={setExpKind}
+            options={[
+              { value: "obligatory", label: "Обязательные" },
+              { value: "all", label: "Все" },
+            ]}
+            ariaLabel="Какие расходы"
+          />
+        )}
 
         {/* Period + scale of the chart (issue #35). Pushed right so the series
             pills stay the primary control. */}
         <div className="ml-auto flex items-center gap-2">
           <label className="inline-flex items-center gap-1.5 text-xs text-muted">
             Период
-            <select
+            <Select
+              size="sm"
+              className="w-24"
               value={range}
-              onChange={(e) => setRange(e.target.value as Range)}
-              className="input text-xs py-1 px-2 w-auto"
+              onChange={setRange}
+              options={RANGES.map((r) => ({ value: r.id, label: r.label }))}
+              ariaLabel="Период графика"
               title="За какой отрезок истории построить график"
-            >
-              {RANGES.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="inline-flex items-center gap-1.5 text-xs text-muted">
             Шкала
-            <select
+            <Select
+              size="sm"
+              className="w-28"
               value={scale}
-              onChange={(e) => setScale(e.target.value as Scale)}
-              className="input text-xs py-1 px-2 w-auto"
+              onChange={setScale}
+              options={SCALES.map((s) => ({ value: s.id, label: s.label }))}
+              ariaLabel="Шаг по оси времени"
               title="Шаг по оси времени: месяцы, кварталы или годы (берётся значение на конец периода)"
-            >
-              {SCALES.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
         </div>
       </div>
@@ -408,7 +324,7 @@ export function FireChart({
               formatter={(v: unknown) =>
                 mode === "months"
                   ? [
-                      `${Number(v).toFixed(1)} мес · ${((Number(v) / FIRE_TARGET) * 100).toFixed(0)}% пути к цели`,
+                      `${formatFixed(Number(v))} мес · ${((Number(v) / FIRE_TARGET) * 100).toFixed(0)}% пути к цели`,
                       "Запас",
                     ]
                   : [
@@ -424,13 +340,13 @@ export function FireChart({
             {mode === "months" && showTarget && (
               <ReferenceLine
                 y={FIRE_TARGET}
-                stroke="#F59E0B"
+                stroke={chartColor.warn}
                 strokeWidth={2}
                 strokeDasharray="4 4"
                 label={{
                   value: "цель · FIRE 100%",
                   position: "insideTopRight",
-                  fill: "#F59E0B",
+                  fill: chartColor.warn,
                   fontSize: 11,
                 }}
               />

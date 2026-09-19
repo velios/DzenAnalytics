@@ -3,16 +3,14 @@
 // bulk). Everything is staged in a local overlay and flushed to Дзен-мани
 // through the normal Push flow, mirroring the categories editor.
 
+import { Checkbox } from "./Checkbox";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLazyList } from "../hooks/useLazyList";
-import { createPortal } from "react-dom";
 import {
-  Search,
   Pencil,
   Trash2,
   Plus,
   Undo2,
-  X,
   Combine,
   UserPlus,
   XSquare,
@@ -38,6 +36,10 @@ import {
   CounterpartyDeleteModal,
   type TransferTarget,
 } from "./CounterpartyDeleteModal";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "./Modal";
+import { SectionEmpty } from "./SectionEmpty";
+import { SearchInput } from "./SearchInput";
+import { Badge } from "./Badge";
 
 /** A row as rendered: cached merchant or unpushed draft, with overlay applied. */
 interface Row {
@@ -111,7 +113,7 @@ export function CounterpartyManager() {
   // «Дубли» view — the flat list is replaced by the duplicate groups.
   const [dupOnly, setDupOnly] = useState(false);
   // «Без контрагента» view — получатели из операций, которых нет в справочнике.
-  const [orphanOnly, setOrphanOnly] = useState(false);
+  const [orphanOnlyRaw, setOrphanOnly] = useState(false);
   const [orphanSel, setOrphanSel] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -246,11 +248,11 @@ export function CounterpartyManager() {
     );
   }, [transactions, allRows]);
 
-  // Разобрали всех — возвращаемся к справочнику: кнопка отбора исчезает вместе
-  // с последней строкой, и вид остался бы пустым без выхода.
-  useEffect(() => {
-    if (orphanPayees.length === 0) setOrphanOnly(false);
-  }, [orphanPayees.length]);
+  // Разобрали всех — возвращаемся к справочнику: кнопка фильтра исчезает вместе
+  // с последней строкой, и вид остался бы пустым без выхода. Считаем это при
+  // отрисовке, а не эффектом: эффект чинил состояние уже ПОСЛЕ того, как
+  // пустой вид один раз показали.
+  const orphanOnly = orphanOnlyRaw && orphanPayees.length > 0;
 
   // Selection is scoped to what's visible; drop ids that vanished (filtered
   // out, pushed away) so the bulk bar never acts on stale rows.
@@ -451,24 +453,12 @@ export function CounterpartyManager() {
     <div className="space-y-3">
       {/* Toolbar: search + «?» info popover + pending/reset/push + Добавить. */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex items-center gap-2 bg-panel2 rounded-lg px-2 py-1 border border-border flex-1 min-w-[200px]">
-          <Search className="w-3.5 h-3.5 text-muted shrink-0" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Поиск контрагента…"
-            className="bg-transparent text-sm flex-1 outline-none min-w-0"
-          />
-          {query && (
-            <button
-              onClick={() => setQuery("")}
-              className="text-xs text-muted hover:text-text"
-              aria-label="Очистить поиск"
-            >
-              ✕
-            </button>
-          )}
-        </div>
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Поиск контрагента…"
+          className="flex-1 min-w-[200px]"
+        />
 
         <InfoPopover label="Как это работает">
                 <p>
@@ -529,12 +519,7 @@ export function CounterpartyManager() {
             }}
             aria-pressed={orphanOnly}
             title={"Получатели без записи в справочнике\nПришли из выписок. Число — сколько таких получателей, а не операций."}
-            className={clsx(
-              "text-sm flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border shrink-0",
-              orphanOnly
-                ? "border-accent bg-accent/10 text-accent"
-                : "border-border text-muted hover:text-text hover:bg-panel2"
-            )}
+            className={clsx("chip chip-md shrink-0", orphanOnly && "chip-on")}
           >
             <UserPlus className="w-4 h-4" />
             Без контрагента
@@ -550,12 +535,7 @@ export function CounterpartyManager() {
             }}
             aria-pressed={dupOnly}
             title="Контрагенты с одинаковым названием"
-            className={clsx(
-              "text-sm flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border shrink-0",
-              dupOnly
-                ? "border-accent bg-accent/10 text-accent"
-                : "border-border text-muted hover:text-text hover:bg-panel2"
-            )}
+            className={clsx("chip chip-md shrink-0", dupOnly && "chip-on")}
           >
             <Combine className="w-4 h-4" />
             Дубли
@@ -635,7 +615,7 @@ export function CounterpartyManager() {
           >
             {/* Column header — the counts need a name, and the fixed widths
                 below keep them (and the buttons) on one grid. */}
-            <div className="sticky top-0 z-10 bg-panel border-b border-border flex items-center gap-3 px-3 py-2 text-[0.85em] text-muted uppercase tracking-wide">
+            <div className="list-head sticky top-0 z-10 bg-panel flex items-center gap-3 px-3 py-2">
               <span className="flex-1 min-w-0">Контрагент</span>
               <span className="w-20 shrink-0 text-right">Операций</span>
               <span className="w-36 shrink-0 text-right">Действия</span>
@@ -659,9 +639,9 @@ export function CounterpartyManager() {
                           {row.title}
                         </span>
                         {isSurvivor && (
-                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">
-                            останется
-                          </span>
+                          <Badge tone="accent" className="shrink-0">
+                            Останется
+                          </Badge>
                         )}
                         <span className="flex-1 min-w-2" />
                         <span className="w-20 shrink-0 text-right">
@@ -669,12 +649,12 @@ export function CounterpartyManager() {
                             <button
                               onClick={() => openOperations(row)}
                               title="Показать операции контрагента"
-                              className="tabular-nums text-muted hover:text-accent hover:underline px-1 rounded"
+                              className="tabular-nums text-muted hover:text-accent hover:underline px-1 -mr-1 rounded"
                             >
                               {formatNum(row.count)}
                             </button>
                           ) : (
-                            <span className="text-muted tabular-nums px-1">—</span>
+                            <span className="text-muted tabular-nums">—</span>
                           )}
                         </span>
                       </div>
@@ -713,7 +693,7 @@ export function CounterpartyManager() {
             {/* Объяснение прямо тут, а не только под «?»: вопрос «а что это
                 вообще такое» возникает ровно на этом экране. */}
             <div className="text-sm min-w-0">
-              {/* Обе цифры сразу и подписанные. Раньше на кнопке-отборе стояло
+              {/* Обе цифры сразу и подписанные. Раньше на кнопке-фильтре стояло
                   число ПОЛУЧАТЕЛЕЙ, а здесь — число ОПЕРАЦИЙ, и рядом они
                   читались как противоречие: «1 057» против «3 590» без единого
                   слова о том, что это разные вещи. */}
@@ -751,10 +731,9 @@ export function CounterpartyManager() {
           <div
             style={{ fontSize: "var(--tbl-font)" }}
           >
-            <div className="sticky top-0 z-10 bg-panel border-b border-border flex items-center gap-3 px-3 py-2 text-[0.85em] text-muted uppercase tracking-wide">
+            <div className="list-head sticky top-0 z-10 bg-panel flex items-center gap-3 px-3 py-2">
               <span className="w-6 shrink-0 flex items-center justify-center">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={
                     orphanPayees.length > 0 && orphanSel.size === orphanPayees.length
                   }
@@ -765,8 +744,7 @@ export function CounterpartyManager() {
                         : new Set(orphanPayees.map((o) => dupKey(o.title)))
                     )
                   }
-                  aria-label="Выделить все"
-                  className="accent-[var(--accent)] cursor-pointer"
+                  label="Выделить все"
                 />
               </span>
               <span className="flex-1 min-w-0">Получатель</span>
@@ -779,8 +757,7 @@ export function CounterpartyManager() {
                 return (
                   <div key={key} className="px-3 py-2 flex items-center gap-3">
                     <span className="w-6 shrink-0 flex items-center justify-center">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={orphanSel.has(key)}
                         onChange={() =>
                           setOrphanSel((s) => {
@@ -790,8 +767,7 @@ export function CounterpartyManager() {
                             return next;
                           })
                         }
-                        aria-label={`Выбрать «${o.title}»`}
-                        className="accent-[var(--accent)] cursor-pointer"
+                        label={`Выбрать «${o.title}»`}
                       />
                     </span>
                     <span className="flex-1 min-w-0 flex items-center gap-2">
@@ -799,9 +775,9 @@ export function CounterpartyManager() {
                       {/* Такой контрагент уже заведён — значит операции просто не
                           связаны с ним, и заводить второго не нужно. */}
                       {o.inDictionary && (
-                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-panel2 text-muted shrink-0">
-                          есть в справочнике
-                        </span>
+                        <Badge tone="neutral" className="shrink-0">
+                          Есть в справочнике
+                        </Badge>
                       )}
                     </span>
                     <span className="w-20 shrink-0 text-right">
@@ -815,7 +791,7 @@ export function CounterpartyManager() {
                           );
                         }}
                         title="Показать операции этого получателя"
-                        className="tabular-nums text-muted hover:text-accent hover:underline px-1 rounded"
+                        className="tabular-nums text-muted hover:text-accent hover:underline px-1 -mr-1 rounded"
                       >
                         {formatNum(o.count)}
                       </button>
@@ -828,7 +804,7 @@ export function CounterpartyManager() {
                         onClick={() => setModal({ kind: "adopt", payee: o })}
                         title={`Привязать под другим именем — например, к уже заведённому контрагенту`}
                         aria-label={`Привязать «${o.title}» под другим именем`}
-                        className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                        className="btn-icon"
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -840,7 +816,7 @@ export function CounterpartyManager() {
                             : `Завести контрагента «${o.title}» и проставить его в ${formatNum(o.count)} ${pluralRu(o.count, ["операции", "операциях", "операциях"])}`
                         }
                         aria-label={`Привязать получателя «${o.title}» как есть`}
-                        className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                        className="btn-icon"
                       >
                         <UserPlus className="w-4 h-4" />
                       </button>
@@ -869,29 +845,27 @@ export function CounterpartyManager() {
       {!dupOnly && !orphanOnly && (
       <div className="border border-border rounded-lg overflow-hidden">
         <div style={{ fontSize: "var(--tbl-font)" }}>
-          <div className="sticky top-0 z-10 bg-panel border-b border-border flex items-center gap-3 px-3 py-2 text-[0.85em] text-muted uppercase tracking-wide">
+          <div className="list-head sticky top-0 z-10 bg-panel flex items-center gap-3 px-3 py-2">
             <span className="w-6 shrink-0 flex items-center justify-center">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={allSelected}
                 onChange={toggleAll}
-                aria-label="Выделить все"
-                className="accent-[var(--accent)] cursor-pointer"
+                label="Выделить все"
               />
             </span>
             <span className="flex-1 min-w-0">Название</span>
-            <span className="w-24 shrink-0 flex items-center justify-center">
+            <span className="w-24 shrink-0 flex items-center justify-end">
               <CountSortHeader sort={sort} onChange={setSort} />
             </span>
             <span className="w-20 shrink-0 text-center whitespace-nowrap">Действия</span>
           </div>
 
           {rows.length === 0 ? (
-            <div className="text-sm text-muted py-6 text-center">
+            <SectionEmpty variant="compact">
               {cached.length === 0 && created.length === 0
                 ? "Контрагенты не найдены."
                 : "Ничего не найдено."}
-            </div>
+            </SectionEmpty>
           ) : (
             <div className="divide-y divide-border/60">
               {visibleRows.map((row) => {
@@ -909,12 +883,10 @@ export function CounterpartyManager() {
                   )}
                 >
                   <span className="w-6 shrink-0 flex items-center justify-center">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selected.has(row.id)}
                       onChange={() => toggleOne(row.id)}
-                      aria-label={`Выбрать ${row.title}`}
-                      className="accent-[var(--accent)] cursor-pointer"
+                      label={`Выбрать ${row.title}`}
                     />
                   </span>
                   <span className="flex items-center gap-2 min-w-0 flex-1">
@@ -925,27 +897,27 @@ export function CounterpartyManager() {
                       {row.title}
                     </span>
                     {row.isNew && !gone && (
-                      <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">
-                        новый
-                      </span>
+                      <Badge tone="accent" className="shrink-0">
+                        Новый
+                      </Badge>
                     )}
                     {row.isDeleted && (
-                      <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-expense/10 text-expense shrink-0">
-                        удалён
-                      </span>
+                      <Badge tone="expense" className="shrink-0">
+                        Удалён
+                      </Badge>
                     )}
                     {row.mergedInto && (
-                      <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">
-                        объединён
-                      </span>
+                      <Badge tone="accent" className="shrink-0">
+                        Объединён
+                      </Badge>
                     )}
                   </span>
-                  <span className="w-24 shrink-0 flex items-center justify-center">
+                  <span className="w-24 shrink-0 flex items-center justify-end">
                     {row.count ? (
                       <button
                         onClick={() => openOperations(row)}
                         title="Показать операции контрагента"
-                        className="tabular-nums text-muted hover:text-accent hover:underline px-1 rounded"
+                        className="tabular-nums text-muted hover:text-accent hover:underline px-1 -mr-1 rounded"
                       >
                         {formatNum(row.count)}
                       </button>
@@ -961,7 +933,7 @@ export function CounterpartyManager() {
                       disabled={gone}
                       title="Переименовать"
                       aria-label="Переименовать контрагента"
-                      className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="btn-icon disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
@@ -977,7 +949,7 @@ export function CounterpartyManager() {
                           : "Перенести операции на другого контрагента"
                       }
                       aria-label="Перенести операции на другого контрагента"
-                      className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="btn-icon disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Combine className="w-4 h-4" />
                     </button>
@@ -988,7 +960,7 @@ export function CounterpartyManager() {
                         aria-label={
                           row.mergedInto ? "Отменить объединение" : "Отменить удаление"
                         }
-                        className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                        className="btn-icon"
                       >
                         <Undo2 className="w-4 h-4" />
                       </button>
@@ -997,7 +969,7 @@ export function CounterpartyManager() {
                         onClick={() => removeOne(row)}
                         title="Удалить"
                         aria-label="Удалить контрагента"
-                        className="p-1.5 rounded-md text-muted hover:text-expense hover:bg-expense/10"
+                        className="btn-icon-danger"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1074,23 +1046,14 @@ function CounterpartyModal({
   onAdopt?: (title: string) => void | Promise<void>;
   onClose: () => void;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState(row?.title ?? payee?.title ?? "");
 
+  // Фокус сразу в поле названия; вернуть его на место при закрытии — забота
+  // `Modal`.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
     const t = setTimeout(() => inputRef.current?.focus(), 30);
-    return () => {
-      clearTimeout(t);
-      if (prev && document.contains(prev)) prev.focus();
-    };
+    return () => clearTimeout(t);
   }, []);
 
   const trimmed = title.trim();
@@ -1125,98 +1088,78 @@ function CounterpartyModal({
     onClose();
   }
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="cp-modal-title"
-        className="w-full max-w-md rounded-2xl border border-border bg-panel shadow-2xl outline-none"
-      >
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border rounded-t-2xl">
-          <div id="cp-modal-title" className="font-semibold">
+  return (
+    <Modal onClose={onClose} width="md" initialFocus={false}>
+      <ModalHeader
+        icon={payee ? UserPlus : row ? Pencil : Plus}
+        title={
+          payee
+            ? "Привязать получателя"
+            : row
+              ? "Редактирование контрагента"
+              : "Новый контрагент"
+        }
+      />
+
+      <ModalBody gap={0}>
+        {payee && (
+          <p className="text-xs text-muted mb-3">
+            Сейчас у{" "}
+            <strong className="text-text tabular-nums">
+              {formatNum(payee.count)}
+            </strong>{" "}
+            {pluralRu(payee.count, ["операции", "операций", "операций"])}{" "}
+            получатель — текст от банка «{payee.title}». Задайте имя, под которым
+            их собрать: можно оставить как есть или выбрать уже заведённого
+            контрагента.
+          </p>
+        )}
+        <label htmlFor="cp-name" className="label block mb-1">
+          Название
+        </label>
+        {/* В привязке — с подсказками из справочника: чаще всего банковскую
+            строку нужно свести к уже существующему контрагенту. */}
+        {payee ? (
+          <Combobox
+            value={title}
+            options={existing.map((e) => e.title)}
+            onChange={setTitle}
+            placeholder="Например, Магнит у дома"
+          />
+        ) : (
+          <input
+            id="cp-name"
+            ref={inputRef}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+            placeholder="Например, Магнит у дома"
+            autoComplete="off"
+            className="input w-full text-sm"
+          />
+        )}
+        {duplicate && (
+          <p className={clsx("text-xs mt-1", payee ? "text-muted" : "text-warn")}>
             {payee
-              ? "Привязать получателя"
-              : row
-                ? "Редактирование контрагента"
-                : "Новый контрагент"}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-muted hover:text-text"
-            aria-label="Закрыть"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+              ? "Такой контрагент уже есть — операции привяжутся к нему, новая запись не появится."
+              : "Контрагент с таким названием уже есть."}
+          </p>
+        )}
+      </ModalBody>
 
-        <div className="px-5 py-4">
-          {payee && (
-            <p className="text-xs text-muted mb-3">
-              Сейчас у{" "}
-              <strong className="text-text tabular-nums">
-                {formatNum(payee.count)}
-              </strong>{" "}
-              {pluralRu(payee.count, ["операции", "операций", "операций"])}{" "}
-              получатель — текст от банка «{payee.title}». Задайте имя, под которым
-              их собрать: можно оставить как есть или выбрать уже заведённого
-              контрагента.
-            </p>
-          )}
-          <label htmlFor="cp-name" className="label block mb-1">
-            Название
-          </label>
-          {/* В привязке — с подсказками из справочника: чаще всего банковскую
-              строку нужно свести к уже существующему контрагенту. */}
-          {payee ? (
-            <Combobox
-              value={title}
-              options={existing.map((e) => e.title)}
-              onChange={setTitle}
-              placeholder="Например, Магнит у дома"
-            />
-          ) : (
-            <input
-              id="cp-name"
-              ref={inputRef}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && save()}
-              placeholder="Например, Магнит у дома"
-              autoComplete="off"
-              className="input w-full text-sm"
-            />
-          )}
-          {duplicate && (
-            <p className={clsx("text-xs mt-1", payee ? "text-muted" : "text-warn")}>
-              {payee
-                ? "Такой контрагент уже есть — операции привяжутся к нему, новая запись не появится."
-                : "Контрагент с таким названием уже есть."}
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border rounded-b-2xl">
-          <button type="button" onClick={onClose} className="btn-ghost text-sm">
-            Отмена
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={!canSave}
-            className="btn-primary text-sm"
-          >
-            {payee ? "Привязать" : row ? "Сохранить" : "Создать"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
+      <ModalFooter>
+        <button type="button" onClick={onClose} className="btn-ghost text-sm">
+          Отмена
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={!canSave}
+          className="btn-primary text-sm"
+        >
+          {payee ? "Привязать" : row ? "Сохранить" : "Создать"}
+        </button>
+      </ModalFooter>
+    </Modal>
   );
 }

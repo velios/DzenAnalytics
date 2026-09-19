@@ -1,4 +1,7 @@
 import type { ComponentType, ReactNode } from "react";
+import { useLocation } from "react-router-dom";
+import clsx from "clsx";
+import { sectionGroupTitle } from "../lib/navSections";
 
 interface Props {
   /**
@@ -17,89 +20,77 @@ interface Props {
    */
   iconTone?: string;
   /**
-   * Short subtitle / hint text shown under the title in muted style.
+   * «?» о разделе — `InfoPopover`. Стоит сразу за названием: пояснение
+   * относится к названию, а у правого края оно оказывалось в другом конце
+   * экрана.
    */
-  hint?: ReactNode;
+  info?: ReactNode;
   /**
-   * Optional right-aligned slot for page-level actions
-   * (e.g. "Снимок PNG", "Экспорт", year selector). The header arranges
-   * itself with `flex items-end justify-between flex-wrap gap-3` so this
-   * stays balanced against the title block on wide viewports and wraps
-   * cleanly on narrow ones.
+   * Правый угол — только действия над разделом целиком («Новая цель»,
+   * «Удалить окончательно»), компактной ступенью 34.
+   *
+   * Настройкам того, что показано, — бегункам, году, режиму, периоду — здесь
+   * не место: они стоят в `SectionControls` под общим фильтром, рядом с тем,
+   * что меняют.
    */
   right?: ReactNode;
-  /**
-   * Allow the hint to wrap onto multiple lines instead of truncating to one.
-   * Off by default (keeps header heights uniform); opt in for pages with a
-   * genuinely longer subtitle.
-   */
-  hintWrap?: boolean;
 }
 
 /**
- * Shared page header used by every top-level route.
+ * Шапка раздела — одна на все страницы.
  *
- * Replaces the ad-hoc `<div><h1><p></div>` block that every page used to
- * inline. Guarantees three things across the product:
- *   1. Same typographic scale и один ряд: значок в плашке, заголовок,
- *      волосок, подпись.
- *   2. Every page can show an identity icon — so navigation feels
- *      consistent regardless of which page you land on.
- *   3. A single, predictable slot for page-level actions on the right.
+ * Одна тонкая строка: значок 16, крошки «Группа / Раздел» и «?» — всё в
+ * ряд. Прежде здесь стоял блок в два этажа со значком 52 в плашке, и
+ * пользователи справедливо сказали, что до первых чисел остаётся полэкрана
+ * (16.09.2026, выбран вариант 1 из пяти на холсте). Теперь шапка занимает
+ * строку и читается как хлебные крошки, а не как обложка.
+ *
+ * Группа слева от названия — не украшение: у разделов из «Ещё» в дорожке меню
+ * подсвечена только кнопка «Ещё», и по одному названию не понять, куда ты
+ * попал. «Аналитика / Календарь» отвечает на это сразу.
+ *
+ * Подписи о том, что в разделе, здесь нет: она живёт только в меню «Ещё»
+ * (`navSections`), где помогает выбрать раздел. В самом разделе строка
+ * серого текста повторяла очевидное и отнимала место (решение 16.09.2026).
  */
 export function PageHeader({
   title,
   icon: Icon,
   iconTone = "text-accent",
-  hint,
+  info,
   right,
-  hintWrap,
 }: Props) {
-  return (
-    <div className="flex items-center justify-between flex-wrap gap-3">
-      {/* Заголовок и подпись стоят в ОДНУ строку, разделённые волоском.
-          Двумя строками шапка занимала около шестидесяти пикселей на каждой из
-          двадцати шести страниц — и это до того, как начиналась сама страница.
-          Подпись при этом никуда не убрана: на редких разделах вроде «50/30/20»
-          или «Что-если» она объясняет, что страница вообще делает.
+  const { pathname } = useLocation();
+  const group = sectionGroupTitle(pathname);
 
-          Если строка не помещается, подпись переносится вниз — то есть в худшем
-          случае получается ровно прежняя раскладка, а не обрезанный текст. */}
-      <div className="min-w-0 flex items-center gap-3 flex-wrap">
-        <h1 className="text-[26px] font-semibold tracking-tight flex items-center gap-3 min-w-0">
-          {/* Значок в плашке, а не голым глифом: во всём остальном продукте —
-              в меню, в быстрых переходах, в переключателях — иконки сидят в
-              залитых плашках, и только заголовок висел особняком. Плашка
-              нейтральная, чтобы работать с любым тоном значка: у страниц
-              внимания («Аномалии», «Дубликаты») он не акцентный. */}
-          {Icon && (
-            <span className="shrink-0 w-9 h-9 rounded-xl bg-panel2 border border-border grid place-items-center">
-              <Icon className={`w-[18px] h-[18px] ${iconTone}`} />
-            </span>
+  return (
+    // `-mb-3` съедает половину шага `space-y-6`, на котором собраны все
+    // страницы: крошки — не блок содержимого, и отбивать их от первой карточки
+    // наравне с остальными блоками незачем.
+    //
+    // `pl-1.5` — на ширину рамки поддона (`.tray` p-1.5, `.card-tray` 6 px):
+    // вровень с внешним краем карточки строка казалась выдвинутой влево, глаз
+    // меряет от белой поверхности внутри рамки, а не от скруглённого канта.
+    <div className="-mb-3 pl-1.5 flex items-center flex-wrap gap-x-3 gap-y-1">
+      <div className="min-w-0 flex items-center gap-2">
+        {Icon && <Icon aria-hidden className={clsx("w-4 h-4 shrink-0", iconTone)} />}
+        <div className="min-w-0 flex items-center gap-1.5 text-[15px] leading-6">
+          {group && (
+            <>
+              {/* Группа и слэш — приглушённые: ведёт название, крошки только
+                  подсказывают, откуда раздел. */}
+              <span className="text-muted shrink-0">{group}</span>
+              <span aria-hidden className="text-border shrink-0">
+                /
+              </span>
+            </>
           )}
-          <span className="truncate">{title}</span>
-        </h1>
-        {hint && (
-          <>
-            <span
-              aria-hidden
-              className="hidden md:block w-px h-5 bg-border shrink-0"
-            />
-            {/* 14.5px, а не прежние 13.5: рядом с заголовком в 26px подпись
-                читалась как служебная сноска, хотя на половине разделов именно
-                она объясняет, что страница делает. Ступень взята из той же
-                шкалы, что и строки в карточках дашборда, — крупнее подпись уже
-                начала бы спорить с заголовком. */}
-            <p
-              className={`text-muted text-[14.5px] min-w-0 ${hintWrap ? "" : "truncate"}`}
-              title={typeof hint === "string" ? hint : undefined}
-            >
-              {hint}
-            </p>
-          </>
-        )}
+          <h1 className="font-semibold truncate">{title}</h1>
+        </div>
+        {info}
       </div>
-      {right && <div className="shrink-0">{right}</div>}
+
+      {right && <div className="ml-auto shrink-0">{right}</div>}
     </div>
   );
 }

@@ -18,6 +18,11 @@
 import type { ReactNode } from "react";
 import { pluralRu } from "../../lib/plural";
 import {
+  isImprovement,
+  type MoMMetric,
+  type MonthOverMonth,
+} from "../../lib/monthOverMonth";
+import {
   ResponsiveContainer,
   ComposedChart,
   Bar,
@@ -29,13 +34,15 @@ import {
   Area,
 } from "recharts";
 import { ArrowRight } from "lucide-react";
+import { Segmented } from "../Segmented";
+import { useFreeMoneyStore } from "../../store/useFreeMoneyStore";
 import { Link } from "react-router-dom";
 import {
-  Scale, Target, TrendingUp, ArrowUpRight, Clock, Lightbulb, Sigma,
+  Scale, Target, TrendingUp, ArrowUpRight, ArrowUp, ArrowDown, Clock, Lightbulb, Sigma,
 } from "lucide-react";
 import { CategoryDot } from "../CategoryDot";
 import { ChartTooltipCard, TooltipFacts, type TooltipFact } from "../TooltipFacts";
-import { InfoPopover } from "../InfoPopover";
+import { InfoPopover, InfoTerm } from "../InfoPopover";
 import { AccountLogo } from "../AccountLogo";
 import { accountKindLabel } from "../../lib/accountType";
 import {
@@ -48,7 +55,8 @@ import {
   chartGridStroke,
   chartAxisStroke,
 } from "../../lib/format";
-import { heatStep, robustCeiling } from "../../lib/dashboardModel";
+import { heatStep, robustCeiling, monthEnd } from "../../lib/dashboardModel";
+import { periodRange, spanDays } from "../../lib/period";
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
@@ -56,20 +64,33 @@ const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн",
   "июл", "авг", "сен", "окт", "ноя", "дек"];
 import type { DashboardModel } from "../../hooks/useDashboardModel";
+import type { FreeMoneyModel } from "../../hooks/useFreeMoney";
+import type { BalanceMode, PlanLeft } from "../../lib/freeMoney";
 import type { PlannedOp } from "../../lib/plannedOps";
+import type { Currency } from "../../types";
+import { SectionEmpty } from "../SectionEmpty";
+import { ProgressBar } from "../ProgressBar";
 
 /* ─────────────────────────────  мелочи  ───────────────────────────── */
 
-export function SectionLabel({ children }: { children: ReactNode }) {
+export function SectionLabel({
+  children,
+  right,
+}: {
+  children: ReactNode;
+  /** Контрол раздела в конце строки — после черты, вровень с подписью. */
+  right?: ReactNode;
+}) {
   return (
     <div className="flex items-center gap-3">
       {/* Настоящий заголовок раздела, а не просто мелкий текст: на старой
           главной не было ни одного h2–h6, и с клавиатуры страница читалась
           как одно сплошное полотно. */}
-      <h2 className="text-[11.5px] uppercase tracking-[0.12em] text-muted font-medium">
+      <h2 className="text-[11.5px] uppercase tracking-[0.12em] text-muted font-medium whitespace-nowrap">
         {children}
       </h2>
       <span className="flex-1 h-px bg-border" />
+      {right && <div className="shrink-0">{right}</div>}
     </div>
   );
 }
@@ -447,7 +468,7 @@ export function AccountsList({
   onAccount?: (title: string) => void;
 }) {
   if (m.accounts.length === 0) {
-    return <div className="text-sm text-muted text-center py-6">Счетов пока нет</div>;
+    return <SectionEmpty variant="compact">Счетов пока нет</SectionEmpty>;
   }
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -523,9 +544,9 @@ export function CategoriesList({
   const rows = m.categories;
   if (rows.length === 0) {
     return (
-      <div className="text-sm text-muted text-center py-6">
+      <SectionEmpty variant="compact">
         За {monthLabel(m.ym)} расходов ещё не было
-      </div>
+      </SectionEmpty>
     );
   }
   // Полоса меряется от САМОЙ КРУПНОЙ статьи — так видно соотношение между
@@ -565,12 +586,12 @@ export function CategoriesList({
                   {formatMoney(c.expense, m.base)}
                 </span>
               </div>
-              <div className="h-2 mt-1 rounded-full bg-panel2 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-expense"
-                  style={{ width: `${frac * 100}%`, opacity: 0.35 + 0.65 * frac }}
-                />
-              </div>
+              <ProgressBar
+                value={frac}
+                tone="expense"
+                fillStyle={{ opacity: 0.35 + 0.65 * frac }}
+                className="mt-1"
+              />
             </div>
           </button>
         );
@@ -584,9 +605,9 @@ export function CategoriesList({
 export function UpcomingList({ m }: { m: DashboardModel }) {
   if (m.upcoming.length === 0) {
     return (
-      <div className="text-sm text-muted text-center py-6">
+      <SectionEmpty variant="compact">
         До конца месяца регулярных платежей не ждём
-      </div>
+      </SectionEmpty>
     );
   }
   return (
@@ -640,7 +661,7 @@ export function UpcomingList({ m }: { m: DashboardModel }) {
  * строки и панель из шести плиток-наблюдений. Первая пустовала, во второй
  * половина плиток была шумом.
  *
- * Отбор и порядок задаёт `buildNotices`; здесь только подача.
+ * Фильтр и порядок задаёт `buildNotices`; здесь только подача.
  */
 /**
  * Планы Дзен-мани до конца месяца — второй вид «Запланированных операций».
@@ -652,27 +673,42 @@ export function UpcomingList({ m }: { m: DashboardModel }) {
  * Прогноз Дзен-мани от плана, поставленного руками, отличаем подписью: первое —
  * догадка по регулярному платежу, второе — намерение человека.
  */
+/** «31 августа» — день с месяцем, без года: год и так текущий. */
+function dayAndMonth(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
 export function ZenPlannedList({
   rows,
   base,
   today,
+  until,
 }: {
   rows: PlannedOp[] | null;
   base: string;
   today: string;
+  /** Последний день окна, ISO. Нужен пустому состоянию: без него «планов
+   *  нет» звучит как «нет вообще», хотя вперёд мы смотрим только до этой даты. */
+  until: string;
 }) {
   if (rows === null) {
     return (
-      <div className="text-sm text-muted text-center py-6">
+      <SectionEmpty variant="compact">
         Планы приезжают из Дзен-мани — подключите синхронизацию
-      </div>
+      </SectionEmpty>
     );
   }
   if (rows.length === 0) {
     return (
-      <div className="text-sm text-muted text-center py-6">
-        Планов в Дзен-мани нет — ни впереди, ни просроченных
-      </div>
+      <SectionEmpty variant="compact">
+        {/* Называем последний день окна, а не «конец месяца»: виджет смотрит
+            вперёд ровно до этой даты, и точное число не оставляет вопроса,
+            что именно проверили. Прежнее «ни впереди, ни просроченных»
+            читалось как «планов нет вообще». */}
+        Планов по {dayAndMonth(until)} нет — и ничего просроченного
+      </SectionEmpty>
     );
   }
   return (
@@ -839,13 +875,26 @@ export function ActivityHeat({
   /** Открыть операции конкретного дня. */
   onDay?: (date: string) => void;
 }) {
-  const year = Number(m.ym.slice(0, 4));
-  const monthIdx = Number(m.ym.slice(5, 7)) - 1;
+  // Сетка остаётся КАЛЕНДАРНОЙ — месяц привычнее читать целиком. Но отчётный
+  // период может начинаться не 1-го числа, и тогда он ложится на два месяца:
+  // показываем тот, где лежит бо́льшая его часть («Август» с днём 28 — это
+  // 28.08–27.09, то есть почти весь сентябрь), а дни вне периода гасим.
+  const period = periodRange(m.ym, m.monthStartDay);
+  const gridYM = (() => {
+    if (m.monthStartDay === 1) return m.ym;
+    // Сколько дней периода попало в его первый месяц и сколько — во второй.
+    const head = spanDays(period.from, monthEnd(period.from.slice(0, 7)));
+    const tail = Number(period.to.slice(8));
+    return tail > head ? period.to.slice(0, 7) : period.from.slice(0, 7);
+  })();
+  const year = Number(gridYM.slice(0, 4));
+  const monthIdx = Number(gridYM.slice(5, 7)) - 1;
   const days = new Date(year, monthIdx + 1, 0).getDate();
   const todayKey = new Date().toISOString().slice(0, 10);
 
-  const ymd = (d: number) =>
-    `${m.ym}-${String(d).padStart(2, "0")}`;
+  const ymd = (d: number) => `${gridYM}-${String(d).padStart(2, "0")}`;
+  /** День принадлежит отчётному периоду. */
+  const inPeriod = (iso: string) => iso >= period.from && iso <= period.to;
 
   // Календарная сетка: столбец — день недели, строка — неделя месяца. Ведущие
   // пустые клетки нужны, чтобы первое число встало под свой день недели.
@@ -854,8 +903,22 @@ export function ActivityHeat({
   for (let i = 0; i < lead; i++) cells.push({ key: `lead-${i}`, day: null });
   for (let d = 1; d <= days; d++) cells.push({ key: ymd(d), day: d });
 
-  const spend = (d: number) => m.dayMap.get(ymd(d))?.expense ?? 0;
-  const values = Array.from({ length: days }, (_, i) => spend(i + 1));
+  const spendOn = (iso: string) => m.dayMap.get(iso)?.expense ?? 0;
+
+  // Все дни ОТЧЁТНОГО периода, а не месяца сетки: числа под календарём
+  // («дней без трат», «самые дорогие дни») должны считать тот же отрезок, что
+  // и остальная главная.
+  // Шагаем по UTC: от локальной полуночи toISOString отдаёт предыдущий день,
+  // и весь отрезок съезжал на сутки назад.
+  const periodDays: string[] = [];
+  for (
+    let t = Date.parse(period.from + "T00:00:00Z");
+    t <= Date.parse(period.to + "T00:00:00Z");
+    t += 86_400_000
+  ) {
+    periodDays.push(new Date(t).toISOString().slice(0, 10));
+  }
+  const values = periodDays.map(spendOn);
   // Шкала — по устойчивому максимуму: один крупный день иначе загонял все
   // остальные в самую бледную ступень.
   const { cap } = robustCeiling(values);
@@ -864,23 +927,23 @@ export function ActivityHeat({
       ? "rgb(var(--c-panel2))"
       : `color-mix(in srgb, rgb(var(--c-expense)) ${[0, 22, 44, 68, 100][step]}%, rgb(var(--c-panel2)))`;
 
-  const past = Array.from({ length: days }, (_, i) => i + 1).filter((d) => ymd(d) <= todayKey);
-  const quiet = past.filter((d) => spend(d) <= 0).length;
-  const busiest = past.reduce((best, d) => (spend(d) > spend(best) ? d : best), past[0] ?? 1);
+  const past = periodDays.filter((iso) => iso <= todayKey);
+  const quiet = past.filter((iso) => spendOn(iso) <= 0).length;
+  const busiest = past.reduce((best, iso) => (spendOn(iso) > spendOn(best) ? iso : best), past[0] ?? period.from);
 
-  const avgDay = past.length ? past.reduce((a, d) => a + spend(d), 0) / past.length : 0;
-  const opsCount = past.reduce((a, d) => a + (m.dayMap.get(ymd(d))?.count ?? 0), 0);
+  const avgDay = past.length ? past.reduce((a, iso) => a + spendOn(iso), 0) / past.length : 0;
+  const opsCount = past.reduce((a, iso) => a + (m.dayMap.get(iso)?.count ?? 0), 0);
   // «Обычный день» — медиана по дням, где траты были. Среднее задирает один
   // крупный день, и «в среднем 10 437 ₽» перестаёт описывать обычный день.
-  const spentDays = past.map(spend).filter((v) => v > 0).sort((a, b) => a - b);
+  const spentDays = past.map(spendOn).filter((v) => v > 0).sort((a, b) => a - b);
   const medianDay = spentDays.length
     ? spentDays.length % 2 === 0
       ? (spentDays[spentDays.length / 2 - 1] + spentDays[spentDays.length / 2]) / 2
       : spentDays[(spentDays.length - 1) / 2]
     : 0;
   const topDays = [...past]
-    .filter((d) => spend(d) > 0)
-    .sort((a, b) => spend(b) - spend(a))
+    .filter((iso) => spendOn(iso) > 0)
+    .sort((a, b) => spendOn(b) - spendOn(a))
     .slice(0, 5);
 
   return (
@@ -898,16 +961,21 @@ export function ActivityHeat({
       <div
         className="grid grid-cols-7 gap-2 max-w-[26rem] w-full"
         role="img"
-        aria-label={`Расходы по дням за ${monthLabel(m.ym)}. Самый крупный день — ${formatMoney(
-          spend(busiest),
+        aria-label={`Расходы по дням за ${monthLabel(gridYM)}. Самый крупный день — ${formatMoney(
+          spendOn(busiest),
           m.base
         )}.`}
       >
         {cells.map((c) => {
           if (c.day === null) return <span key={c.key} />;
-          const future = ymd(c.day) > todayKey;
-          const value = future ? 0 : spend(c.day);
-          const step = future ? 0 : heatStep(value, cap);
+          const iso = ymd(c.day);
+          // День за границей отчётного периода: он относится к соседнему
+          // месяцу и в числах под календарём не участвует — гасим его, чтобы
+          // календарь не спорил с остальным экраном.
+          const outside = !inPeriod(iso);
+          const future = iso > todayKey;
+          const value = future || outside ? 0 : spendOn(iso);
+          const step = future || outside ? 0 : heatStep(value, cap);
           // Цвет числа — по ступени, иначе оно тонет в собственной клетке.
           // Приглушённый серый годится только на пустой: на верхних ступенях он
           // давал полтора к одному по тёмной теме, на средних — два с небольшим
@@ -915,31 +983,50 @@ export function ActivityHeat({
           // двух верхних, где клетка почти сплошь красная, — белое: на красном
           // оно читается в обеих темах (4,8:1 по светлой, 6,1:1 по тёмной).
           const hot = step >= 4;
-          const dayTone = future
-            ? "text-muted/50"
-            : hot
-              ? "text-white font-medium"
-              : step > 0
-                ? "text-text"
-                : "text-muted";
+          const dayTone = outside
+            ? "text-muted/40"
+            : future
+              ? "text-muted/50"
+              : hot
+                ? "text-on-tone font-medium"
+                : step > 0
+                  ? "text-text"
+                  : "text-muted";
+          // Первый день периода внутри сетки отмечен кантом: видно, откуда
+          // месяц считается, когда он начинается не 1-го числа.
+          const startsHere = iso === period.from;
           return (
             <button
               key={c.key}
               type="button"
-              disabled={future || value <= 0}
-              onClick={() => onDay?.(ymd(c.day as number))}
+              disabled={outside || future || value <= 0}
+              onClick={() => onDay?.(iso)}
+              title={
+                outside
+                  ? m.monthStartDay === 1
+                    ? undefined
+                    : "Другой отчётный период"
+                  : startsHere
+                    ? "Начало отчётного периода"
+                    : undefined
+              }
               className={`aspect-square rounded-md flex items-center justify-center text-[13px] tabular-nums
                           transition-shadow duration-150
                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50
                           ${dayTone}
+                          ${startsHere ? "ring-1 ring-accent/60" : ""}
                           ${
-                            !future && value > 0
+                            !future && !outside && value > 0
                               ? "cursor-pointer hover:ring-2 hover:ring-accent/40"
                               : "cursor-default"
                           }`}
               style={{
-                background: future ? "transparent" : shade(step),
-                border: future ? "1px dashed rgb(var(--c-border))" : undefined,
+                background: outside
+                  ? "color-mix(in srgb, rgb(var(--c-panel2)) 40%, transparent)"
+                  : future
+                    ? "transparent"
+                    : shade(step),
+                border: future && !outside ? "1px dashed rgb(var(--c-border))" : undefined,
               }}
             >
               {c.day}
@@ -947,6 +1034,15 @@ export function ActivityHeat({
           );
         })}
       </div>
+
+      {/* Отчётный период лёг на два календарных месяца: сетка показывает тот, где
+          бо́льшая его часть, а числа под календарём считают весь отрезок —
+          строкой говорим, какой именно. */}
+      {m.monthStartDay !== 1 && (
+        <div className="text-[11.5px] text-muted max-w-[26rem]">
+          Отчётный период: {formatDate(period.from, "short")} — {formatDate(period.to, "short")}
+        </div>
+      )}
 
       </div>
 
@@ -960,21 +1056,21 @@ export function ActivityHeat({
               <button
                 key={d}
                 type="button"
-                onClick={() => onDay?.(ymd(d))}
+                onClick={() => onDay?.(d)}
                 className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0
                            text-left rounded-lg px-2 -mx-2 transition-colors duration-200
                            hover:bg-panel2/70 focus-visible:outline-none focus-visible:ring-2
                            focus-visible:ring-accent/40 group"
               >
                 <span className="text-[13.5px] whitespace-nowrap">
-                  {d} {MONTHS_SHORT[monthIdx]}
+                  {Number(d.slice(8))} {MONTHS_SHORT[Number(d.slice(5, 7)) - 1]}
                   <span className="text-muted text-[12px]">
                     {" · "}
-                    {WEEKDAYS[(new Date(year, monthIdx, d).getDay() + 6) % 7]}
+                    {WEEKDAYS[(new Date(d + "T00:00:00").getDay() + 6) % 7]}
                   </span>
                 </span>
                 <span className="font-mono tabular-nums font-semibold text-[13.5px] text-expense shrink-0">
-                  {formatMoney(spend(d), m.base)}
+                  {formatMoney(spendOn(d), m.base)}
                 </span>
               </button>
             ))}
@@ -1021,3 +1117,658 @@ export function ActivityHeat({
 
 
 
+
+
+/**
+ * «Месяц к месяцу» — сравнение отчётного месяца с предыдущим.
+ *
+ * Главная отвечает на вопрос «сколько», но не отвечает на «нормально ли это»:
+ * «Итоги месяца» показывают только текущий, и сравнить его не с чем.
+ *
+ * Пока месяц идёт, от прошлого берётся столько же дней — об этом сказано прямо
+ * в шапке («30 из 31 дня») и под числом («в июле за те же 30 дней»). Подпись
+ * стоит рядом с числом, а не в подвале: она объясняет, почему сравнение вообще
+ * имеет смысл, и в подвале её никто не читает.
+ */
+export function MonthOverMonthBlock({
+  mom,
+  base,
+  prevLabel,
+}: {
+  mom: MonthOverMonth;
+  base: string;
+  /** Название прошлого месяца в ПРЕДЛОЖНОМ падеже: «в июле за те же…». */
+  prevLabel: string;
+}) {
+  const net = mom.net;
+  const netUp = isImprovement(net, false);
+  return (
+    <div className="flex-1 min-h-0 flex flex-col gap-3">
+      <div className="rounded-[14px] bg-panel2 px-4 py-3.5">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <span className="text-[11px] uppercase tracking-[0.08em] text-muted">
+            Чистый поток
+          </span>
+          {mom.running && (
+            <span className="text-[11px] text-muted tabular-nums">
+              {mom.days} из {mom.daysInMonth} {pluralRu(mom.daysInMonth, ["дня", "дней", "дней"])}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="text-[32px] font-bold tracking-[-0.03em] tabular-nums leading-[1.05]">
+            {formatMoney(net.now, base, { signed: true })}
+          </span>
+          <DeltaChip metric={net} base={base} up={netUp} />
+        </div>
+        <div className="text-[12px] text-muted mt-1 tabular-nums">
+          {mom.running
+            ? `В ${prevLabel} за те же ${mom.days} ${pluralRu(mom.days, ["день", "дня", "дней"])} — ${formatMoney(net.prev, base)}`
+            : `В ${prevLabel} — ${formatMoney(net.prev, base)}`}
+        </div>
+      </div>
+
+      {/* Плитки забирают всю оставшуюся высоту: крупное число прижато к низу
+          вместе со строкой «Было…», ярлык держится верха. Так все четыре
+          числа и все четыре сравнения стоят по своим линиям. */}
+      <div className="flex-1 min-h-0 grid grid-cols-2 gap-3">
+        <MomTile label="Доходы" metric={mom.income} base={base} tone="income" />
+        <MomTile label="Расходы" metric={mom.expense} base={base} tone="expense" lowerIsBetter />
+        <MomTile label="Норма сбережений" metric={mom.savingsRate} base={base} percent />
+        <MomTile label="Средний чек" metric={mom.avgExpense} base={base} lowerIsBetter />
+      </div>
+    </div>
+  );
+}
+
+/** Пилюля с отклонением. Центрируется по высоте числа, а не садится на его
+ *  базовую линию: у крупного числа она от этого провисает. */
+function DeltaChip({
+  metric,
+  base,
+  up,
+}: {
+  metric: MoMMetric;
+  base: string;
+  up: boolean | null;
+}) {
+  if (up === null) {
+    return (
+      <span className="inline-flex items-center rounded-lg bg-panel px-2 py-0.5 text-[12.5px] font-semibold text-muted">
+        Без изменений
+      </span>
+    );
+  }
+  const cls = up ? "bg-income/10 text-income" : "bg-expense/10 text-expense";
+  const Icon = metric.delta > 0 ? ArrowUp : ArrowDown;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[12.5px] font-semibold tabular-nums ${cls}`}>
+      <Icon className="w-3 h-3" />
+      {formatMoney(Math.abs(metric.delta), base)}
+      {metric.ratio !== null && ` · ${Math.round(Math.abs(metric.ratio) * 100)}%`}
+    </span>
+  );
+}
+
+function MomTile({
+  label,
+  metric,
+  base,
+  tone,
+  percent = false,
+  lowerIsBetter = false,
+}: {
+  label: string;
+  metric: MoMMetric;
+  base: string;
+  tone?: "income" | "expense";
+  /** Показатель — доля, а не деньги: печатаем процентами. */
+  percent?: boolean;
+  lowerIsBetter?: boolean;
+}) {
+  const up = isImprovement(metric, lowerIsBetter);
+  const show = (v: number) => (percent ? formatPct(v) : formatMoney(v, base));
+  const numCls =
+    tone === "income" ? "text-income" : tone === "expense" ? "text-expense" : "";
+  return (
+    <div className="rounded-[14px] border border-border px-4 py-3.5 flex flex-col">
+      <span className="text-[11px] uppercase tracking-[0.08em] text-muted">{label}</span>
+      {/* Пружина ПЕРЕД числом: оно с подписью держится низа плитки, а зазор
+          в 20px разводит их так, что число садится по центру. */}
+      <span
+        className={`mt-auto mb-5 text-[24px] font-semibold tabular-nums tracking-[-0.025em] leading-[1.1] ${numCls}`}
+      >
+        {show(metric.now)}
+      </span>
+      <span className="text-[12px] text-muted tabular-nums">
+        Было {show(metric.prev)}
+        {/* У доли показываем РАЗНИЦУ двух процентов, а не процент от процента:
+            14,6 % → −9,6 % это «−24,2 %», а не «−166 %». Строго это пункты, но
+            «Было 14,6 %» стоит рядом, и из пары читается, что это разность. */}
+        {up !== null && (percent || metric.ratio !== null) && (
+          <>
+            {" · "}
+            <span className={`font-medium ${up ? "text-income" : "text-expense"}`}>
+              {metric.delta > 0 ? "+" : "−"}
+              {percent
+                ? `${formatNum(Math.abs(metric.delta) * 100, { fractionDigits: 1 })}%`
+                : `${Math.round(Math.abs(metric.ratio ?? 0) * 100)}%`}
+            </span>
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/* ────────────────────────  Свободные деньги (#96)  ──────────────────────── */
+
+/**
+ * Кольцо дневного лимита.
+ *
+ * Показывает ОДИН день, а не весь период: вопрос кольца — «много ли осталось
+ * на сегодня». Дуга пустеет ровно на то, что сегодняшний день съел из свободных
+ * денег; за остаток месяца отвечает полоска ниже, у неё своя шкала.
+ */
+function AllowanceRing({ ratio, tone }: { ratio: number; tone: string }) {
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg width="80" height="80" viewBox="0 0 80 80" className="shrink-0" aria-hidden>
+      <circle
+        cx="40"
+        cy="40"
+        r={r}
+        fill="none"
+        stroke="rgb(var(--c-border))"
+        strokeWidth="7"
+      />
+      {ratio > 0 && (
+        <circle
+          cx="40"
+          cy="40"
+          r={r}
+          fill="none"
+          stroke={tone}
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray={`${c * ratio} ${c}`}
+          // Начало дуги — вверху, а не справа: круг читается как циферблат.
+          transform="rotate(-90 40 40)"
+        />
+      )}
+    </svg>
+  );
+}
+
+/**
+ * Полоска «сколько свободных денег периода ещё цело».
+ *
+ * Шкала у неё своя: полная полоска — свободные деньги, какими они были бы без
+ * единого перебора по статьям. Пустеет она только от перерасхода, потому что
+ * трата внутри плана свободных денег не трогает.
+ */
+function FreeBar({ ratio }: { ratio: number }) {
+  return (
+    <ProgressBar value={ratio} tone="income" />
+  );
+}
+
+/** Строка разбивки: подпись слева, сумма справа. */
+function FreeRow({
+  label,
+  value,
+  base,
+  sign,
+  muted,
+  strong,
+}: {
+  label: ReactNode;
+  value: number;
+  base: Currency;
+  /** Знак перед суммой — слагаемые без него читались как набор не связанных чисел. */
+  sign?: "+" | "−";
+  muted?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-baseline justify-between gap-3 ${
+        strong ? "pt-2 mt-1 border-t border-border" : ""
+      }`}
+    >
+      <span className={`text-[13px] truncate ${muted ? "text-muted" : ""}`}>{label}</span>
+      <span
+        className={`font-mono tabular-nums shrink-0 ${
+          strong ? "text-[15px] font-semibold" : "text-[13px]"
+        } ${muted ? "text-muted" : ""} ${value < 0 && strong ? "text-expense" : ""}`}
+      >
+        {sign}
+        {sign ? " " : ""}
+        {formatMoney(Math.abs(value), base)}
+      </span>
+    </div>
+  );
+}
+
+/** Строка списка плана: сама статья, её глубина и что рисовать вокруг. */
+interface PlanLine {
+  row: PlanLeft;
+  depth: number;
+  /** Ветка продолжается ниже — вертикаль уголка идёт насквозь. */
+  more: boolean;
+  /** Строка закрывает категорию — под ней волосок. */
+  divider: boolean;
+}
+
+/**
+ * Разворачивает дерево плана в строки: под-статьи идут сразу под своей
+ * категорией, как в списке у Дзен-мани.
+ *
+ * Заодно размечает, где ветка продолжается и где кончается категория:
+ * рисовать уголок и волосок по соседям в JSX было бы втрое многословнее.
+ */
+function planLines(rows: readonly PlanLeft[]): PlanLine[] {
+  const flat: { row: PlanLeft; depth: number }[] = [];
+  const walk = (list: readonly PlanLeft[], depth: number) => {
+    for (const r of list) {
+      flat.push({ row: r, depth });
+      walk(r.children ?? [], depth + 1);
+    }
+  };
+  walk(rows, 0);
+  return flat.map((item, i) => {
+    const next = flat[i + 1];
+    return {
+      ...item,
+      more: next !== undefined && next.depth >= item.depth && item.depth > 0,
+      // Волосок — только между категориями: внутри ветки он рвал бы вертикаль
+      // уголка на отрезки, а последний в списке обходится без черты.
+      divider: next !== undefined && next.depth === 0,
+    };
+  });
+}
+
+/**
+ * Подсказка виджета. `withPlan` — стоит ли рядом список статей: у узкого
+ * варианта его нет, и объяснять там вложенность под-статей не на чем.
+ *
+ * Термины — ровно те подписи, что стоят в самом виджете (issue #100): раньше
+ * подсказка объясняла «Деньги», а такой строки в виджете нет.
+ */
+function freeMoneyInfo(withPlan: boolean, balanceMode: BalanceMode) {
+  const opening = balanceMode === "includeOpeningBalance";
+  return (
+    <>
+      <p>
+        <InfoTerm>Свободно до…</InfoTerm> — сколько можно потратить до конца
+        периода, не залезая в запланированное. Считаем как Дзен-мани:{" "}
+        {opening ? "«На счетах»" : "«Баланс периода»"} плюс «Ещё поступит»
+        минус «План на месяц».
+      </p>
+      <p>
+        {opening ? (
+          <>
+            <InfoTerm>На счетах</InfoTerm> — сколько сейчас лежит на счетах из
+            расчёта, вместе с тем, что было к началу периода.
+          </>
+        ) : (
+          <>
+            <InfoTerm>Баланс периода</InfoTerm> — приход минус расход с начала
+            периода. Остаток на счетах к его началу не считается.
+          </>
+        )}{" "}
+        Так настроен ваш Дзен-мани, и эту настройку мы берём у него, а не
+        заводим свою.
+      </p>
+      <p>
+        <InfoTerm>Ещё поступит</InfoTerm> — доход, который ждёт бюджет и
+        назначенные поступления, за вычетом того, что уже пришло. Пришедшая
+        зарплата отсюда уходит: она уже в балансе.
+      </p>
+      <p>
+        <InfoTerm>План на месяц</InfoTerm> — сколько ещё предстоит потратить по
+        бюджету. У каждой статьи это её бюджет плюс назначенные на месяц платежи
+        минус уже потраченное. Исполненный платёж из плана не уходит: он был
+        обещан и остаётся обещанным, просто теперь его место заняла трата. Сумма
+        под замком — ровно та, что вы задали: назначенные платежи к ней не
+        прибавляются.
+      </p>
+      <p>
+        Каждая статья считается отдельно, и перебор по одной не гасится остатком
+        соседней. Отсюда «из»: полная сумма — сколько свободных денег было бы без
+        единого перебора, а разница между ними и есть перерасход.
+      </p>
+      {withPlan ? (
+        <p>
+          <InfoTerm>Под-статьи</InfoTerm> стоят под своей категорией, и у
+          категории показана вся ветка целиком, вместе с ними. Трата по
+          под-статье, у которой своего бюджета нет, уходит в ближайшую статью
+          выше. А если замок стоит на категории, её под-статьи — только
+          разбивка: их суммы уже внутри неё и к итогу не прибавляются.
+        </p>
+      ) : (
+        <p>
+          Из чего этот план сложился — по статьям и под-статьям — показывает
+          виджет «Свободные деньги» пошире.
+        </p>
+      )}
+      <p>
+        <InfoTerm>На сегодня</InfoTerm> — кольцо: сколько из положенного на
+        сегодня ещё цело. Оно пустеет только от трат сверх плана, поэтому
+        обычный день его не трогает. Лимит дня считается от свободных денег на
+        утро: сегодняшняя трата сегодняшний же лимит не урезает.
+      </p>
+      <p>
+        Метод деления по дням и неснижаемый остаток задаются в «Настройках →
+        Расчёты».
+      </p>
+    </>
+  );
+}
+
+/** Без Дзен-мани считать нечего: ни бюджета, ни назначенных платежей. */
+function FreeMoneyEmpty() {
+  return (
+    <>
+      <BlockTitle title="Свободные деньги" />
+      <div className="text-sm text-muted">
+        Свободные деньги считаются по остаткам, планам и бюджету из Дзен-мани.
+        Подключите синхронизацию — и виджет заработает.
+      </div>
+    </>
+  );
+}
+
+/**
+ * Ответ виджета: сколько можно сегодня и сколько до конца периода.
+ *
+ * Живёт отдельно от списка статей: в широком виджете это левая колонка, в
+ * узком — всё его содержимое.
+ */
+/**
+ * Как делить свободные деньги по дням — прямо в виджете. Та же настройка, что
+ * в «Настройках → Расчёты → Виджет «Свободные деньги»»: переключить метод
+ * хочется, глядя на число дня, а не уходя за ним в настройки.
+ */
+function FreeMethodSwitch() {
+  const method = useFreeMoneyStore((s) => s.method);
+  const setMethod = useFreeMoneyStore((s) => s.setMethod);
+  return (
+    <Segmented
+      size="sm"
+      tight
+      label="Как делить свободные деньги по дням"
+      value={method}
+      onChange={(v) => void setMethod(v)}
+      options={[
+        {
+          value: "cumulative",
+          label: "Накопительный",
+          title: "Лимит на день один на весь период, непотраченное копится",
+        },
+        {
+          value: "daily",
+          label: "Ежедневный",
+          title: "Остаток делится на оставшиеся дни заново каждое утро",
+        },
+      ]}
+    />
+  );
+}
+
+function FreeMoneySummary({ f, base }: { f: FreeMoneyModel; base: Currency }) {
+  const { allowance, money } = f;
+  // Свободных денег нет вовсе — план съел всё, что будет. Дневного лимита в
+  // этом случае не существует, и придумывать его нельзя.
+  const noBudget = f.free <= 0;
+  // День уже перебрали: кольцо замыкается красным, как у Дзен-мани, — пустая
+  // серая дуга в этом случае читалась бы как «ещё ничего не потрачено».
+  const over = !noBudget && f.todayLeft < 0;
+  const tone = noBudget || over ? "rgb(var(--c-expense))" : "rgb(var(--c-income))";
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 divide-y divide-border">
+      <div className="flex-1 flex flex-col pb-5">
+        <SectionLabel right={<FreeMethodSwitch />}>На сегодня</SectionLabel>
+        <div className="flex-1 flex items-center gap-4 mt-2.5">
+          <AllowanceRing ratio={noBudget ? 0 : over ? 1 : f.ratio} tone={tone} />
+          <div className="min-w-0">
+            <div
+              className={`font-mono tabular-nums font-semibold text-3xl 3xl:text-4xl leading-none ${
+                noBudget || f.todayLeft <= 0 ? "text-expense" : ""
+              }`}
+              style={{ wordSpacing: "-0.22em" }}
+            >
+              {noBudget ? "—" : formatMoney(Math.abs(f.todayLeft), base)}
+            </div>
+            {noBudget ? (
+              <div className="text-[13px] text-muted mt-1.5">
+                тратить нечего: план больше, чем будет денег
+              </div>
+            ) : (
+              <div className="text-[13px] text-muted mt-1.5 space-y-0.5">
+                <div>
+                  {f.todayLeft < 0 ? (
+                    <>
+                      Сверх лимита{" "}
+                      <span className="font-mono tabular-nums text-text">
+                        {formatMoney(f.today, base)}
+                      </span>{" "}
+                      на сегодня
+                    </>
+                  ) : f.method === "cumulative" &&
+                    allowance.saved !== null &&
+                    allowance.saved >= 1 ? (
+                    <>
+                      Лимит{" "}
+                      <span className="font-mono tabular-nums text-text">
+                        {formatMoney(allowance.perDay, base)}
+                      </span>{" "}
+                      плюс{" "}
+                      <span className="font-mono tabular-nums text-income">
+                        {formatMoney(allowance.saved, base)}
+                      </span>{" "}
+                      накопленных
+                    </>
+                  ) : (
+                    <>
+                      Лимит{" "}
+                      <span className="font-mono tabular-nums text-text">
+                        {formatMoney(allowance.perDay, base)}
+                      </span>{" "}
+                      в день до {dayAndMonth(f.periodEnd)}
+                    </>
+                  )}
+                </div>
+                <div>
+                  {f.spentToday > 0.5 ? (
+                    <>
+                      Сегодня из свободных ушло{" "}
+                      <span className="font-mono tabular-nums text-expense">
+                        {formatMoney(f.spentToday, base)}
+                      </span>
+                    </>
+                  ) : f.spentToday < -0.5 ? (
+                    <>
+                      Сегодня свободных прибавилось{" "}
+                      <span className="font-mono tabular-nums text-income">
+                        {formatMoney(-f.spentToday, base)}
+                      </span>
+                    </>
+                  ) : (
+                    "Сегодня всё по плану — свободные целы"
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
+
+      <div className="flex-1 flex flex-col justify-center pt-5">
+        <SectionLabel>
+          Свободно до {dayAndMonth(f.periodEnd)} · {formatNum(f.daysLeft)}{" "}
+          {pluralRu(f.daysLeft, ["день", "дня", "дней"])}
+        </SectionLabel>
+        <div className="flex items-baseline gap-2 mt-2 mb-2.5">
+          <span
+            className={`font-mono tabular-nums font-semibold text-2xl leading-none ${
+              f.free < 0 ? "text-expense" : ""
+            }`}
+            style={{ wordSpacing: "-0.22em" }}
+          >
+            {f.free < 0 && "−"}
+            {formatMoney(Math.abs(f.free), base)}
+          </span>
+          {f.overspent >= 1 && (
+            <span className="text-[13px] text-muted font-mono tabular-nums">
+              из {formatMoney(f.freeTotal, base)}
+            </span>
+          )}
+        </div>
+        <FreeBar ratio={f.freeTotal > 0 ? f.free / f.freeTotal : 0} />
+        {f.overspent >= 1 && (
+          <div className="text-[13px] text-muted mt-2">
+            Перебор по статьям съел{" "}
+            <span className="font-mono tabular-nums text-expense">
+              {formatMoney(f.overspent, base)}
+            </span>
+          </div>
+        )}
+        <div className="space-y-1.5 mt-3.5 pt-3.5 border-t border-border">
+          <FreeRow
+            label={
+              f.balanceMode === "includeOpeningBalance"
+                ? "На счетах"
+                : "Баланс периода"
+            }
+            value={money.balance}
+            base={base}
+          />
+          {money.stillToCome > 0 && (
+            <FreeRow
+              label="Ещё поступит"
+              value={money.stillToCome}
+              base={base}
+              sign="+"
+              muted
+            />
+          )}
+          {money.excluded > 0 && (
+            <FreeRow
+              label="Не учитывать"
+              value={money.excluded}
+              base={base}
+              sign="−"
+              muted
+            />
+          )}
+          <FreeRow
+            label="План на месяц"
+            value={f.planLeft}
+            base={base}
+            sign="−"
+            muted
+          />
+        </div>
+      </div>
+        </div>
+  );
+    }
+
+export function FreeMoneyBlock({ f, base }: { f: FreeMoneyModel; base: Currency }) {
+  if (!f.ready) return <FreeMoneyEmpty />;
+  const lines = planLines(f.planRows);
+
+  return (
+    <>
+      <BlockTitle
+        title="Свободные деньги"
+        to="/budgets"
+        linkLabel="Бюджет"
+        info={freeMoneyInfo(true, f.balanceMode)}
+      />
+
+      {/* Две колонки: слева ответ на «сколько можно сегодня» и из чего он
+          сложился, справа — сам план, который эти деньги и съедает. Правая
+          листается: категорий бывает три десятка, а высота у виджета общая. */}
+      <div className="grid gap-6 md:grid-cols-2 flex-1 min-h-0">
+        <FreeMoneySummary f={f} base={base} />
+
+        <div className="flex flex-col min-h-0">
+          <SectionLabel>План на месяц</SectionLabel>
+          {f.planRows.length === 0 ? (
+            <p className="text-[13px] text-muted mt-2">
+              Бюджет на этот период не задан, поэтому вычитать из денег нечего.
+              Задайте его в «Бюджете» — и свободные деньги станут честнее.
+            </p>
+          ) : (
+            <div className="scroll-soft flex-1 min-h-0 mt-2 -mx-2 px-2">
+              {lines.map(({ row, depth, more, divider }) => (
+                <div
+                  key={row.tagId}
+                  // Содержимое по центру строки, а не по базовой линии: при
+                  // выравнивании по базовой текст прижимается к верху строки
+                  // высотой 36 px, и уголок под-статьи оказывался на восемь
+                  // пикселей ниже её названия.
+                  className={`relative flex items-center justify-between gap-3 h-9 ${
+                    divider ? "border-b border-border/60" : ""
+                  } ${depth > 0 ? "text-muted" : ""}`}
+                  style={depth > 0 ? { paddingLeft: `${depth}rem` } : undefined}
+                >
+                  {/* Уголок к родительской статье — тот же, что в «Бюджеты →
+                      Дашборд»: вертикаль идёт насквозь, пока ветка
+                      продолжается, и обрывается на середине последней
+                      под-статьи. */}
+                  {depth > 0 && (
+                    <>
+                      <span
+                        className={`absolute top-0 w-px bg-border ${
+                          more ? "bottom-0" : "bottom-1/2"
+                        }`}
+                        style={{ left: `${depth - 0.75}rem` }}
+                      />
+                      <span
+                        className="absolute top-1/2 w-2 h-px bg-border"
+                        style={{ left: `${depth - 0.75}rem` }}
+                      />
+                    </>
+                  )}
+                  <span className="text-[13.5px] truncate">{row.title}</span>
+                  <span className="font-mono tabular-nums text-[13.5px] text-muted shrink-0">
+                    {formatMoney(row.left, base)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Тот же виджет в треть ширины — без списка статей.
+ *
+ * Список в узкую колонку не встаёт: суммы жмутся к названиям, а под-статьи с
+ * уголком остаются без места под отступ. Всё остальное — кольцо дня, свободные
+ * до конца периода и разбивка — читается в трети ничуть не хуже.
+ */
+export function FreeMoneyCompactBlock({ f, base }: { f: FreeMoneyModel; base: Currency }) {
+  if (!f.ready) return <FreeMoneyEmpty />;
+
+  return (
+    <>
+      <BlockTitle
+        title="Свободные деньги"
+        to="/budgets"
+        linkLabel="Бюджет"
+        info={freeMoneyInfo(false, f.balanceMode)}
+      />
+      <FreeMoneySummary f={f} base={base} />
+    </>
+  );
+}

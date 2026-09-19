@@ -7,9 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { Checkbox } from "./Checkbox";
 import { createPortal } from "react-dom";
 import { SURFACE_ATTR } from "./Popover";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
 
 // Narrow by default (just the categories + the one-line header); widens by
 // SUB_W to the right when a category is expanded.
@@ -26,6 +27,7 @@ import clsx from "clsx";
 import { FILTER_NONE } from "../store/useFiltersStore";
 import { pluralRu } from "../lib/plural";
 import { CategoryDot } from "./CategoryDot";
+import { SearchInput } from "./SearchInput";
 
 export interface CategoryNode {
   name: string;
@@ -59,10 +61,13 @@ export function CategoryFilterPicker({
   selected,
   onChange,
   className,
+  icon: Icon,
 }: {
   nodes: CategoryNode[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
+  /** Значок сущности на кнопке — как у соседних выборов в ряду фильтров. */
+  icon?: LucideIcon;
   /** Extra classes for the outer wrapper (e.g. `flex-1` to fill a row). */
   className?: string;
 }) {
@@ -245,12 +250,16 @@ export function CategoryFilterPicker({
           setOpen((o) => !o);
         }}
         className={clsx(
-          "btn-ghost text-xs py-1.5 h-[30px] w-full justify-between",
-          !isAll && "border-accent text-accent"
+          "btn-ghost text-[12.5px] leading-4 w-full justify-between gap-2",
+          !isAll && "border-accent"
         )}
       >
-        <span className="truncate max-w-[180px]">Категории: {summary}</span>
-        <ChevronDown className="w-4 h-4 shrink-0" />
+        {Icon && <Icon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden="true" />}
+        <span className="truncate max-w-[180px] flex-1 text-left font-normal text-muted">
+          Категории:{" "}
+          <span className={clsx("font-medium", !isAll ? "text-accent" : "text-text")}>{summary}</span>
+        </span>
+        <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
       </button>
       {open &&
         pos &&
@@ -272,16 +281,14 @@ export function CategoryFilterPicker({
                   {isAll ? "Снять все" : "Выбрать все"}
                 </button>
               </div>
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-border/60">
-                <Search className="w-3.5 h-3.5 text-muted shrink-0" />
-                <input
-                  autoFocus
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Поиск категории и подкатегории"
-                  className="bg-transparent text-xs w-full outline-none"
-                />
-              </div>
+              <SearchInput
+                variant="menu"
+                size="sm"
+                value={query}
+                onChange={setQuery}
+                placeholder="Поиск категории и подкатегории"
+                autoFocus
+              />
               {searchResults ? (
                 /* Search — flat, directly-toggleable list with full paths. */
                 <div className="overflow-y-auto min-h-0 flex-1">
@@ -297,14 +304,12 @@ export function CategoryFilterPicker({
                               key={item.key}
                               className="flex items-center gap-2 px-3 py-1.5 hover:bg-panel2 cursor-pointer text-xs"
                             >
-                              <input
-                                type="checkbox"
+                              <Checkbox
                                 checked={st === "all"}
-                                ref={(el) => {
-                                  if (el) el.indeterminate = st === "some";
-                                }}
                                 onChange={() => toggleParent(item.node)}
-                                className="accent-accent shrink-0"
+                                indeterminate={st === "some"}
+                                label="Выбрать категорию целиком"
+                                className="shrink-0"
                               />
                               <CategoryDot category={item.node.name} size="w-4 h-4" />
                               <span className="truncate">{item.node.name}</span>
@@ -316,11 +321,11 @@ export function CategoryFilterPicker({
                           key={item.key}
                           className="flex items-center gap-2 px-3 py-1.5 hover:bg-panel2 cursor-pointer text-xs"
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={leafChecked(subKey(item.node.name, item.sub))}
                             onChange={() => toggleLeaf(subKey(item.node.name, item.sub))}
-                            className="accent-accent shrink-0"
+                            label="Выбрать подкатегорию"
+                            className="shrink-0"
                           />
                           <CategoryDot category={item.sub} parent={item.node.name} size="w-4 h-4" />
                           <span className="truncate">
@@ -367,7 +372,7 @@ export function CategoryFilterPicker({
                               i > 0 && "mt-1 pt-1 border-t border-border"
                             )}
                           >
-                            <span className="text-[11px] uppercase tracking-wide text-muted truncate">
+                            <span className="caps-label truncate">
                               {groupLabel}
                             </span>
                             {/* Весь тип разом — иначе расходных категорий три
@@ -386,14 +391,12 @@ export function CategoryFilterPicker({
                         <div
                           className={clsx("flex items-center gap-1 pr-1", isActive && "bg-panel2")}
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={st === "all"}
-                            ref={(el) => {
-                              if (el) el.indeterminate = st === "some";
-                            }}
                             onChange={() => toggleParent(n)}
-                            className="accent-accent shrink-0 ml-2"
+                            indeterminate={st === "some"}
+                            label="Выбрать категорию целиком"
+                            className="shrink-0 ml-2"
                           />
                           <button
                             type="button"
@@ -432,11 +435,11 @@ export function CategoryFilterPicker({
                           key={s}
                           className="flex items-center gap-2 px-2 py-1.5 hover:bg-panel2 cursor-pointer text-xs"
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={subChecked(activeNode, s)}
                             onChange={() => toggleLeaf(subKey(activeNode.name, s))}
-                            className="accent-accent shrink-0"
+                            label="Выбрать подкатегорию"
+                            className="shrink-0"
                           />
                           <CategoryDot category={s} parent={activeNode.name} size="w-4 h-4" />
                           <span className="truncate">{s}</span>

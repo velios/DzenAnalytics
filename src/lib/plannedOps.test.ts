@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { plannedOps, plannedBreakdown } from "./plannedOps";
+import { plannedOps, plannedBreakdown, ownPlannedOps, type PlannedOp } from "./plannedOps";
 import {
   backfillEntities,
   cacheVersionOf,
@@ -273,5 +273,36 @@ describe("plannedBreakdown", () => {
 
   it("treats a negative sum as nothing (these totals are unsigned)", () => {
     expect(plannedBreakdown(-5, -1)).toEqual([]);
+  });
+});
+
+describe("ownPlannedOps — планы на чужих личных счетах (#92, #95)", () => {
+  const op = (id: string, member?: number | null) =>
+    ({ id, member }) as unknown as PlannedOp;
+
+  it("убирает планы на личных счетах других участников", () => {
+    const out = ownPlannedOps([op("мой", 1), op("жены", 5), op("мой2", 1)], 1);
+    expect(out.map((p) => p.id)).toEqual(["мой", "мой2"]);
+  });
+
+  it("планы на общих счетах остаются — они на то и общие", () => {
+    expect(ownPlannedOps([op("общий", null), op("жены", 5)], 1).map((p) => p.id)).toEqual([
+      "общий",
+    ]);
+  });
+
+  it("без выбранного участника не трогает список", () => {
+    // Человек ещё не сказал, кто он. Угадать нельзя, а спрятать наугад значило
+    // бы убрать свои планы и оставить чужие.
+    const ops = [op("a", 1), op("b", 5)];
+    expect(ownPlannedOps(ops, null)).toEqual(ops);
+  });
+
+  it("планы без пометки остаются", () => {
+    expect(ownPlannedOps([op("без")], 1).map((p) => p.id)).toEqual(["без"]);
+  });
+
+  it("пустой список не роняет", () => {
+    expect(ownPlannedOps([], 1)).toEqual([]);
   });
 });

@@ -90,7 +90,7 @@ export function SlicesSettings() {
                 checked={isActive}
                 onChange={() => void setActive(s.id)}
                 aria-label={`Сделать активным разрез «${s.name}»`}
-                className="accent-[var(--accent)] cursor-pointer shrink-0"
+                className="accent-accent w-4 h-4 cursor-pointer shrink-0"
               />
               {editing === s.id ? (
                 <>
@@ -105,7 +105,7 @@ export function SlicesSettings() {
                       }
                       if (e.key === "Escape") setEditing(null);
                     }}
-                    className="input h-9 text-sm flex-1 min-w-0"
+                    className="input text-sm !py-1.5 flex-1 min-w-0"
                   />
                   <button
                     onClick={() => {
@@ -114,7 +114,7 @@ export function SlicesSettings() {
                     }}
                     title="Сохранить"
                     aria-label="Сохранить название"
-                    className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                    className="btn-icon"
                   >
                     <Check className="w-4 h-4" />
                   </button>
@@ -122,7 +122,7 @@ export function SlicesSettings() {
                     onClick={() => setEditing(null)}
                     title="Отмена"
                     aria-label="Отменить переименование"
-                    className="p-1.5 rounded-md text-muted hover:text-text hover:bg-panel2"
+                    className="btn-icon"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -151,7 +151,7 @@ export function SlicesSettings() {
                     }}
                     title="Переименовать"
                     aria-label="Переименовать разрез"
-                    className="p-1.5 rounded-md text-muted hover:text-accent hover:bg-panel2"
+                    className="btn-icon"
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
@@ -164,7 +164,7 @@ export function SlicesSettings() {
                         : "Удалить разрез"
                     }
                     aria-label="Удалить разрез"
-                    className="p-1.5 rounded-md text-muted hover:text-expense hover:bg-expense/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="btn-icon-danger"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Checkbox } from "./Checkbox";
+import { Popover } from "./Popover";
 import {
   Filter,
   ChevronDown,
@@ -39,6 +41,7 @@ export function FiltersMenu() {
   const rename = useSavedViewsStore((s) => s.rename);
   const setActiveId = useSavedViewsStore((s) => s.setActiveId);
 
+  const anchorRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [name, setName] = useState("");
@@ -175,18 +178,19 @@ export function FiltersMenu() {
   }
 
   return (
-    <div className="relative">
+    // На телефоне делит строку с «Дополнительно» поровну (см. GlobalFilters).
+    <div ref={anchorRef} className="relative max-sm:flex-1 max-sm:min-w-0">
       <button
         onClick={() => setOpen((o) => !o)}
         className={clsx(
-          "relative btn-ghost text-xs py-1.5 h-[30px] w-52",
+          "relative btn-ghost text-[12.5px] leading-4 w-52 max-sm:w-full",
           activeView && "text-accent2"
         )}
         title="Фильтры"
       >
-        <Filter className="w-3.5 h-3.5 shrink-0" />
+        <Filter className="w-3.5 h-3.5 shrink-0 text-muted" />
         <span className="flex-1 min-w-0 text-left truncate">{label}</span>
-        <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+        <ChevronDown className="w-3.5 h-3.5 opacity-60 shrink-0" />
         {/* Unsaved-changes marker — ONLY for a modified saved filter (not for
             plain ad-hoc filtering on «Без фильтрации»). Absolutely positioned so
             it never shifts the toolbar. */}
@@ -198,10 +202,16 @@ export function FiltersMenu() {
         )}
       </button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-[70]" onClick={closeAll} />
-          <div className="absolute z-[80] mt-1 w-80 max-h-[70vh] overflow-auto card p-2 left-0">
+      {/* Список — общим `Popover` в портале на body: панель фильтров живёт
+          внутри шапки, у которой размытие фона, а внутри неё `fixed` считался
+          бы от самой шапки — подложка «клик мимо» накрыла бы только её. */}
+      <Popover
+        open={open}
+        anchorRef={anchorRef}
+        onClose={closeAll}
+        className="w-80 max-h-[70vh] overflow-auto card p-2"
+      >
+          <>
             {/* Без фильтрации */}
             <button
               onClick={applyDefault}
@@ -263,14 +273,14 @@ export function FiltersMenu() {
                         setRenamingId(v.id);
                         setRenameVal(v.name);
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted hover:text-text"
+                      className="btn-icon opacity-0 group-hover:opacity-100"
                       title="Переименовать"
                     >
                       <Pencil className="w-3 h-3" />
                     </button>
                     <button
                       onClick={() => del(v)}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted hover:text-expense"
+                      className="btn-icon-danger opacity-0 group-hover:opacity-100"
                       title="Удалить"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -318,7 +328,7 @@ export function FiltersMenu() {
                       <button
                         key={v.id}
                         onClick={() => setName(v.name)}
-                        className="text-xs px-2 py-0.5 rounded-full bg-panel2 text-muted hover:text-text"
+                        className="chip chip-sm"
                         title="Перезаписать этот фильтр"
                       >
                         {v.name}
@@ -327,11 +337,10 @@ export function FiltersMenu() {
                   </div>
                 )}
                 <label className="flex items-center gap-2 text-xs text-muted">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={withPeriod}
-                    onChange={(e) => setWithPeriod(e.target.checked)}
-                    className="accent-accent"
+                    onChange={(on) => setWithPeriod(on)}
+                    label="Сохранять вместе с периодом"
                   />
                   Включить период (месяц/диапазон)
                 </label>
@@ -348,9 +357,8 @@ export function FiltersMenu() {
                 </div>
               </div>
             )}
-          </div>
-        </>
-      )}
+          </>
+      </Popover>
     </div>
   );
 }
