@@ -252,9 +252,18 @@ export function RulePreviewModal({
                             подпись молчит: она повторялась бы в каждой строке,
                             а её и так видно в шапке окна. */}
                         {showRule && oneRule && (
-                          <Badge className="max-w-[14rem] truncate">{oneRule}</Badge>
+                          // Текст — во внутреннем span: у ярлыка `inline-flex`, и
+                          // `truncate` на нём самом многоточия не рисует —
+                          // название обрывалось на полуслове.
+                          <Badge className="max-w-[14rem] min-w-0" title={oneRule}>
+                            <span className="truncate">{oneRule}</span>
+                          </Badge>
                         )}
-                        {STATUS_LABEL[row.status] && (
+                        {row.status === "blocked" && row.blockedKind ? (
+                          <Badge tone={STATUS_TONE.blocked}>
+                            Тип не сменить: {row.blockedKind}
+                          </Badge>
+                        ) : STATUS_LABEL[row.status] && (
 <Badge tone={STATUS_TONE[row.status]}>
                             {STATUS_LABEL[row.status]}
                             {row.status === "blocked" && row.blockedCategory
