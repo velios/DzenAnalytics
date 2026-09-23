@@ -34,23 +34,25 @@ const Router = !hasRealUrl
     ? HashRouter
     : BrowserRouter;
 
+// `useTransitions={false}`: смена адреса рисуется сразу, а не в
+// `startTransition`, как по умолчанию в React Router 7. Иначе плавная смена
+// кадров (`withViewTransition`) снимала «новый» кадр раньше, чем React успевал
+// нарисовать новую страницу: анимация шла от старой страницы к ней же, а потом
+// страница подменялась ещё раз — рывком, будто открывалась дважды. Отложенная
+// отрисовка нам ничего не даёт: ленивых разделов и `Suspense` в приложении нет.
 const callback = consumeOAuthCallback();
-if (callback) document.getElementById("root")!.textContent = "Завершаем вход...";
+if (callback) document.getElementById("root")!.textContent = "Завершаем вход…";
 
 async function mount() {
-  let syncAfterLogin = sessionStorage.getItem("dzenanalyticsSyncAfterLogin") === "1";
-  sessionStorage.removeItem("dzenanalyticsSyncAfterLogin");
-  if (syncAfterLogin) await useZenmoneyStore.getState().hydrate();
+  let syncAfterLogin = false;
   if (callback) {
-    const store = useZenmoneyStore;
-    await store.getState().hydrate();
     try {
-      if ("error" in callback) throw new Error("Не удалось проверить вход. Попробуйте снова.");
+      await useZenmoneyStore.getState().hydrate();
+      if ("error" in callback) throw new Error("Invalid OAuth callback");
       const token = await exchangeCode(callback.code);
-      syncAfterLogin = await store.getState().validateAndSaveToken(token);
-      if (store.getState().status === "checking") return;
+      syncAfterLogin = await useZenmoneyStore.getState().validateAndSaveToken(token);
     } catch {
-      store.setState({ status: "error", error: "Не удалось завершить вход. Попробуйте снова." });
+      useZenmoneyStore.setState({ status: "error", error: "Не удалось завершить вход. Попробуйте снова." });
     }
   }
   createRoot(document.getElementById("root")!).render(
@@ -61,7 +63,7 @@ async function mount() {
     </StrictMode>
   );
   if (syncAfterLogin) {
-    void useZenmoneyStore.getState().sync().catch(() => { /* Error is displayed by the store. */ });
+    void useZenmoneyStore.getState().sync().catch(() => {});
   }
 }
 

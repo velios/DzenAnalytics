@@ -44,10 +44,6 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
 
-  // Динамические per-session ручки (SSO-токен и т.п.) кэшировать нельзя:
-  // cache-first прибил бы приложение к токену старого аккаунта. Всегда в сеть.
-  if (url.pathname.startsWith("/api/")) return;
-
   // Network-first для HTML — чтобы получить свежий код, если онлайн
   const isHTML =
     req.mode === "navigate" ||

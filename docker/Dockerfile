@@ -10,14 +10,11 @@ RUN npm install
 
 COPY . /app/
 
-# Optional OAuth entry point; unset keeps upstream manual token / CSV mode.
-ARG VITE_TOKEN_BROKER_URL
-
 RUN npm run build
 
 # nginx stage
 # --------------------
-FROM nginx:mainline-alpine
+FROM nginx:mainline
 
 RUN mkdir /var/www/html/ -p
 

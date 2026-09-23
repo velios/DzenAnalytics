@@ -6,7 +6,7 @@
 
 import { create } from "zustand";
 import * as db from "../lib/db";
-import { fetchDiff, ZenApiError } from "../lib/zenmoney";
+import { fetchDiff, checkToken, ZenApiError } from "../lib/zenmoney";
 import type { ZenTermUnit } from "../lib/zenmoney";
 import { mapZenmoneyDiff } from "../lib/zenmoneyMap";
 import {
@@ -93,7 +93,6 @@ import { useCloudSettingsStore } from "./useCloudSettingsStore";
 import { findCloudDocs, isServiceAccountTitle } from "../lib/cloudSettings";
 import { refDictionaryFromCache } from "../lib/ruleRefs";
 import type { ImportMeta } from "../types";
-import { wipeLocalDb, shouldWipeForUser } from "../lib/oauth";
 
 const TOKEN_KEY = "zenmoneyToken";
 const TIMESTAMP_KEY = "zenmoneyServerTimestamp";
@@ -105,7 +104,6 @@ const SNAPSHOT_POLICY_KEY = "zenmoneySnapshotPolicy";
 const AUTO_SYNC_ENABLED_KEY = "zenmoneyAutoSyncEnabled";
 const AUTO_SYNC_VALUE_KEY = "zenmoneyAutoSyncValue";
 const AUTO_SYNC_UNIT_KEY = "zenmoneyAutoSyncUnit";
-// the account on the next reload. Cleared when the user opts back in via login.
 
 /**
  * Overlay pending tag edits onto a freshly-mapped `categoryMeta` map so
@@ -590,6 +588,7 @@ interface ZenmoneyState {
   autoSyncUnit: AutoSyncUnit;
 
   hydrate: () => Promise<void>;
+  saveToken: (token: string) => Promise<void>;
   validateAndSaveToken: (token: string) => Promise<boolean>;
   removeToken: () => Promise<void>;
   /**
@@ -630,9 +629,6 @@ interface ZenmoneyState {
   runAutoSyncIfDue: () => Promise<boolean>;
 }
 
-/** In-flight guard for hydrate() — see the comment there. */
-let hydrating = false;
-
 export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   token: null,
   serverTimestamp: 0,
@@ -652,12 +648,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
   autoSyncUnit: AUTO_SYNC_UNIT_DEFAULT,
 
   hydrate: async () => {
-    // Two effects (App + ImportPage) both call hydrate guarded only by
-    // `!loaded`, which flips asynchronously — guard the in-flight window
-    // too so concurrent hydrations cannot overwrite each other.
-    if (get().loaded || hydrating) return;
-    hydrating = true;
-    try {
     const [
       token,
       ts,
@@ -707,7 +697,6 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     // они из того же хранилища, что и операции, и запуск здесь означает, что к
     // первой отрисовке ответ обычно уже есть — страница рисуется с остатками
     // сразу, без второго кадра «сначала по операциям, потом по кэшу».
-    //
     void getLiveAccountsFromCache().catch(() => {});
     // День начала месяца при подключённом Дзен-мани — его собственный: берём
     // из кэша сразу, не дожидаясь синхронизации.
@@ -716,39 +705,25 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
         .then((c) => useReportPeriodStore.getState().adoptZenDay(c?.user?.[0]?.monthStartDay))
         .catch(() => {});
     }
+  },
 
-    } finally {
-      hydrating = false;
-    }
+  saveToken: async (token) => {
+    const trimmed = token.trim();
+    await db.saveJSON(TOKEN_KEY, trimmed);
+    set({ token: trimmed, error: null });
   },
 
   validateAndSaveToken: async (token) => {
     const trimmed = token.trim();
-    if (!trimmed || trimmed.length > 8192 || /\s/.test(trimmed)) {
+    if (!trimmed) {
       set({ error: "Введите токен" });
       return false;
     }
     set({ status: "checking", error: null });
     try {
-      const probe = await fetchDiff(trimmed, Math.floor(Date.now() / 1000), AbortSignal.timeout(15_000), ["user"]);
-      const users = Array.isArray(probe.user) ? probe.user.filter(user => user?.parent === null) : [];
-      const userId = users[0]?.id;
-      if (users.length !== 1 || !Number.isSafeInteger(userId) || userId <= 0) {
-        set({ status: "error", error: "Не удалось определить аккаунт Дзен-мани. Данные сохранены, вход не выполнен." });
-        return false;
-      }
-      const cache = await loadZenCache();
-      const cachedId = cache?.user?.find(user => user.parent === null)?.id ?? cache?.user?.[0]?.id ?? null;
-      if (cache && cachedId === null) {
-        set({ status: "error", error: "Не удалось определить владельца локального кэша. Вход остановлен, данные сохранены." });
-        return false;
-      }
-      if (shouldWipeForUser(cachedId, userId)) {
-        await wipeLocalDb();
-        await db.saveJSON(TOKEN_KEY, trimmed);
-        sessionStorage.setItem("dzenanalyticsSyncAfterLogin", "1");
-        set({ token: null, status: "checking" });
-        location.reload();
+      const ok = await checkToken(trimmed);
+      if (!ok) {
+        set({ status: "error", error: "Токен отклонён сервером (401)" });
         return false;
       }
       await db.saveJSON(TOKEN_KEY, trimmed);
@@ -789,7 +764,7 @@ export const useZenmoneyStore = create<ZenmoneyState>((set, get) => ({
     ]);
     set({
       token: null,
-          serverTimestamp: 0,
+      serverTimestamp: 0,
       lastSyncAt: null,
       status: "idle",
       error: null,

@@ -1,54 +1,67 @@
-name: Deploy to dokku
+name: Deploy upstream DzenAnalytics
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: dzenanalytics-production
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/velios/dzenanalytics
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          repository: DEADover/DzenAnalytics
+          ref: main
+          persist-credentials: false
 
-      - name: Log in to ghcr.io
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
-          docker build \
-            --build-arg VITE_TOKEN_BROKER_URL=https://token.zentable.ru \
-            -f docker/Dockerfile \
-            -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
-          docker push "$IMAGE:$GITHUB_SHA"
+          printf 'VITE_OAUTH_PROVIDER_URL=https://token.zentable.ru\n' > .env.production
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build -f docker/Dockerfile -t "$IMAGE:$SOURCE_SHA" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$SOURCE_SHA"
           docker push "$IMAGE:latest"
 
-      - name: Deploy via dokku
-        env:
-          SSH_KEY: ${{ secrets.DOKKU_SSH_PRIVATE_KEY }}
-          DOKKU_HOST: ${{ secrets.DOKKU_HOST }}
-          DOKKU_PORT: ${{ secrets.DOKKU_SSH_PORT }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          dokku() { ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$DOKKU_PORT" "dokku@$DOKKU_HOST" -- "$@"; }
-          # ps:stop: '-p 127.0.0.1:8103' breaks rolling deploy until edge-enable (ADR 0004);
-          # '|| true' covers the very first deploy when the app has no containers yet
-          dokku ps:stop dzenanalytics || true
-          dokku git:from-image dzenanalytics "$IMAGE:$GITHUB_SHA"
-
-      # 500 MB private-package storage is account-wide: keep only recent versions.
-      # Same pattern as zen-platform ci.yml (zen-hub#78); registry-aware action
-      # (multi-arch manifests, untagged orphans).
       - uses: dataaxiom/ghcr-cleanup-action@v1
         with:
           packages: dzenanalytics
           exclude-tags: latest
           keep-n-tagged: 3
           delete-untagged: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Deploy via dokku
+        env:
+          SSH_KEY: ${{ secrets.DOKKU_SSH_PRIVATE_KEY }}
+          DOKKU_HOST: ${{ secrets.DOKKU_HOST }}
+          DOKKU_PORT: ${{ secrets.DOKKU_SSH_PORT }}
+          SOURCE_SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          dokku() { ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$DOKKU_PORT" "dokku@$DOKKU_HOST" -- "$@"; }
+          dokku ps:stop dzenanalytics || true
+          dokku git:from-image dzenanalytics "$IMAGE:$SOURCE_SHA"

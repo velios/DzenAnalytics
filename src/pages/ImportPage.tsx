@@ -27,8 +27,6 @@ import {
   CloudDownload,
   CloudUpload,
   ChevronDown,
-  LogIn,
-  Users,
   Calculator,
   Coins,
   ALargeSmall,
@@ -36,6 +34,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { parseCsv } from "../lib/csv";
+import { isOAuthConfigured, startOAuth } from "../lib/oauth";
 import { SyncLog } from "../components/SyncLog";
 import { OperationsSettings } from "../components/OperationsSettings";
 import { SettingsSectionHeader } from "../components/SettingsSectionHeader";
@@ -60,7 +59,6 @@ import { useCloudSnapshotStore } from "../store/useCloudSnapshotStore";
 import { useEditsStore } from "../store/useEditsStore";
 import { useDraftsStore } from "../store/useDraftsStore";
 import { confirm } from "../store/useConfirmStore";
-import { isOAuthConfigured, startOAuth } from "../lib/oauth";
 import { pluralRu } from "../lib/plural";
 import { useBackupStore, type BackupInterval } from "../store/useBackupStore";
 import { useReportPeriodStore } from "../store/useReportPeriodStore";
@@ -373,9 +371,7 @@ export function ImportPage() {
     let cancelled = false;
     import("../lib/zenmoneyCache").then(({ loadZenCache }) => {
       loadZenCache().then((cache) => {
-        if (cancelled) return;
-        const u = cache?.user?.[0];
-        setCurrentUserId(u?.id ?? null);
+        if (!cancelled) setCurrentUserId(cache?.user?.[0]?.id ?? null);
       });
     });
     return () => {
@@ -482,9 +478,7 @@ export function ImportPage() {
     return `Синхронизировано: ${parts.join(", ")}. Всего ${formatNum(r.count)} операций.`;
   }
 
-  async function connectToken() {
-    setSyncSuccess(null);
-    // Guard: existing CSV data will be replaced by API sync.
+  async function prepareApiSource(): Promise<boolean> {
     if (meta?.source === "csv" && transactions.length > 0) {
       const ok = await confirm({
         title: "Заменить CSV-данные на API?",
@@ -492,9 +486,15 @@ export function ImportPage() {
         confirmLabel: "Заменить",
         tone: "warning",
       });
-      if (!ok) return;
+      if (!ok) return false;
       await clearAll();
     }
+    return true;
+  }
+
+  async function connectToken() {
+    setSyncSuccess(null);
+    if (!(await prepareApiSource())) return;
     const ok = await zenValidateAndSave(tokenDraft);
     if (ok) {
       setTokenDraft("");
@@ -505,6 +505,11 @@ export function ImportPage() {
         /* error already in store */
       }
     }
+  }
+
+  async function connectProvider() {
+    setSyncSuccess(null);
+    if (await prepareApiSource()) startOAuth();
   }
 
   async function runSync() {
@@ -555,23 +560,6 @@ export function ImportPage() {
     if (!ok) return;
     await zenRemoveToken();
     setSyncSuccess(null);
-  }
-
-  async function switchUser() {
-    // Only warn when there's local data to lose — and only if the user
-    // actually logs in as someone else (the wipe happens on return, after
-    // a real user-id mismatch). Cancelling / same account keeps everything.
-    if (transactions.length > 0) {
-      const ok = await confirm({
-        title: "Переключить пользователя?",
-        message:
-          "Откроется вход Дзен-мани. Если войти другим аккаунтом, локальные данные этого браузера заменятся данными нового аккаунта. Тот же аккаунт или отмена — данные останутся на месте.",
-        confirmLabel: "Перейти ко входу",
-        tone: "warning",
-      });
-      if (!ok) return;
-    }
-    startOAuth();
   }
 
   // Manual payee aliases — user-curated overrides on top of (or in
@@ -977,18 +965,9 @@ export function ImportPage() {
         {!zenToken ? (
           <div className="space-y-3">
             {isOAuthConfigured() && (
-              <div className="flex items-center gap-2 flex-wrap pb-1">
-                <button
-                  onClick={() => startOAuth()}
-                  className="btn-primary text-sm"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  Войти через Дзен-мани
-                </button>
-                <span className="text-xs text-muted">
-                  или введите токен вручную ниже
-                </span>
-              </div>
+              <button onClick={connectProvider} className="btn-primary text-sm">
+                Войти через Дзен-мани
+              </button>
             )}
             <div className="text-xs text-muted">
               <KeyRound className="w-3.5 h-3.5 inline align-text-bottom mr-1" />
@@ -1056,27 +1035,27 @@ export function ImportPage() {
           <div className="space-y-3">
             {/* Row 1: token field (read-only) + action buttons. */}
             <div className="flex items-center gap-2 flex-wrap">
-                <div className="relative flex-1 min-w-[220px]">
-                  <input
-                    type={tokenVisible ? "text" : "password"}
-                    value={zenToken}
-                    readOnly
-                    aria-label="Текущий токен Дзен-мани"
-                    className="input text-sm pr-9 w-full font-mono opacity-70 cursor-default"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setTokenVisible((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                    title={tokenVisible ? "Скрыть" : "Показать"}
-                  >
-                    {tokenVisible ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
+              <div className="relative flex-1 min-w-[220px]">
+                <input
+                  type={tokenVisible ? "text" : "password"}
+                  value={zenToken}
+                  readOnly
+                  aria-label="Текущий токен Дзен-мани"
+                  className="input text-sm pr-9 w-full font-mono opacity-70 cursor-default"
+                />
+                <button
+                  type="button"
+                  onClick={() => setTokenVisible((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                  title={tokenVisible ? "Скрыть" : "Показать"}
+                >
+                  {tokenVisible ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
               <button
                 onClick={runSync}
                 disabled={zenStatus === "syncing"}
@@ -1098,21 +1077,15 @@ export function ImportPage() {
                 <CloudDownload className="w-4 h-4" />
                 Полная синхронизация
               </button>
-              {isOAuthConfigured() && (
-                <button onClick={switchUser} disabled={zenStatus === "syncing"} className="btn-ghost text-sm text-muted">
-                  <Users className="w-3.5 h-3.5" />
-                  Переключить пользователя
-                </button>
-              )}
-                <button
-                  onClick={disconnectToken}
-                  disabled={zenStatus === "syncing"}
-                  className="btn-danger text-sm"
-                  title="Удалить токен из браузера"
-                >
-                  <Unlink className="w-3.5 h-3.5" />
-                  Отключить
-                </button>
+              <button
+                onClick={disconnectToken}
+                disabled={zenStatus === "syncing"}
+                className="btn-danger text-sm"
+                title="Удалить токен из браузера"
+              >
+                <Unlink className="w-3.5 h-3.5" />
+                Отключить
+              </button>
             </div>
 
           </div>
@@ -2825,4 +2798,3 @@ export function ImportPage() {
     </div>
   );
 }
-
